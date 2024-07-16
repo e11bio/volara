@@ -22,4 +22,9 @@ jobs:
         pip install ".[dev]"
     - name: Test with pytest
       run: |
-        pytest tests
+        pytest --cov=volara tests
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v2
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
