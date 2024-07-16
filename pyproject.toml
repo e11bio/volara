@@ -1,0 +1,61 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "volara"
+description = "A package for common blockwise computations for large microscopy volumes."
+authors = [
+    { name = "William Patton", email = "wllmpttn24@gmail.com" },
+    { name = "Arlo Sheridan", email = "arlo@e11.bio" },
+]
+license = { text = "MIT" }
+readme = "README.md"
+dynamic = ["version"]
+
+classifiers = ["Programming Language :: Python :: 3"]
+keywords = []
+requires-python = ">=3.10"
+
+dependencies = [
+    "click",
+    "daisy",
+    "funlib.geometry",
+    "funlib.learn.torch @ git+https://github.com/funkelab/funlib.learn.torch",
+    # "funlib.persistence @ git+https://github.com/funkelab/funlib.persistence@4b4e685",
+    "funlib.segment @ git+https://github.com/funkelab/funlib.segment",
+    "gunpowder @ git+https://github.com/funkelab/gunpowder@dev-v1.4",
+    "mwatershed >= 0.5.1",
+    "pydantic == 2.6.3",
+    "wandb",
+    "torch",
+    "dask",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "mypy", "ruff"]
+
+[tool.setuptools.dynamic]
+version = { attr = "volara.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["volara*"]
+
+[tool.setuptools.package-data]
+"volara" = ["py.typed"]
+
+[tool.ruff]
+lint.select = ["F", "W", "I001"]
+
+[[tool.mypy.overrides]]
+module = [
+    "scipy.*",
+    "daisy.*",
+    "gunpowder.*",
+    "zarr.*",
+    "networkx.*",
+    "mwatershed.*",
+    "funlib.math.*",
+    "dacapo.*",
+]
+ignore_missing_imports = true

@@ -1,0 +1,185 @@
+import logging
+from contextlib import contextmanager
+from typing import Annotated, Callable, Generator, Literal, Union
+
+import numpy as np
+from daisy import Block
+from funlib.geometry import Roi
+from funlib.math import inv_cantor_number
+from funlib.persistence.arrays import Array
+from funlib.persistence.graphs.graph_database import GraphDataBase
+from pydantic import Field
+from scipy.ndimage import measurements
+
+from ..dataset import Affs, Labels
+from ..dbs import PostgreSQL, SQLite
+from ..utils import PydanticCoordinate
+from .blockwise import BlockwiseTask
+
+logger = logging.getLogger(__file__)
+
+
+class AffAgglom(BlockwiseTask):
+    task_type: Literal["aff-agglom"] = "aff-agglom"
+    db_type: Annotated[
+        Union[PostgreSQL, SQLite],
+        Field(discriminator="db_type"),
+    ]
+    frags_data: Labels
+    affs_data: Affs
+    block_size: PydanticCoordinate
+    context: PydanticCoordinate
+    scores: dict[str, list[PydanticCoordinate]]
+
+    @property
+    def neighborhood(self):
+        return self.affs_data.neighborhood
+
+    @property
+    def task_name(self) -> str:
+        return f"{self.affs_data.name}-{self.task_type}"
+
+    @property
+    def fit(self):
+        return "shrink"
+
+    @property
+    def read_write_conflict(self):
+        return False
+
+    @property
+    def write_roi(self) -> Roi:
+        total_roi = self.frags_data.array("r").roi
+        if self.roi is not None:
+            total_roi = total_roi.intersect(Roi(self.roi[0], self.roi[1]))
+        return total_roi
+
+    @property
+    def write_size(self) -> PydanticCoordinate:
+        return self.block_size * self.frags_data.array("r").voxel_size
+
+    @property
+    def context_size(self) -> PydanticCoordinate:
+        return self.context * self.frags_data.array("r").voxel_size
+
+    def agglomerate(self, affs, frags, rag):
+        fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
+        num_frags = len(fragment_ids)
+        frag_mapping = {
+            old: seq for seq, old in zip(range(1, num_frags + 1), fragment_ids)
+        }
+        rev_mapping = {v: k for k, v in frag_mapping.items()}
+        for old, seq in frag_mapping.items():
+            frags[frags == old] = seq
+
+        if len(fragment_ids) == 0:
+            return
+
+        def count_affs(fragments, affinities, offset):
+            base_frags = frags[tuple(slice(0, -m if m > 0 else None) for m in offset)]
+            base_affinities = affinities[
+                tuple(slice(0, -m if m > 0 else None) for m in offset)
+            ]
+            offset_frags = fragments[tuple(slice(m, None) for m in offset)]
+
+            mask = (offset_frags != base_frags) * (offset_frags > 0) * (base_frags > 0)
+
+            # cantor pairing function
+            # 1/2 (k1 + k2)(k1 + k2 + 1) + k2
+            k1, k2 = (
+                np.min(
+                    [
+                        offset_frags,
+                        base_frags,
+                    ],
+                    axis=0,
+                ),
+                np.max(
+                    [
+                        offset_frags,
+                        base_frags,
+                    ],
+                    axis=0,
+                ),
+            )
+            cantor_pairings = ((k1 + k2) * (k1 + k2 + 1) / 2 + k2) * mask
+            cantor_ids = np.array([x for x in np.unique(cantor_pairings) if x != 0])
+            scores = measurements.mean(
+                base_affinities,
+                cantor_pairings,
+                cantor_ids,
+            )
+            counts = measurements.sum_labels(
+                mask,
+                cantor_pairings,
+                cantor_ids,
+            )
+            mapping = {
+                cantor_id: (mean_score, count)
+                for cantor_id, mean_score, count in zip(cantor_ids, scores, counts)
+            }
+            return mapping
+
+        neighborhood_affs = {}
+        for offset_affs, offset in zip(affs, self.neighborhood):
+            neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
+
+        for score_name, score_neighborhood in self.scores.items():
+            offset_counts = [neighborhood_affs[offset] for offset in score_neighborhood]
+            cantor_ids = set(*[x.keys() for x in offset_counts])
+            for cantor_id in cantor_ids:
+                key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]
+                total_count = sum([count[1] for count in key_counts])
+                if total_count > 0:
+                    u, v = inv_cantor_number(cantor_id, dims=2)
+                    rag.add_edge(
+                        rev_mapping[u],
+                        rev_mapping[v],
+                        **{
+                            score_name: sum(
+                                [
+                                    count[0] * count[1] / total_count
+                                    for count in key_counts
+                                ]
+                            )
+                        },
+                    )
+
+    def agglomerate_in_block(
+        self, block: Block, affs: Array, frags: Array, rag_provider: GraphDataBase
+    ):
+        frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
+        rag = rag_provider[block.read_roi]
+
+        affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
+
+        if affs_data.dtype == np.uint8:
+            affs_data = affs_data.astype(np.float32) / 255.0
+
+        self.agglomerate(
+            affs_data,
+            frags_data,
+            rag,
+        )
+
+        rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+
+    def init(self) -> None:
+        self.init_block_array()
+
+    @contextmanager
+    def process_block_func(self) -> Generator[Callable, None, None]:
+        affs = self.affs_data.array("r")
+        frags = self.frags_data.array("r")
+
+        rag_provider = self.db_type.db("r+")
+
+        def process_block(block) -> None:
+            self.agglomerate_in_block(
+                block,
+                affs,
+                frags,
+                rag_provider,
+            )
+
+        yield process_block

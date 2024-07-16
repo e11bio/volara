@@ -1,0 +1,157 @@
+import logging
+from contextlib import contextmanager
+from itertools import chain, combinations
+from typing import Annotated, Literal, Optional, Union
+
+import numpy as np
+from funlib.geometry import Roi
+from pydantic import Field
+from scipy.ndimage import laplace
+from scipy.spatial import cKDTree
+
+from ..dataset import Labels
+from ..dbs import PostgreSQL, SQLite
+from ..utils import PydanticCoordinate
+from .blockwise import BlockwiseTask
+
+logger = logging.getLogger(__file__)
+
+
+class DistanceAgglom(BlockwiseTask):
+    task_type: Literal["distance-agglom"] = "distance-agglom"
+    db_type: Annotated[
+        Union[PostgreSQL, SQLite,],
+        Field(discriminator="db_type"),
+    ]
+    frags_data: Labels
+    block_size: PydanticCoordinate
+    context: PydanticCoordinate
+    distance_keys: Optional[list[str]] = None
+    background_intensities: Optional[list[float]] = None
+    eps: float = 1e-8
+    distance_threshold: Optional[float] = None
+    distance_metric: Literal["euclidean", "cosine", "max"] = "cosine"
+
+    @property
+    def task_name(self) -> str:
+        return f"{self.frags_data.name}-{self.task_type}"
+
+    @property
+    def fit(self):
+        return "shrink"
+
+    @property
+    def read_write_conflict(self):
+        return False
+
+    @property
+    def write_roi(self) -> Roi:
+        total_roi = self.frags_data.array("r").roi
+        if self.roi is not None:
+            total_roi = total_roi.intersect(Roi(self.roi[0], self.roi[1]))
+        return total_roi
+
+    @property
+    def write_size(self) -> PydanticCoordinate:
+        return self.block_size * self.frags_data.array("r").voxel_size
+
+    @property
+    def context_size(self) -> PydanticCoordinate:
+        return self.context * self.frags_data.array("r").voxel_size
+
+    def label_distances(self, labels, voxel_size, dist_threshold=0.0):
+        # First 0 out all voxel where the laplace is 0 (not an edge voxel)
+        output = np.zeros_like(labels, dtype=np.float32)
+        object_filter = laplace(labels, output=output)
+        labels *= (abs(object_filter) > 0)
+        coordinates = np.nonzero(labels)
+        labels = labels[*coordinates]
+        coords = np.column_stack(coordinates) * np.array(voxel_size)
+
+        trees = []
+        for label in np.unique(labels):
+            trees.append((label, cKDTree(coords[labels == label]), coords[labels == label]))
+        min_dists = {}
+
+        for (label_a, tree_a, tree_coords_a), (label_b, tree_b, tree_coords_b) in combinations(trees, 2):
+            pairs = tree_a.query_ball_tree(tree_b, dist_threshold)
+            if len(list(chain(*pairs))) > 0:
+                min_dists[(label_a, label_b)] = min(
+                    np.linalg.norm(tree_coords_a[i] - tree_coords_b[j])
+                    for i, matches in enumerate(pairs)
+                    for j in matches
+                )
+
+        return list(min_dists.keys()), list(min_dists.values())
+
+    def agglomerate_in_block(self, block, frags, rag_provider):
+        voxel_size = frags.voxel_size
+        frags = frags.to_ndarray(block.read_roi, fill_value=0)
+        rag = rag_provider[block.read_roi]
+
+        distance_threshold = (
+            self.distance_threshold
+            if self.distance_threshold is not None
+            else min(self.context * voxel_size)
+        )
+        pairs, distances = self.label_distances(frags, voxel_size, distance_threshold)
+        distance_keys = [] if self.distance_keys is None else self.distance_keys
+        background_intensities = (
+            [0.0] * len(distance_keys)
+            if self.background_intensities is None
+            else self.background_intensities
+        )
+        assert len(background_intensities) == len(distance_keys)
+        for (frag_i, frag_j), dist in zip(pairs, distances):
+            if frag_i in rag.nodes and frag_j in rag.nodes:
+                node_attrs_a = rag.nodes[frag_i]
+                node_attrs_b = rag.nodes[frag_j]
+                attr_dict = {"distance": dist}
+                for distance_key, background_intensity in zip(
+                    distance_keys, background_intensities
+                ):
+                    if (
+                        distance_key not in node_attrs_a
+                        or distance_key not in node_attrs_b
+                    ):
+                        continue
+                    distance_a = (
+                        np.array(node_attrs_a[distance_key]) - background_intensity
+                    )
+                    distance_b = (
+                        np.array(node_attrs_b[distance_key]) - background_intensity
+                    )
+                    if self.distance_metric == "cosine":
+                        similarity = np.dot(distance_a, distance_b) / max(
+                            np.linalg.norm(distance_a) * np.linalg.norm(distance_b),
+                            self.eps,
+                        )
+                    elif self.distance_metric == "euclidean":
+                        similarity = -np.linalg.norm(distance_a - distance_b)
+                    elif self.distance_metric == "max":
+                        similarity = -np.max(np.abs(distance_a - distance_b))
+                    attr_dict[f"{distance_key}_similarity"] = similarity
+                rag.add_edge(
+                    int(frag_i),
+                    int(frag_j),
+                    **attr_dict,
+                )
+
+        rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+
+    def init(self):
+        self.init_block_array()
+
+    @contextmanager
+    def process_block_func(self):
+        frags = self.frags_data.array("r")
+        rag_provider = self.db_type.db("r+")
+
+        def process_block(block):
+            self.agglomerate_in_block(
+                block,
+                frags,
+                rag_provider,
+            )
+
+        yield process_block
