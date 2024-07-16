@@ -61,9 +61,6 @@ class GlobalMWS(BlockwiseTask):
     def num_voxels_in_block(self) -> int:
         return 1
 
-    def init(self):
-        self.init_block_array()
-
     @contextmanager
     def process_block_func(self):
         rag_provider = self.db_type.db("r+")

@@ -13,7 +13,7 @@ from funlib.persistence import Array
 from pydantic import Field
 from scipy.ndimage.filters import gaussian_filter
 
-from ..dataset import Affs, Labels
+from ..dataset import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -36,6 +36,8 @@ class SeededExtractFrags(BlockwiseTask):
     nml_file: Path = Path(
         "/home/arlo/Desktop/Workspace/Projects/data/skeletons/full_dataset.nml"
     )
+
+    _out_array_dtype: np.dtype = np.dtype(np.uint64)
 
     @property
     def task_name(self) -> str:
@@ -70,6 +72,14 @@ class SeededExtractFrags(BlockwiseTask):
     def context_size(self) -> Coordinate:
         return self.context * self.voxel_size
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [self.segs_data]
+
+    def init(self):
+        self.init_out_array()
+        self.db_type.init()
+
     def init_out_array(self):
         # get data from in_array
         voxel_size = self.affs_data.array("r").voxel_size
@@ -78,15 +88,10 @@ class SeededExtractFrags(BlockwiseTask):
             self.write_roi,
             voxel_size,
             self.write_size,
-            np.uint64,
+            self._out_array_dtype,
             None,
             kwargs=self.segs_data.attrs,
         )
-
-    def init(self):
-        self.init_out_array()
-        self.init_block_array()
-        self.db_type.init()
 
     @contextmanager
     def process_block_func(self):

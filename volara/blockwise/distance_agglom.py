@@ -9,7 +9,7 @@ from pydantic import Field
 from scipy.ndimage import laplace
 from scipy.spatial import cKDTree
 
-from ..dataset import Labels
+from ..dataset import Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -58,6 +58,10 @@ class DistanceAgglom(BlockwiseTask):
     @property
     def context_size(self) -> PydanticCoordinate:
         return self.context * self.frags_data.array("r").voxel_size
+
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return []
 
     def label_distances(self, labels, voxel_size, dist_threshold=0.0):
         # First 0 out all voxel where the laplace is 0 (not an edge voxel)
@@ -138,9 +142,6 @@ class DistanceAgglom(BlockwiseTask):
                 )
 
         rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
-
-    def init(self):
-        self.init_block_array()
 
     @contextmanager
     def process_block_func(self):

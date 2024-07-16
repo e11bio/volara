@@ -4,7 +4,7 @@ from typing import Literal, Optional
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
-from ..dataset import Labels, Raw
+from ..dataset import Dataset, Labels, Raw
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -47,8 +47,11 @@ class Argmax(BlockwiseTask):
     def context_size(self) -> Coordinate:
         return Coordinate((0,) * self.write_size.dims)
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [self.sem_data]
+
     def init(self):
-        self.init_block_array()
         self.init_out_array()
 
     def init_out_array(self):
@@ -59,7 +62,7 @@ class Argmax(BlockwiseTask):
             self.write_roi,
             voxel_size,
             self.write_size,
-            np.uint8,
+            self._out_array_dtype,
             None,
             kwargs=self.sem_data.attrs,
         )

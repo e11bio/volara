@@ -11,7 +11,7 @@ from funlib.persistence.graphs.graph_database import GraphDataBase
 from pydantic import Field
 from scipy.ndimage import measurements
 
-from ..dataset import Affs, Labels
+from ..dataset import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -25,8 +25,8 @@ class AffAgglom(BlockwiseTask):
         Union[PostgreSQL, SQLite],
         Field(discriminator="db_type"),
     ]
-    frags_data: Labels
     affs_data: Affs
+    frags_data: Labels
     block_size: PydanticCoordinate
     context: PydanticCoordinate
     scores: dict[str, list[PydanticCoordinate]]
@@ -61,6 +61,10 @@ class AffAgglom(BlockwiseTask):
     @property
     def context_size(self) -> PydanticCoordinate:
         return self.context * self.frags_data.array("r").voxel_size
+
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return []
 
     def agglomerate(self, affs, frags, rag):
         fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
@@ -163,9 +167,6 @@ class AffAgglom(BlockwiseTask):
         )
 
         rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
-
-    def init(self) -> None:
-        self.init_block_array()
 
     @contextmanager
     def process_block_func(self) -> Generator[Callable, None, None]:

@@ -7,7 +7,7 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.tmp import replace_values
 
-from ..dataset import Labels
+from ..dataset import Dataset, Labels
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -18,6 +18,8 @@ class LUT(BlockwiseTask):
     seg_data: Labels
     lut: Path
     block_size: PydanticCoordinate
+
+    _out_array_dtype: np.dtype = np.dtype(np.uint64)
 
     @property
     def task_name(self) -> str:
@@ -50,8 +52,11 @@ class LUT(BlockwiseTask):
     def context_size(self) -> Coordinate:
         return Coordinate((0,) * self.write_size.dims)
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [self.seg_data]
+
     def init(self):
-        self.init_block_array()
         self.init_out_array()
 
     def init_out_array(self):
@@ -62,7 +67,7 @@ class LUT(BlockwiseTask):
             self.write_roi,
             voxel_size,
             self.write_size,
-            np.uint64,
+            self._out_array_dtype,
             None,
             kwargs=self.seg_data.attrs,
         )

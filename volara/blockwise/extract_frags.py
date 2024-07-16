@@ -39,6 +39,8 @@ class ExtractFrags(BlockwiseTask):
     filter_fragments: float = 0.0
     remove_debris: int = 0
 
+    _out_array_dtype: np.dtype = np.dtype(np.uint64)
+
     @property
     def neighborhood(self):
         return self.affs_data.neighborhood
@@ -74,6 +76,10 @@ class ExtractFrags(BlockwiseTask):
     def num_voxels_in_block(self) -> int:
         return int(np.prod(self.block_size))
 
+    def init(self):
+        self.db_type.init()
+        self.init_out_array()
+
     def init_out_array(self):
         # get data from in_array
         voxel_size = self.affs_data.array("r").voxel_size
@@ -82,15 +88,10 @@ class ExtractFrags(BlockwiseTask):
             self.write_roi,
             voxel_size,
             self.write_size,
-            np.uint64,
+            self._out_array_dtype,
             None,
             kwargs=self.frags_data.attrs,
         )
-
-    def init(self):
-        self.init_out_array()
-        self.init_block_array()
-        self.db_type.init()
 
     def filter_avg_fragments(self, affs, fragments_data, filter_value):
         # tmp (think about this)
@@ -244,7 +245,9 @@ class ExtractFrags(BlockwiseTask):
             np.ones_like(fragments_data), fragments_data, fragment_ids
         )
 
-        save_intensities = self.save_intensities if self.save_intensities is not None else {}
+        save_intensities = (
+            self.save_intensities if self.save_intensities is not None else {}
+        )
         intensities = []
         for data_config in save_intensities.values():
             embedding_data = data_config.array("r").to_ndarray(block.write_roi)
@@ -265,7 +268,10 @@ class ExtractFrags(BlockwiseTask):
                     + affs.voxel_size * Coordinate(center),
                     "size": count,
                 },
-                **{bar_name: bar for bar_name, bar in zip(save_intensities.keys(), bars)},
+                **{
+                    bar_name: bar
+                    for bar_name, bar in zip(save_intensities.keys(), bars)
+                },
             }
             for fragment_id, center, count, *bars in zip(
                 fragment_ids, centers_of_masses, counts, *intensities

@@ -14,6 +14,7 @@ from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import LOG_BASEDIR
 
+from ..dataset import Dataset
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
 
@@ -25,6 +26,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
     num_workers: int = 1
     num_cache_workers: int = 1
     worker_config: Optional[Worker] = None
+    _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
     # TODO: do we still want task_type as a property?
 
@@ -63,8 +65,8 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def read_write_conflict(self) -> bool:
         pass
 
-    @abstractmethod
     def init(self):
+        # TODO: override this in subclasses if necessary
         pass
 
     @abstractmethod
@@ -87,6 +89,15 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def block_ds(self) -> Path:
         return self.meta_dir / "blocks_done.zarr"
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        # TODO: override this in subclasses if necessary
+        return list()
+
+    @property
+    def artifact_datasets(self):
+        return [self.block_ds] + self.output_datasets
+
     def process_roi(self, roi: Roi, context: Optional[Coordinate] = None):
         block = daisy.Block(
             roi, roi if context is None else roi.grow(context, context), roi
@@ -94,10 +105,13 @@ class BlockwiseTask(ABC, StrictBaseModel):
         process_block = self.process_block_func()
         process_block(block)
 
-    def drop(self) -> None:
+    def drop(self, drop_outputs: bool = False) -> None:
         # reset the blocks_done ds so that the task is rerun
         if self.meta_dir.exists():
             rmtree(self.meta_dir)
+        if drop_outputs:
+            for output_dataset in self.output_datasets:
+                output_dataset.drop()
 
     def check_block_func(self):
         def check_block(block):
@@ -291,3 +305,6 @@ class BlockwiseTask(ABC, StrictBaseModel):
         )
 
         return task
+
+    def run_blockwise(self):
+        self.init_block_array()

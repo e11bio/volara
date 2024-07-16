@@ -5,7 +5,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 
-from ..dataset import Affs, Raw
+from ..dataset import Affs, Dataset, Raw
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -60,8 +60,11 @@ class PsuedoAff(BlockwiseTask):
         )
         return context_low, context_high
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [self.affs_data]
+
     def init(self):
-        self.init_block_array()
         self.init_out_array()
 
     def init_out_array(self):
@@ -72,7 +75,7 @@ class PsuedoAff(BlockwiseTask):
             self.write_roi,
             voxel_size,
             self.write_size * voxel_size,
-            np.uint8,
+            self._out_array_dtype,
             len(self.affs_data.neighborhood),
             kwargs=self.affs_data.attrs,
         )

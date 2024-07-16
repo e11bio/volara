@@ -11,7 +11,7 @@ from funlib.persistence import Array
 from gunpowder import ArrayKey, Batch, BatchProvider
 from pydantic import Field
 
-from ..dataset import LSD, Affs, Raw
+from ..dataset import LSD, Affs, Dataset, Raw
 from ..models import Checkpoint, DaCapo, Model
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -71,6 +71,8 @@ class Predict(BlockwiseTask):
     in_data: Union[Raw]
     out_data: list[Optional[OutDataType]]
 
+    _out_array_dtype: np.dtype = np.dtype(np.uint8)
+
     @property
     def checkpoint_config(self) -> Model:
         return self.checkpoint
@@ -107,9 +109,12 @@ class Predict(BlockwiseTask):
     def read_write_conflict(self):
         return False
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [out_data for out_data in self.out_data if out_data is not None]
+
     def init(self):
         self.init_out_array()
-        self.init_block_array()
 
     def init_out_array(self):
         for out_data, num_channels in zip(
@@ -120,7 +125,7 @@ class Predict(BlockwiseTask):
                     self.write_roi,
                     self.voxel_size,
                     self.write_size,
-                    np.uint8,
+                    self._out_array_dtype,
                     num_channels,
                     kwargs=out_data.attrs,
                 )
