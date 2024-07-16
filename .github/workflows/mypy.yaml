@@ -15,5 +15,6 @@ jobs:
         uses: actions/checkout@v2
       - name: mypy
         run: |
-          pip install ".[dev]"
+          pip install uv
+          uv pip install ".[dev]"
           mypy funlib/geometry

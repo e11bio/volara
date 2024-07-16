@@ -19,7 +19,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        pip install ".[dev]"
+        pip install uv
+        uv pip install ".[dev]"
     - name: Test with pytest
       run: |
         pytest --cov=volara tests
