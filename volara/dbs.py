@@ -9,9 +9,8 @@ from .utils import StrictBaseModel
 
 
 class DB(ABC, StrictBaseModel):
-    raw_channels: Optional[int] = None
-    enhanced_channels: Optional[int] = None
-    embedding_channels: Optional[int] = None
+    node_attrs: Optional[dict[str, Union[str, int]]] = None
+    edge_attrs: Optional[dict[str, Union[str, int]]] = None
 
     @property
     def default_node_attrs(self) -> dict[str, Union[Any]]:
@@ -20,6 +19,22 @@ class DB(ABC, StrictBaseModel):
     @property
     def default_edge_attrs(self):
         return {"adj_weight": float, "lr_weight": float, "distance": float}
+
+    @property
+    def graph_attrs(self):
+        node_attrs = self.node_attrs if self.node_attrs is not None else {}
+        node_attrs = {
+            k: (Vec(float, v) if isinstance(v, int) else eval(v))
+            for k, v in node_attrs.items()
+        }
+        node_attrs = {**self.default_node_attrs, **node_attrs}
+        edge_attrs = self.edge_attrs if self.edge_attrs is not None else {}
+        edge_attrs = {
+            k: (Vec(float, v) if isinstance(v, int) else eval(v))
+            for k, v in edge_attrs.items()
+        }
+        edge_attrs = {**self.default_edge_attrs, **edge_attrs}
+        return node_attrs, edge_attrs
 
     @abstractmethod
     def db(self):
@@ -39,22 +54,9 @@ class DB(ABC, StrictBaseModel):
 class SQLite(DB):
     db_type: Literal["sqlite"] = "sqlite"
     path: Path
-    node_attrs: Optional[dict[str, Union[str, int]]] = None
-    edge_attrs: Optional[dict[str, Union[str, int]]] = None
 
     def db(self, mode="r"):
-        node_attrs = self.node_attrs if self.node_attrs is not None else {}
-        node_attrs = {
-            k: (Vec(float, v) if isinstance(v, int) else eval(v))
-            for k, v in node_attrs.items()
-        }
-        node_attrs = {**self.default_node_attrs, **node_attrs}
-        edge_attrs = self.edge_attrs if self.edge_attrs is not None else {}
-        edge_attrs = {
-            k: (Vec(float, v) if isinstance(v, int) else eval(v))
-            for k, v in edge_attrs.items()
-        }
-        edge_attrs = {**self.default_edge_attrs, **edge_attrs}
+        node_attrs, edge_attrs = self.graph_attrs
 
         return SQLiteGraphDataBase(
             self.path,
@@ -74,22 +76,9 @@ class PostgreSQL(DB):
     name: Optional[str] = None
     user: Optional[str] = None
     password: Optional[str] = None
-    node_attrs: Optional[dict[str, Union[str, int]]] = None
-    edge_attrs: Optional[dict[str, Union[str, int]]] = None
 
     def db(self, mode="r"):
-        node_attrs = self.node_attrs if self.node_attrs is not None else {}
-        node_attrs = {
-            k: (Vec(float, v) if isinstance(v, int) else eval(v))
-            for k, v in node_attrs.items()
-        }
-        node_attrs = {**self.default_node_attrs, **node_attrs}
-        edge_attrs = self.edge_attrs if self.edge_attrs is not None else {}
-        edge_attrs = {
-            k: (Vec(float, v) if isinstance(v, int) else eval(v))
-            for k, v in edge_attrs.items()
-        }
-        edge_attrs = {**self.default_edge_attrs, **edge_attrs}
+        node_attrs, edge_attrs = self.graph_attrs
 
         return PgSQLGraphDatabase(
             db_host=self.host,

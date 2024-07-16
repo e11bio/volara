@@ -22,8 +22,6 @@ from ..utils import PydanticCoordinate
 
 class MWSPipeline(BlockwiseTask):
     raw_config: Raw
-    # enhanced_config: Optional[Raw] = None
-    # uniform_config: Optional[Raw] = None
     affs_config: Affs
     frags_config: Labels
     segs_config: Labels
@@ -45,8 +43,6 @@ class MWSPipeline(BlockwiseTask):
     scores: dict[str, list[PydanticCoordinate]]
 
     affs_model_config: Optional[Checkpoint] = None
-    # enhance_model_config: Optional[Checkpoint] = None
-    # uniform_model_config: Optional[Contrastive] = None
 
     db_config: Union[PostgreSQL, SQLite]
 
@@ -72,18 +68,6 @@ class MWSPipeline(BlockwiseTask):
     def process_block_func(self):
         raise NotImplementedError()
 
-    #  @property
-    # def enhance_pred_config(self):
-    # return Predict(
-    # roi=self.roi,
-    # checkpoint=self.enhance_model_config,
-    # in_data=self.raw_config,
-    # out_data=self.enhanced_config,
-    # num_workers=self.num_workers,
-    # num_cache_workers=self.num_cache_workers,
-    # worker_config=self.worker_config
-    # )
-
     @property
     def affs_pred_config(self) -> Optional[Predict]:
         if self.affs_model_config is None:
@@ -98,18 +82,6 @@ class MWSPipeline(BlockwiseTask):
                 num_cache_workers=self.num_cache_workers,
                 worker_config=self.worker_config,
             )
-
-    #  @property
-    # def uniform_pred_config(self):
-    # return Predict(
-    # roi=self.roi,
-    # checkpoint=self.uniform_model_config,
-    # in_data=self.enhanced_config,
-    # out_data=self.uniform_config,
-    # num_workers=self.num_workers,
-    # num_cache_workers=self.num_cache_workers,
-    # worker_config=self.worker_config
-    # )
 
     @property
     def extract_frags_config(self) -> ExtractFrags:
@@ -169,14 +141,6 @@ class MWSPipeline(BlockwiseTask):
             affs_pred_task = None
         else:
             affs_pred_task = self.affs_pred_config.task()
-
-        # todo: handle multiple networks:
-
-        # enhanced_pred_task = self.enhance_pred_config.task
-        # uniform_config = self.uniform_pred_config.task
-        # extract_frags_task = self.extract_frags_config.task(
-        # [affs_pred_task, enhanced_pred_task, uniform_config]
-        # )
 
         upstream_tasks = [affs_pred_task] if affs_pred_task is not None else None
         extract_frags_task = self.extract_frags_config.task(upstream_tasks)

@@ -106,15 +106,12 @@ def build_configs(tmpdir):
 
     db_config = SQLite(
         path=tmpdir / "db.sqlite",
-        raw_channels=1,
-        enhanced_channels=1,
-        node_attrs={"raw_intensity": 1, "enhanced_intensity": 1},
+        node_attrs={"raw_intensity": 1},
         edge_attrs={
             "y_aff": "float",
             "z_aff": "float",
             "x_aff": "float",
             "raw_intensity_similarity": "float",
-            "enhanced_intensity_similarity": "float",
         },
     )
     db_config.db("w")
@@ -135,7 +132,7 @@ def build_configs(tmpdir):
         frags_data=frags,
         block_size=Coordinate(10, 10, 10),
         context=Coordinate(0, 0, 0),
-        save_intensities={"raw_intensity": raw, "enhanced_intensity": raw},
+        save_intensities={"raw_intensity": raw},
         bias=[0.0, 0.0, 0.0],
     )
     seeded_extract_frags_config = SeededExtractFrags(
@@ -164,7 +161,7 @@ def build_configs(tmpdir):
         frags_data=frags,
         block_size=Coordinate(10, 10, 10),
         context=Coordinate(0, 0, 0),
-        distance_keys=["raw_intensity", "enhanced_intensity"],
+        distance_keys=["raw_intensity"],
         distance_threshold=2,
     )
     global_mws_config = GlobalMWS(
@@ -322,12 +319,8 @@ def test_aff_agglom_block(blockwise_configs):
 
     db = config.db_type.db("r+")
     graph = db.read_graph(block.write_roi)
-    graph.add_node(
-        1, position=(4, 4, 2), size=600, raw_intensity=(0.1,), enhanced_intensity=(0.1,)
-    )
-    graph.add_node(
-        2, position=(4, 4, 7), size=400, raw_intensity=(0.1,), enhanced_intensity=(0.1,)
-    )
+    graph.add_node(1, position=(4, 4, 2), size=600, raw_intensity=(0.1,))
+    graph.add_node(2, position=(4, 4, 7), size=400, raw_intensity=(0.1,))
     db.write_graph(graph, roi=block.write_roi)
 
     with config.process_block_func() as process_block:
@@ -343,10 +336,10 @@ def test_aff_agglom_block(blockwise_configs):
 
 
 @pytest.mark.parametrize(
-    "distance_metric_and_score", [("cosine", (-1.0, 1.0)), ("euclidean", (-0.2, -0.05))]
+    "distance_metric_and_score", [("cosine", -1.0), ("euclidean", -0.2)]
 )
 def test_distance_agglom_block(blockwise_configs, distance_metric_and_score):
-    metric, (raw_score, enhanced_score) = distance_metric_and_score
+    metric, raw_score = distance_metric_and_score
     config: DistanceAgglom = blockwise_configs["distance_agglom"]
     config.distance_metric = metric
     block = daisy.Block(
@@ -361,15 +354,12 @@ def test_distance_agglom_block(blockwise_configs, distance_metric_and_score):
 
     db = config.db_type.db("r+")
     graph = db.read_graph(block.write_roi)
-    graph.add_node(
-        1, position=(4, 4, 2), size=600, raw_intensity=(0.1,), enhanced_intensity=(0.1,)
-    )
+    graph.add_node(1, position=(4, 4, 2), size=600, raw_intensity=(0.1,))
     graph.add_node(
         2,
         position=(4, 4, 7),
         size=400,
         raw_intensity=(-0.1,),
-        enhanced_intensity=(0.05,),
     )
     db.write_graph(graph, roi=block.write_roi)
 
@@ -381,9 +371,6 @@ def test_distance_agglom_block(blockwise_configs, distance_metric_and_score):
     assert np.isclose(
         graph.edges[(1, 2)]["raw_intensity_similarity"], raw_score
     ), graph.edges[(1, 2)]
-    assert np.isclose(
-        graph.edges[(1, 2)]["enhanced_intensity_similarity"], enhanced_score
-    )
 
 
 @pytest.mark.parametrize("adj_weight", [0.5, -0.5])
@@ -397,17 +384,12 @@ def test_global_mws_block(blockwise_configs, adj_weight):
 
     db = config.db_type.db("r+")
     graph = db.read_graph(block.write_roi)
-    graph.add_node(
-        1, position=(4, 4, 2), size=600, raw_intensity=(0.1,), enhanced_intensity=(0.1,)
-    )
-    graph.add_node(
-        2, position=(4, 4, 7), size=400, raw_intensity=(0.1,), enhanced_intensity=(0.1,)
-    )
+    graph.add_node(1, position=(4, 4, 2), size=600, raw_intensity=(0.1,))
+    graph.add_node(2, position=(4, 4, 7), size=400, raw_intensity=(0.1,))
     graph.add_edge(
         1,
         2,
         raw_intensity_similarity=0.1,
-        enhanced_intensity_similarity=0.1,
         adj_weight=adj_weight,
         lr_weight=0.0,
     )
