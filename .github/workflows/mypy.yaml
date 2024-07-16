@@ -16,5 +16,5 @@ jobs:
       - name: mypy
         run: |
           pip install uv
-          uv pip install ".[dev]"
+          uv pip install ".[dev]" --system
           mypy funlib/geometry
