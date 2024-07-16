@@ -1,6 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
+from shutil import rmtree
 from typing import Literal, Optional, Union
 
 import numpy as np
@@ -28,6 +29,9 @@ class Dataset(ABC, StrictBaseModel):
             return self.store.name
         else:
             return self.store.split("/")[-1]
+
+    def drop(self):
+        rmtree(self.store)
 
     def prepare(self, offset, voxel_size, write_size, dtype, num_channels, **ds_kwargs):
         # prepare ds
