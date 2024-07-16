@@ -1,4 +1,5 @@
 [![tests](https://github.com/pattonw/volara/actions/workflows/tests.yaml/badge.svg)](https://github.com/pattonw/volara/actions/workflows/tests.yaml)
+[![codecov](https://codecov.io/gh/pattonw/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/pattonw/volara)
 [![black](https://github.com/pattonw/volara/actions/workflows/black.yaml/badge.svg)](https://github.com/pattonw/volara/actions/workflows/black.yaml)
 [![mypy](https://github.com/pattonw/volara/actions/workflows/mypy.yaml/badge.svg)](https://github.com/pattonw/volara/actions/workflows/mypy.yaml)
 
