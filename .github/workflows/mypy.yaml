@@ -17,4 +17,4 @@ jobs:
         run: |
           pip install uv
           uv pip install ".[dev]" --system
-          mypy funlib/geometry
+          mypy volara tests
