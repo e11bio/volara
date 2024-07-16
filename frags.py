@@ -5,7 +5,6 @@ from typing import Literal, Optional
 import mwatershed as mws
 import numpy as np
 from funlib.persistence import Array
-from funlib.segment.arrays import replace_values
 from scipy.ndimage import binary_dilation, center_of_mass, label, measurements
 from scipy.ndimage.filters import gaussian_filter, maximum_filter
 from scipy.ndimage.morphology import distance_transform_edt
@@ -18,6 +17,7 @@ from skimage.segmentation import watershed
 #     filter_avg_fragments,
 # )
 from .volara.utils import PydanticCoordinate, StrictBaseModel
+from .volara.tmp import replace_values
 
 logging.basic(level=logging.INFO)
 
@@ -817,7 +817,7 @@ class Waterz(Agglom):
 
     def agglomerate(self, affs, frags, rag):
         import waterz
-        from funlib.segment.arrays import relabel
+        from volara.tmp import replace_values
         from volara.utils.merge_tree import MergeTree
 
         waterz_merge_functions = {
