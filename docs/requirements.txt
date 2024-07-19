@@ -1,7 +1,0 @@
-sphinx-autodoc-typehints
-sphinx-material
-sphinx-autoapi
-sphinx-click
-sphinx-rtd-theme
-myst-parser
-jupyter-sphinx

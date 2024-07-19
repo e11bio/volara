@@ -33,6 +33,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "mypy", "ruff"]
+docs = [
+    "sphinx-autodoc-typehints",
+    "sphinx-material",
+    "sphinx-autoapi",
+    "sphinx-click",
+    "sphinx-rtd-theme",
+    "myst-parser",
+    "jupyter-sphinx",
+    "matplotlib",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "volara.__version__" }
