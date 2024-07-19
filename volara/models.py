@@ -10,6 +10,10 @@ from .utils import PydanticCoordinate, StrictBaseModel
 
 
 class Model(ABC, StrictBaseModel):
+    """
+    A base class for defining the common attributes and methods for all
+    model types.
+    """
     @property
     def context(self):
         return (self.eval_input_shape - self.eval_output_shape) // 2

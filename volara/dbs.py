@@ -9,6 +9,10 @@ from .utils import StrictBaseModel
 
 
 class DB(ABC, StrictBaseModel):
+    """
+    A base class for defining the common attributes and methods for all
+    database types.
+    """
     node_attrs: Optional[dict[str, Union[str, int]]] = None
     edge_attrs: Optional[dict[str, Union[str, int]]] = None
 
@@ -18,7 +22,7 @@ class DB(ABC, StrictBaseModel):
 
     @property
     def default_edge_attrs(self):
-        return {"adj_weight": float, "lr_weight": float, "distance": float}
+        return {"distance": float}
 
     @property
     def graph_attrs(self):
@@ -56,6 +60,9 @@ class DB(ABC, StrictBaseModel):
 
 
 class SQLite(DB):
+    """
+    An SQLite database for storing and retrieving graph data.
+    """
     db_type: Literal["sqlite"] = "sqlite"
     path: Path
 
@@ -84,6 +91,9 @@ class SQLite(DB):
 
 
 class PostgreSQL(DB):
+    """
+    A PostgreSQL database for storing and retrieving graph data.
+    """
     db_type: Literal["postgresql"] = "postgresql"
     host: Optional[str] = None
     name: Optional[str] = None

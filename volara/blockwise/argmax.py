@@ -11,6 +11,10 @@ from .blockwise import BlockwiseTask
 
 
 class Argmax(BlockwiseTask):
+    """
+    A blockwise task that performs an argmax operation on a given set of
+    probabilities and writes the result to a semantic segmentation dataset.
+    """
     task_type: Literal["argmax"] = "argmax"
     probs_data: Raw
     sem_data: Labels

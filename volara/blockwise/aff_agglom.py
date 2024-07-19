@@ -21,6 +21,12 @@ logger = logging.getLogger(__file__)
 
 
 class AffAgglom(BlockwiseTask):
+    """
+    A blockwise task that performs affinity agglomeration on a given
+    set of affinities and fragments. Will compute the mean affinity
+    between fragments bridged by the affinities and add edges to the
+    provided database.
+    """
     task_type: Literal["aff-agglom"] = "aff-agglom"
     db: Annotated[
         Union[PostgreSQL, SQLite],
@@ -31,6 +37,17 @@ class AffAgglom(BlockwiseTask):
     block_size: PydanticCoordinate
     context: PydanticCoordinate
     scores: dict[str, list[PydanticCoordinate]]
+    """
+    A dictionary of score names and their respective neighborhoods.
+    This allows us to compute the mean affinity in subgroups of the
+    neighborhood. For example if you wanted to compute the mean affinity
+    between fragments in x and y separately from z, you would provide
+    a dictionary like so:
+        scores = {
+            "xy": [(1, 0, 0), (0, 1, 0)],
+            "z": [(0, 0, 1)]
+        }
+    """
 
     @property
     def neighborhood(self):

@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class Dataset(ABC, StrictBaseModel):
+    """
+    A Dataset base class that defines the common attributes and methods
+    for all dataset types.
+    """
     store: Union[str, Path]
 
     voxel_size: Optional[PydanticCoordinate] = None
@@ -25,6 +29,11 @@ class Dataset(ABC, StrictBaseModel):
 
     @property
     def name(self):
+        """
+        A name for this dataset. Often it is simply the name of the
+        path provided as the store. We use it to differentiate between
+        multiple runs of the same blockwise task on different data.
+        """
         if isinstance(self.store, Path):
             return self.store.name
         else:
@@ -56,6 +65,12 @@ class Dataset(ABC, StrictBaseModel):
 
 
 class Raw(Dataset):
+    """
+    Represents a dataset containing raw intensities.
+    Has support for sampling specific channels, normalizing
+    with provided scale and shifting, or reading in normalization
+    bounds from OMERO metadata.
+    """
     dataset_type: Literal["raw"] = "raw"
     channels: Optional[list[int]] = None
     ome_norm: Optional[Union[Path, str]] = None
@@ -124,6 +139,11 @@ class Raw(Dataset):
 
 
 class Affs(Dataset):
+    """
+    Represents a dataset containing affinities.
+    Requires the inclusion of the neighborhood for these
+    affinities.
+    """
     dataset_type: Literal["affs"] = "affs"
     neighborhood: list[PydanticCoordinate]
 
@@ -133,6 +153,9 @@ class Affs(Dataset):
 
 
 class LSD(Dataset):
+    """
+    Represents a dataset containing local shape descriptors.
+    """
     dataset_type: Literal["lsd"] = "lsd"
 
     @property
@@ -141,6 +164,9 @@ class LSD(Dataset):
 
 
 class Labels(Dataset):
+    """
+    Represents an integer label dataset.
+    """
     dataset_type: Literal["labels"] = "labels"
 
     @property
