@@ -4,7 +4,13 @@ from typing import Optional, Union
 import daisy
 from funlib.geometry import Roi
 
-from volara.blockwise import (
+from volara.dataset import Affs, Labels, Raw
+from volara.dbs import PostgreSQL, SQLite
+from volara.models import Checkpoint
+from volara.workers import Worker
+
+from ..utils import PydanticCoordinate
+from .components import (
     LUT,
     AffAgglom,
     BlockwiseTask,
@@ -12,12 +18,6 @@ from volara.blockwise import (
     GlobalMWS,
     Predict,
 )
-from volara.dataset import Affs, Labels, Raw
-from volara.dbs import PostgreSQL, SQLite
-from volara.models import Checkpoint
-from volara.workers import Worker
-
-from ..utils import PydanticCoordinate
 
 
 class MWSPipeline(BlockwiseTask):
