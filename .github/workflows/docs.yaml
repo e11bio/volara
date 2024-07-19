@@ -22,12 +22,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - uses: conda-incubator/setup-miniconda@v2
+      - name: Setup Python
+        uses: actions/setup-python@v1
         with:
           python-version: "3.11"
-          mamba-version: "*"
-          channels: conda-forge
-          channel-priority: true
 
       - name: Install package and dependencies
         run: |
