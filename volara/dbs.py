@@ -71,8 +71,11 @@ class SQLite(DB):
         )
 
     def drop(self):
-        self.path.unlink()
-        (self.path.parent / f"{self.path.stem}-meta.json").unlink()
+        if self.path.exists():
+            self.path.unlink()
+        meta_path = self.path.parent / f"{self.path.stem}-meta.json"
+        if meta_path.exists():
+            meta_path.unlink()
 
     def drop_edges(self):
         db = self.open("a")
