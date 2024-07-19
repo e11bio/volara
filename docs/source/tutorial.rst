@@ -367,3 +367,10 @@ We can also check how closely this matches our original labels:
 
 Our perfect accuracy is not surprising here. We used perfect affinities that were
 generated from the labels we were trying to reproduce.
+
+To clean up lets just remove all the data we wrote to file:
+.. jupyter-execute:: 
+
+  import shutil
+  shutil.rmtree("cells3d.zarr")
+  shutil.rmtree("volara_logs")
