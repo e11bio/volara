@@ -265,7 +265,9 @@ segmentation. This is obvious when we look at the edges of our fragments graph:
 
 Now lets compute some edges:
 
-.. jupyter-execute:: 
+.. jupyter-execute::
+  
+  from volara.blockwise import AffAgglom
 
   # Affinity Agglomeration accross blocks
   aff_agglom = AffAgglom(
@@ -303,7 +305,9 @@ datasets fairly easily. You may run into problems if you generate many millions 
 but using a reasonable block size and filtering out small fragments can help handle massive
 datasets.
 
-.. jupyter-execute:: 
+.. jupyter-execute::
+
+  from volara.blockwise import GlobalMWS
 
   # global mws
   global_mws = GlobalMWS(
@@ -322,7 +326,9 @@ such as different biases to see how they affect your segmentation.
 Once you're happy with your segmentation though, it is useful to relabel your fragments and generate
 a new segmentation array. Lets do that now:
 
-.. jupyter-execute:: 
+.. jupyter-execute::
+
+  from volara.blockwise import LUT
 
   segments = Labels(store="cells3d.zarr/segments")
 
