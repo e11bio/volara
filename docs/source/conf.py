@@ -30,6 +30,7 @@ author = "William Patton, Arlo Sheridan"
 # ones.
 extensions = [
     "jupyter_sphinx",
+    "sphinxcontrib.autodoc_pydantic",  # auto document pydantic models
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
