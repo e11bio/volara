@@ -312,12 +312,12 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def run_blockwise(
         self,
         upstream_tasks: Optional[list[daisy.Task]] = None,
-        no_multiprocessing: bool = False,
+        multiprocessing: bool = True,
     ):
         self.init_block_array()
         self.init()
         task = self.task(upstream_tasks)
-        if not no_multiprocessing:
+        if multiprocessing:
             daisy.run_blockwise(task)
         else:
             server = daisy.SerialServer()
