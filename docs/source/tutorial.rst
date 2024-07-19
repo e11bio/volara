@@ -114,10 +114,15 @@ Tutorial
                 plt.imshow(data.transpose(1, 2, 0), cmap=cmap)
         plt.show()
 
-In this tutorial, we will demonstrate the usefulness of this library
-for processing large image data in the context of instance segmentation.
-Since training a model is out of scope for this tutorial, we will be using
-some fairly simple data.
+Introduction
+------------
+
+In this tutorial, we will demonstrate the usefulness of this library for processing 
+large image data in the context of instance segmentation. Since training a model 
+is out of scope for this tutorial, we will be using some fairly simple data.
+
+Viewing Data
+------------
 
 A 2D slice of the data we are working with is shown below.
 
@@ -139,30 +144,27 @@ Both Channels:
 
   imshow(cell_array[:, 30])
 
-As you can see, the volume we are working with is a two-channel fluorescence
-image of nuclei and cell membranes. We have also generated some pseudo
-ground truth via some simple blurring and thresholding:
+As you can see, the volume we are working with is a two-channel fluorescence image 
+of nuclei and cell membranes. We have also generated some pseudo ground truth via 
+some simple blurring and thresholding:
 
 Pseudo Ground Truth:
 
-.. jupyter-execute:: 
+.. jupyter-execute::
 
   imshow(labels_array[30])
 
-All of this data is stored in a ``zarr`` container ``cells3d.zarr``.
-We created each array with some helpful metadata such as the offset,
-voxel size, axis names, and units. This is not necessary for processing
-but is good bookkeeping practice.
-The raw data is a 2-channel image, with a resolution of
-0.29x0.26x0.26 microns. We have chosen to name the axes as ``c^``, ``z``,
-``y``, and ``x``. The ground truth has the same metadata. The ground truth
-should normally be manually curated to ensure quality, but this will be
-fine for our purposes.
-Finally, we have also gone ahead and generated affinities from the ground
-truth labels. This is commonly done with a machine learning model (UNet)
-when trying to generate an instance segmentation. We will be working with
-perfect affinities for this tutorial but most applications will be a bit
-noisier.
+All of this data is stored in a ``zarr`` container ``cells3d.zarr``. We created each 
+array with some helpful metadata such as the offset, voxel size, axis names, and 
+units. This is not necessary for processing but is good bookkeeping practice.
+The raw data is a 2-channel image, with a resolution of 0.29x0.26x0.26 microns. 
+We have chosen to name the axes as ``c^``, ``z``, ``y``, and ``x``. The ground truth 
+has the same metadata. The ground truth should normally be manually curated to 
+ensure quality, but this will be fine for our purposes.
+Finally, we have also gone ahead and generated affinities from the ground truth 
+labels. This is commonly done with a machine learning model (UNet) when trying to 
+generate an instance segmentation. We will be working with perfect affinities for 
+this tutorial but most applications will be a bit noisier.
 
 Affinities:
 
@@ -170,13 +172,16 @@ Affinities:
 
   imshow(affs_array[:, 30])
 
-Now we get to using `volara`. Our goal will be to take the "model predictions",
-i.e., the affinities, and generate something like the ground truth segmentation.
-`volara` allows us to do this in a blockwise way which becomes necessary as
-soon as you leave the realm of toy data.
+Generating Supervoxels
+----------------------
 
-First, we need to generate supervoxels from the affinities. This can be done
-by running a watershed within each chunk we process.
+Now we get to using `volara`. Our goal will be to take the "model predictions", i.e., 
+the affinities, and generate something like the ground truth segmentation. `volara` 
+allows us to do this in a blockwise way which becomes necessary as soon as you leave 
+the realm of toy data.
+
+First, we need to generate supervoxels from the affinities. This can be done by 
+running a watershed within each chunk we process.
 
 .. jupyter-execute::
 
@@ -210,27 +215,33 @@ by running a watershed within each chunk we process.
   )
   extract_frags.run_blockwise(multiprocessing=False)
 
-Now we have supervoxels, but before we look at them, let's talk about some of the
-code that went into generating the fragments. We have an argument called `bias`.
-This defines how much we want to emphasize splitting or merging. Affinities are
-normally generated such that 0 indicates a boundary between objects and 1 means
-the voxels belong to the same object. When we extract fragments, we use negative
-scores for splitting and positive for merging. This means a bias of -2 would split
-everything since even our most confident affinities would split. A bias of 1 would
-mean that even our most uncertain affinities would result in a merge. Finally, a bias
-of -0.5 shifts our affinities to the range (-0.5, 0.5), resulting in splits across
-boundaries and merges within objects. We provide a bias for every offset in our
-neighborhood, which allows us to treat offsets very differently. This can be
-particularly useful when you train long-range affinities since we generally see
-much nicer segmentations when we use long-range affinity scores for splitting and
+Bias and Blockwise Operation
+----------------------------
+
+Now we have supervoxels, but before we look at them, let's talk about some of the 
+code that went into generating the fragments. We have an argument called `bias`. 
+This defines how much we want to emphasize splitting or merging. Affinities are 
+normally generated such that 0 indicates a boundary between objects and 1 means 
+the voxels belong to the same object. When we extract fragments, we use negative 
+scores for splitting and positive for merging. This means a bias of -2 would split 
+everything since even our most confident affinities would split. A bias of 1 would 
+mean that even our most uncertain affinities would result in a merge. Finally, a 
+bias of -0.5 shifts our affinities to the range (-0.5, 0.5), resulting in splits 
+across boundaries and merges within objects. We provide a bias for every offset 
+in our neighborhood, which allows us to treat offsets very differently. This can 
+be particularly useful when you train long-range affinities since we generally see 
+much nicer segmentations when we use long-range affinity scores for splitting and 
 neighboring voxel affinities for merging objects.
 
-The only other variables we had to specify other than the simple paths to the data
-we are working with are the `block_size` and `context`. Both are provided in voxels.
-A larger context will result in fragments that have more consistent edges at block
-boundaries, but normally does not need to be significantly larger than the max
-offset in your neighborhood. The block size should be set based on the compute constraints
+The only other variables we had to specify other than the simple paths to the data 
+we are working with are the `block_size` and `context`. Both are provided in voxels. 
+A larger context will result in fragments that have more consistent edges at block 
+boundaries, but normally does not need to be significantly larger than the max offset 
+in your neighborhood. The block size should be set based on the compute constraints 
 of your system.
+
+Viewing Fragments
+-----------------
 
 Now let's take a look at the fragments we generated:
 
@@ -238,9 +249,17 @@ Now let's take a look at the fragments we generated:
 
   imshow(fragments.array("r")[30])
 
-An important part of running blockwise is that we need to be able to operate efficiently
-on the supervoxels we have generated here. For this purpose, we store the fragments
-in a graph database. Let's look at what we have stored.
+As you can see, we get a fragments of full segmentations, which is expected given 
+that we are working blockwise. Note that you can clearly see the block boundaries.
+
+Fragment Graph
+--------------
+
+One thing we still haven't talked about is the `db` argument to `ExtractFrags`. Using
+a database allows us to store the fragments we generate in a way that is easy to
+operate on without having to load the image data at all, and reduces an operation
+that would be done on in this case (60x256x256) voxels to an operation done one just
+a few hundred nodes and edges.
 
 .. jupyter-execute::
 
@@ -249,20 +268,26 @@ in a graph database. Let's look at what we have stored.
   print("Some sample fragments: ")
   pprint.pp(list(fragment_graph.nodes(data=True))[100:105])
 
-As you can see, we store the fragments' center position along with their size as well.
+As you can see, we store the fragments' center position along with their size. 
 You can store other attributes as well, but these attributes are always included.
 
-We do not yet know which fragments can be merged together to generate our final
+Merging Fragments
+-----------------
+
+We do not yet know which fragments can be merged together to generate our final 
 segmentation. This is obvious when we look at the edges of our fragments graph:
 
 .. jupyter-execute::
 
   print(f"Number of edges in our fragment graph: {len(fragment_graph.edges)}")
 
-Now let's compute some edges:
+Computing Edges
+---------------
+
+Let's compute some edges:
 
 .. jupyter-execute::
-  
+
   from volara.blockwise import AffAgglom
 
   # Affinity Agglomeration across blocks
@@ -276,8 +301,8 @@ Now let's compute some edges:
   )
   aff_agglom.run_blockwise(multiprocessing=False)
 
-This should have generated the edges between all pairs of fragments that are
-close enough to have affinities between them. Let's take a look:
+This should have generated the edges between all pairs of fragments that are close 
+enough to have affinities between them. Let's take a look:
 
 .. jupyter-execute::
 
@@ -287,15 +312,24 @@ close enough to have affinities between them. Let's take a look:
   print("Some sample edges: ")
   pprint.pp(list(fragment_graph.edges(data=True))[100:105])
 
-Now that we have edges, we can process the graph to generate our final segmentation. This is pretty straightforward to do with mutex watershed again. We have affinity scores, we just need to make them negative for splitting edges, and positive for merging edges. Thus we provide the same bias as we did during fragment agglomeration, except now passed in as a dictionary for the edge attributes we want to use:
+Global Matching and Segmentation
+--------------------------------
 
-A quick note about this step:
-The global matching step is special in that we treat it like a blockwise task, but it only
-processes a single block containing the entire dataset. It only needs to operate on the
-graph of supervoxels so this is a cheap operation that can scale up to petabyte-scale
-datasets fairly easily. You may run into problems if you generate many millions of fragments,
-but using a reasonable block size and filtering out small fragments can help handle massive
-datasets.
+Now that we have edges, we can process the graph to generate our final segmentation. 
+This is pretty straightforward to do with mutex watershed again. We have affinity 
+scores, we just need to make them negative for splitting edges and positive for 
+merging edges. Thus we provide the same bias as we did during fragment agglomeration, 
+except now passed in as a dictionary for the edge attributes we want to use:
+
+Quick Note on Global Matching
+------------------------------
+
+The global matching step is special in that we treat it like a blockwise task, 
+but it only processes a single block containing the entire dataset. It only needs 
+to operate on the graph of supervoxels so this is a cheap operation that can scale 
+up to petabyte-scale datasets fairly easily. You may run into problems if you 
+generate many millions of fragments, but using a reasonable block size and filtering 
+out small fragments can help handle massive datasets.
 
 .. jupyter-execute::
 
@@ -310,13 +344,17 @@ datasets.
   )
   global_mws.run_blockwise(multiprocessing=False)
 
-The only artifact generated by this step is a lookup table that maps fragment IDs to segment IDs.
-If you want to be efficient, you could load the lookup table into your favorite visualization tool
-and use it to color your fragments for visualization. This would be useful for exploring parameters
-such as different biases to see how they affect your segmentation.
+The only artifact generated by this step is a lookup table that maps fragment IDs 
+to segment IDs. If you want to be efficient, you could load the lookup table into 
+your favorite visualization tool and use it to color your fragments for visualization. 
+This would be useful for exploring parameters such as different biases to see how 
+they affect your segmentation.
 
-Once you're happy with your segmentation, it is useful to relabel your fragments and generate
-a new segmentation array. Let's do that now:
+Relabeling Fragments
+---------------------
+
+Once you're happy with your segmentation, it is useful to relabel your fragments 
+and generate a new segmentation array. Let's do that now:
 
 .. jupyter-execute::
 
@@ -333,15 +371,18 @@ a new segmentation array. Let's do that now:
   )
   lut.run_blockwise(multiprocessing=False)
 
+Viewing Final Segmentation
+--------------------------
+
 Once this completes, we can take a look at our final segmentation:
 
-.. jupyter-execute:: 
+.. jupyter-execute::
 
   imshow(segments.array("r")[30])
 
 We can also check how closely this matches our original labels:
 
-.. jupyter-execute:: 
+.. jupyter-execute::
 
   s_to_l = {}
   false_merges = 0
@@ -363,11 +404,15 @@ We can also check how closely this matches our original labels:
   print("False splits: ", false_splits)
   print("Accuracy: ", (len(s_to_l) - (false_merges + false_splits)) / len(s_to_l))
 
-Our perfect accuracy is not surprising here. We used perfect affinities that were
+Our perfect accuracy is not surprising here. We used perfect affinities that were 
 generated from the labels we were trying to reproduce.
 
+Cleaning Up
+-----------
+
 To clean up, let's just remove all the data we wrote to file:
-.. jupyter-execute:: 
+
+.. jupyter-execute::
 
   import shutil
   shutil.rmtree("cells3d.zarr")
