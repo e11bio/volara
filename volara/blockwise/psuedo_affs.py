@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from shutil import rmtree
 from typing import Literal
 
 import numpy as np
@@ -63,6 +64,9 @@ class PsuedoAff(BlockwiseTask):
     @property
     def output_datasets(self) -> list[Dataset]:
         return [self.affs_data]
+
+    def drop_artifacts(self):
+        rmtree(self.affs_data.store)
 
     def init(self):
         self.init_out_array()

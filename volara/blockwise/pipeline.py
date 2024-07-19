@@ -86,7 +86,7 @@ class MWSPipeline(BlockwiseTask):
     @property
     def extract_frags_config(self) -> ExtractFrags:
         return ExtractFrags(
-            db_type=self.db_config,
+            db=self.db_config,
             affs_data=self.affs_config,
             frags_data=self.frags_config,
             block_size=self.block_size,
@@ -99,7 +99,7 @@ class MWSPipeline(BlockwiseTask):
     @property
     def agglom_frags_config(self) -> AffAgglom:
         return AffAgglom(
-            db_type=self.db_config,
+            db=self.db_config,
             frags_data=self.frags_config,
             affs_data=self.affs_config,
             block_size=self.block_size,
@@ -112,7 +112,7 @@ class MWSPipeline(BlockwiseTask):
     @property
     def global_segments_config(self) -> GlobalMWS:
         return GlobalMWS(
-            db_type=self.db_config,
+            db=self.db_config,
             frags_data=self.frags_config,
             lut=self.lut,
             bias=self.edge_biases,

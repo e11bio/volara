@@ -37,17 +37,21 @@ class DB(ABC, StrictBaseModel):
         return node_attrs, edge_attrs
 
     @abstractmethod
-    def db(self):
+    def open(self):
         pass
 
     def init(self):
         try:
-            self.db("r")
+            self.open("r")
         except RuntimeError:
-            self.db("w")
+            self.open("w")
 
     @abstractmethod
     def drop(self):
+        pass
+
+    @abstractmethod
+    def drop_edges(self):
         pass
 
 
@@ -55,7 +59,7 @@ class SQLite(DB):
     db_type: Literal["sqlite"] = "sqlite"
     path: Path
 
-    def db(self, mode="r"):
+    def open(self, mode="r"):
         node_attrs, edge_attrs = self.graph_attrs
 
         return SQLiteGraphDataBase(
@@ -68,6 +72,12 @@ class SQLite(DB):
 
     def drop(self):
         self.path.unlink()
+        (self.path.parent / f"{self.path.stem}-meta.json").unlink()
+
+    def drop_edges(self):
+        db = self.open("a")
+        db._drop_edges()
+        db._create_tables()
 
 
 class PostgreSQL(DB):
@@ -77,7 +87,7 @@ class PostgreSQL(DB):
     user: Optional[str] = None
     password: Optional[str] = None
 
-    def db(self, mode="r"):
+    def open(self, mode="r"):
         node_attrs, edge_attrs = self.graph_attrs
 
         return PgSQLGraphDatabase(
@@ -92,5 +102,11 @@ class PostgreSQL(DB):
         )
 
     def drop(self):
-        db = self.db("w")
+        db = self.open("a")
         db._drop_tables()
+        db._create_tables()
+
+    def drop_edges(self):
+        db = self.open("a")
+        db._drop_edges()
+        db._create_tables()

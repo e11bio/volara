@@ -114,7 +114,7 @@ def build_configs(tmpdir):
             "raw_intensity_similarity": "float",
         },
     )
-    db_config.db("w")
+    db_config.open("w")
 
     pred_config = Predict(
         task_type="predict",
@@ -127,7 +127,7 @@ def build_configs(tmpdir):
         ),
     )
     extract_frags_config = ExtractFrags(
-        db_type=db_config,
+        db=db_config,
         affs_data=affs,
         frags_data=frags,
         block_size=Coordinate(10, 10, 10),
@@ -136,7 +136,7 @@ def build_configs(tmpdir):
         bias=[0.0, 0.0, 0.0],
     )
     seeded_extract_frags_config = SeededExtractFrags(
-        db_type=db_config,
+        db=db_config,
         affs_data=affs,
         segs_data=segments,
         block_size=Coordinate(10, 10, 10),
@@ -145,7 +145,7 @@ def build_configs(tmpdir):
         nml_file=tmpdir / "test.nml",
     )
     aff_agglom_config = AffAgglom(
-        db_type=db_config,
+        db=db_config,
         frags_data=frags,
         affs_data=affs,
         block_size=Coordinate(10, 10, 10),
@@ -157,7 +157,7 @@ def build_configs(tmpdir):
         },
     )
     distance_agglom_config = DistanceAgglom(
-        db_type=db_config,
+        db=db_config,
         frags_data=frags,
         block_size=Coordinate(10, 10, 10),
         context=Coordinate(0, 0, 0),
@@ -166,7 +166,7 @@ def build_configs(tmpdir):
     )
     global_mws_config = GlobalMWS(
         frags_data=frags,
-        db_type=db_config,
+        db=db_config,
         lut=zarr_dir / "luts" / "test",
         bias={"adj_weight": 0.0, "lr_weight": 0.0},
     )
@@ -273,7 +273,7 @@ def test_extract_frags_block(blockwise_configs):
     assert np.unique(frags_out[:, :, 6:]).size == 1
     assert np.unique(frags_out).size == 2
 
-    db = config.db_type.db("r")
+    db = config.db.open("r")
     graph = db.read_graph(block.write_roi)
     assert len(graph.nodes) == 2
 
@@ -317,7 +317,7 @@ def test_aff_agglom_block(blockwise_configs):
     block_frags[:, :, 6:] = 2
     frags_array[block.write_roi] = block_frags
 
-    db = config.db_type.db("r+")
+    db = config.db.open("r+")
     graph = db.read_graph(block.write_roi)
     graph.add_node(1, position=(4, 4, 2), size=600, raw_intensity=(0.1,))
     graph.add_node(2, position=(4, 4, 7), size=400, raw_intensity=(0.1,))
@@ -352,7 +352,7 @@ def test_distance_agglom_block(blockwise_configs, distance_metric_and_score):
     block_frags[:, :, 6:] = 2
     frags_array[block.write_roi] = block_frags
 
-    db = config.db_type.db("r+")
+    db = config.db.open("r+")
     graph = db.read_graph(block.write_roi)
     graph.add_node(1, position=(4, 4, 2), size=600, raw_intensity=(0.1,))
     graph.add_node(
@@ -382,7 +382,7 @@ def test_global_mws_block(blockwise_configs, adj_weight):
         write_roi=Roi((0, 0, 0), (10, 10, 10)),
     )
 
-    db = config.db_type.db("r+")
+    db = config.db.open("r+")
     graph = db.read_graph(block.write_roi)
     graph.add_node(1, position=(4, 4, 2), size=600, raw_intensity=(0.1,))
     graph.add_node(2, position=(4, 4, 7), size=400, raw_intensity=(0.1,))

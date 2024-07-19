@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from shutil import rmtree
 from typing import Literal, Optional
 
 import numpy as np
@@ -50,6 +51,9 @@ class Argmax(BlockwiseTask):
     @property
     def output_datasets(self) -> list[Dataset]:
         return [self.sem_data]
+
+    def drop_artifacts(self):
+        rmtree(self.sem_data.store)
 
     def init(self):
         self.init_out_array()

@@ -19,7 +19,7 @@ logger = logging.getLogger(__file__)
 
 class DistanceAgglom(BlockwiseTask):
     task_type: Literal["distance-agglom"] = "distance-agglom"
-    db_type: Annotated[
+    db: Annotated[
         Union[PostgreSQL, SQLite,],
         Field(discriminator="db_type"),
     ]
@@ -62,6 +62,9 @@ class DistanceAgglom(BlockwiseTask):
     @property
     def output_datasets(self) -> list[Dataset]:
         return []
+
+    def drop_artifacts(self):
+        self.db.drop_edges()
 
     def label_distances(self, labels, voxel_size, dist_threshold=0.0):
         # First 0 out all voxel where the laplace is 0 (not an edge voxel)
@@ -146,7 +149,7 @@ class DistanceAgglom(BlockwiseTask):
     @contextmanager
     def process_block_func(self):
         frags = self.frags_data.array("r")
-        rag_provider = self.db_type.db("r+")
+        rag_provider = self.db.open("r+")
 
         def process_block(block):
             self.agglomerate_in_block(

@@ -33,15 +33,16 @@ class Dataset(ABC, StrictBaseModel):
     def drop(self):
         rmtree(self.store)
 
-    def prepare(self, offset, voxel_size, write_size, dtype, num_channels, **ds_kwargs):
+    def prepare(self, shape, chunk_shape, offset, voxel_size, dtype, **ds_kwargs):
         # prepare ds
         array = prepare_ds(
             self.store,
+            shape=shape,
             offset=offset,
             voxel_size=voxel_size,
-            write_size=write_size,
+            chunk_shape=chunk_shape,
             dtype=dtype,
-            num_channels=num_channels,
+            mode="a",
         )
         array._source_data.attrs.update(ds_kwargs)
 

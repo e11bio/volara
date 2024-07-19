@@ -1,5 +1,6 @@
 import logging
 from contextlib import contextmanager
+from itertools import chain
 from typing import Annotated, Callable, Generator, Literal, Union
 
 import numpy as np
@@ -21,7 +22,7 @@ logger = logging.getLogger(__file__)
 
 class AffAgglom(BlockwiseTask):
     task_type: Literal["aff-agglom"] = "aff-agglom"
-    db_type: Annotated[
+    db: Annotated[
         Union[PostgreSQL, SQLite],
         Field(discriminator="db_type"),
     ]
@@ -65,6 +66,9 @@ class AffAgglom(BlockwiseTask):
     @property
     def output_datasets(self) -> list[Dataset]:
         return []
+
+    def drop_artifacts(self):
+        return self.db.drop_edges()
 
     def agglomerate(self, affs, frags, rag):
         fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
@@ -130,7 +134,7 @@ class AffAgglom(BlockwiseTask):
 
         for score_name, score_neighborhood in self.scores.items():
             offset_counts = [neighborhood_affs[offset] for offset in score_neighborhood]
-            cantor_ids = set(*[x.keys() for x in offset_counts])
+            cantor_ids = set(chain(*[x.keys() for x in offset_counts]))
             for cantor_id in cantor_ids:
                 key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]
                 total_count = sum([count[1] for count in key_counts])
@@ -173,7 +177,7 @@ class AffAgglom(BlockwiseTask):
         affs = self.affs_data.array("r")
         frags = self.frags_data.array("r")
 
-        rag_provider = self.db_type.db("r+")
+        rag_provider = self.db.open("r+")
 
         def process_block(block) -> None:
             self.agglomerate_in_block(

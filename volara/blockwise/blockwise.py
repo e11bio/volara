@@ -14,7 +14,6 @@ from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import LOG_BASEDIR
 
-from ..dataset import Dataset
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
 
@@ -23,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 class BlockwiseTask(ABC, StrictBaseModel):
     roi: Optional[tuple[PydanticCoordinate, PydanticCoordinate]] = None
-    num_workers: int = 1
-    num_cache_workers: int = 1
+    num_workers: Optional[int] = None
+    num_cache_workers: Optional[int] = None
     worker_config: Optional[Worker] = None
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
@@ -73,6 +72,10 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def process_block_func(self):
         pass
 
+    @abstractmethod
+    def drop_artifacts(self):
+        pass
+
     @property
     def block_write_roi(self) -> Roi:
         return Roi((0,) * self.write_size.dims, self.write_size)
@@ -89,15 +92,6 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def block_ds(self) -> Path:
         return self.meta_dir / "blocks_done.zarr"
 
-    @property
-    def output_datasets(self) -> list[Dataset]:
-        # TODO: override this in subclasses if necessary
-        return list()
-
-    @property
-    def artifact_datasets(self):
-        return [self.block_ds] + self.output_datasets
-
     def process_roi(self, roi: Roi, context: Optional[Coordinate] = None):
         block = daisy.Block(
             roi, roi if context is None else roi.grow(context, context), roi
@@ -109,19 +103,17 @@ class BlockwiseTask(ABC, StrictBaseModel):
         # reset the blocks_done ds so that the task is rerun
         if self.meta_dir.exists():
             rmtree(self.meta_dir)
-        if drop_outputs:
-            for output_dataset in self.output_datasets:
-                output_dataset.drop()
+        self.drop_artifacts()
 
     def check_block_func(self):
         def check_block(block):
-            block_array = open_ds(str(self.block_ds[0]), self.block_ds[1])
+            block_array = open_ds(self.block_ds, mode="r")
             offset = block.write_roi.offset
             voxel_size = block_array.voxel_size
 
             block_roi = Roi(offset, voxel_size)
 
-            block_data = block_array[block_roi].to_ndarray()
+            block_data = block_array[block_roi]
 
             return block_data == block.block_id[1] + 1
 
@@ -260,15 +252,18 @@ class BlockwiseTask(ABC, StrictBaseModel):
                 f"Number of blocks ({num_blocks}) is too large for available data types."
             )
 
+        block_voxel_size = cgcd(
+            self.write_roi.offset, self.write_size, self.write_roi.shape
+        )
+
         prepare_ds(
-            str(self.block_ds[0]),
-            self.block_ds[1],
-            total_roi=self.write_roi,
-            voxel_size=cgcd(
-                self.write_roi.offset, self.write_size, self.write_roi.shape
-            ),
-            write_size=self.write_size,
+            self.block_ds,
+            shape=self.write_roi.shape // block_voxel_size,
+            offset=self.write_roi.offset,
+            voxel_size=block_voxel_size,
+            chunk_shape=block_voxel_size,
             dtype=get_dtype(self.write_roi, self.write_size),
+            mode="w",
         )
 
     def task(
@@ -281,15 +276,23 @@ class BlockwiseTask(ABC, StrictBaseModel):
             context_low, context_high = context[0], context[1]
         else:
             context_low, context_high = context, context
+
+        if self.num_workers is not None:
+            process_func = self.worker_func()
+            num_workers = self.num_workers
+        else:
+            process_func = self.process_block_func().__enter__()
+            num_workers = 1 # dummy value
+
         task = daisy.Task(
             self.task_name,
             total_roi=self.write_roi.grow(context_low, context_high),
             read_roi=self.block_write_roi.grow(context_low, context_high),
             write_roi=self.block_write_roi,
-            process_function=self.worker_func(),
+            process_function=process_func,
             read_write_conflict=self.read_write_conflict,
             fit=self.fit,
-            num_workers=self.num_workers,
+            num_workers=num_workers,
             check_function=self.check_block_func(),
             max_retries=2,
             timeout=None,
@@ -306,5 +309,17 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
         return task
 
-    def run_blockwise(self):
+    def run_blockwise(
+        self,
+        upstream_tasks: Optional[list[daisy.Task]] = None,
+        no_multiprocessing: bool = False,
+    ):
         self.init_block_array()
+        self.init()
+        task = self.task(upstream_tasks)
+        if not no_multiprocessing:
+            daisy.run_blockwise(task)
+        else:
+            server = daisy.SerialServer()
+            cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+            server.run_blockwise([task])

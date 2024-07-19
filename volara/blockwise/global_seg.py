@@ -17,18 +17,17 @@ DB = Annotated[
     Field(discriminator="db_type"),
 ]
 
-
 class GlobalMWS(BlockwiseTask):
     task_type: Literal["create-lut"] = "create-lut"
     frags_data: Labels
-    db_type: DB
+    db: DB
     lut: Path
     starting_lut: Optional[Path] = None
     bias: dict[str, float]
     roi: Optional[tuple[PydanticCoordinate, PydanticCoordinate]] = None
     edge_per_attr: bool = True
     store_segment_intensities: Optional[dict[str, str]] = None
-    out_db_type: Optional[DB] = None
+    out_db: Optional[DB] = None
 
     @property
     def task_name(self) -> str:
@@ -61,12 +60,18 @@ class GlobalMWS(BlockwiseTask):
     def num_voxels_in_block(self) -> int:
         return 1
 
+    def drop_artifacts(self):
+        if self.lut.exists():
+            self.lut.unlink()
+        if self.out_db is not None:
+            self.out_db.drop()
+
     @contextmanager
     def process_block_func(self):
-        rag_provider = self.db_type.db("r+")
+        rag_provider = self.db.open("r+")
 
-        if self.out_db_type is not None:
-            out_rag_provider = self.out_db_type.db("w")
+        if self.out_db is not None:
+            out_rag_provider = self.out_db.open("w")
 
         if self.starting_lut is not None:
             starting_frags, starting_segs = np.load(f"{self.starting_lut}.npz")[
@@ -123,7 +128,7 @@ class GlobalMWS(BlockwiseTask):
             np.savez_compressed(self.lut, fragment_segment_lut=lut, edges=edges)
 
             if self.store_segment_intensities is not None:
-                assert self.out_db_type is not None, self.out_db_type
+                assert self.out_db is not None, self.out_db
                 out_graph = out_rag_provider.read_graph(block.write_roi)
                 assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
                 mapping = {}

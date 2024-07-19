@@ -2,6 +2,7 @@ import logging
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
+from shutil import rmtree
 from typing import Annotated, Literal, Optional, Union
 
 import daisy
@@ -23,7 +24,7 @@ logger = logging.getLogger(__file__)
 
 class SeededExtractFrags(BlockwiseTask):
     task_type: Literal["seeded-extract-frags"] = "seeded-extract-frags"
-    db_type: Annotated[
+    db: Annotated[
         Union[PostgreSQL, SQLite],
         Field(discriminator="db_type"),
     ]
@@ -76,9 +77,12 @@ class SeededExtractFrags(BlockwiseTask):
     def output_datasets(self) -> list[Dataset]:
         return [self.segs_data]
 
+    def drop_artifacts(self):
+        rmtree(self.segs_data.store)
+
     def init(self):
         self.init_out_array()
-        self.db_type.init()
+        self.db.init()
 
     def init_out_array(self):
         # get data from in_array

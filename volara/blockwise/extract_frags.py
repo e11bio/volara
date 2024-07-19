@@ -1,5 +1,6 @@
 import logging
 from contextlib import contextmanager
+from shutil import rmtree
 from typing import Annotated, Literal, Optional, Union
 
 import daisy
@@ -23,7 +24,7 @@ logger = logging.getLogger(__file__)
 
 class ExtractFrags(BlockwiseTask):
     task_type: Literal["extract-frags"] = "extract-frags"
-    db_type: Annotated[
+    db: Annotated[
         Union[PostgreSQL, SQLite],
         Field(discriminator="db_type"),
     ]
@@ -76,20 +77,28 @@ class ExtractFrags(BlockwiseTask):
     def num_voxels_in_block(self) -> int:
         return int(np.prod(self.block_size))
 
+    @property
+    def voxel_size(self) -> Coordinate:
+        return self.affs_data.array("r").voxel_size
+
+    def drop_artifacts(self):
+        try:
+            rmtree(self.frags_data.store)
+        except FileNotFoundError:
+            pass
+        self.db.drop()
+
     def init(self):
-        self.db_type.init()
+        self.db.init()
         self.init_out_array()
 
     def init_out_array(self):
-        # get data from in_array
-        voxel_size = self.affs_data.array("r").voxel_size
-
         self.frags_data.prepare(
-            self.write_roi,
-            voxel_size,
-            self.write_size,
+            self.write_roi.shape / self.voxel_size,
+            self.write_size / self.voxel_size,
+            self.write_roi.offset,
+            self.voxel_size,
             self._out_array_dtype,
-            None,
             kwargs=self.frags_data.attrs,
         )
 
@@ -186,7 +195,6 @@ class ExtractFrags(BlockwiseTask):
         affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
         if affs.dtype == np.uint8:
-            logger.info("Assuming affinities are in [0,255]")
             max_affinity_value = 255.0
             affs_data = affs_data.astype(np.float64)
         else:
@@ -227,7 +235,6 @@ class ExtractFrags(BlockwiseTask):
 
         # ensure unique IDs
         id_bump = block.block_id[1] * self.num_voxels_in_block
-        logger.info("bumping fragment IDs by %i", id_bump)
         fragments_data[fragments_data > 0] += id_bump
 
         # store fragments
@@ -238,6 +245,7 @@ class ExtractFrags(BlockwiseTask):
             return
 
         fragment_ids, counts = np.unique(fragments_data, return_counts=True)
+        logger.info("Found %d fragments", len(fragment_ids))
         fragment_ids, counts = zip(
             *[(f, c) for f, c in zip(fragment_ids, counts) if f > 0]
         )
@@ -306,7 +314,7 @@ class ExtractFrags(BlockwiseTask):
         frags = self.frags_data.array("r+")
         mask = self.mask_data.array("r") if self.mask_data else None
 
-        rag_provider = self.db_type.db("r+")
+        rag_provider = self.db.open("r+")
 
         def process_block(block):
             self.watershed_in_block(

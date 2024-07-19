@@ -1,5 +1,6 @@
 import logging
 from contextlib import contextmanager
+from shutil import rmtree
 from typing import Annotated, Callable, Literal, Optional, Union
 
 import daisy
@@ -113,6 +114,11 @@ class Predict(BlockwiseTask):
     def output_datasets(self) -> list[Dataset]:
         return [out_data for out_data in self.out_data if out_data is not None]
 
+    def drop_artifacts(self):
+        for out_data in self.out_data:
+            if out_data is not None:
+                rmtree(out_data.store)
+
     def init(self):
         self.init_out_array()
 
@@ -171,7 +177,8 @@ class Predict(BlockwiseTask):
                 if self.out_data[i] is not None
             },
             device=device,
-            spawn_subprocess=self.num_cache_workers > 1,
+            spawn_subprocess=self.num_cache_workers is not None
+            and self.num_cache_workers > 1,
         )
 
         pipeline += gp.Squeeze(

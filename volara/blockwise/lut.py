@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
+from shutil import rmtree
 from typing import Literal
 
 import numpy as np
@@ -56,19 +57,19 @@ class LUT(BlockwiseTask):
     def output_datasets(self) -> list[Dataset]:
         return [self.seg_data]
 
+    def drop_artifacts(self):
+        rmtree(self.seg_data.store)
+
     def init(self):
         self.init_out_array()
 
     def init_out_array(self):
-        # get data from in_array
-        voxel_size = self.frags_data.array("r").voxel_size
-
         self.seg_data.prepare(
-            self.write_roi,
-            voxel_size,
-            self.write_size,
+            self.write_roi.shape / self.voxel_size,
+            self.write_size / self.voxel_size,
+            self.write_roi.offset,
+            self.voxel_size,
             self._out_array_dtype,
-            None,
             kwargs=self.seg_data.attrs,
         )
 
@@ -79,7 +80,6 @@ class LUT(BlockwiseTask):
 
     @contextmanager
     def process_block_func(self):
-
         frags = self.frags_data.array("r")
         segs = self.seg_data.array("r+")
 
@@ -88,7 +88,6 @@ class LUT(BlockwiseTask):
         )
 
         def process_block(block):
-
             self.map_block(block, frags, segs, mapping)
 
         yield process_block
