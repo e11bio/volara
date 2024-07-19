@@ -99,7 +99,7 @@ def affs_array(tmp_path, cell_array: Array) -> Array:
         dtype=np.uint8,
     )
     affs_array[:] = (
-        seg_to_affgraph(labels_array[:], nhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]) * 255
+        seg_to_affgraph(cell_array[:], nhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]) * 255
     )
     return affs_array
 
