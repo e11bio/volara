@@ -2,23 +2,15 @@ from contextlib import contextmanager
 from typing import Optional, Union
 
 import daisy
+import numpy as np
 import pytest
 from funlib.geometry import Coordinate, Roi
-
-from volara.blockwise import BlockwiseTask
-from volara.logging import set_log_basedir
-
-
-import random
-
-import matplotlib.pyplot as plt
-import numpy as np
-from funlib.geometry import Coordinate
-from funlib.persistence import prepare_ds, Array
+from funlib.persistence import Array, prepare_ds
 from scipy.ndimage.measurements import label
 from skimage import data
 from skimage.filters import gaussian
 
+from volara.blockwise import BlockwiseTask
 from volara.tmp import seg_to_affgraph
 
 
