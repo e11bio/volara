@@ -4,3 +4,4 @@ sphinx-autoapi
 sphinx-click
 sphinx-rtd-theme
 myst-parser
+jupyter-sphinx
