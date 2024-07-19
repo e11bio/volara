@@ -1,5 +1,7 @@
-Tutorial
+.. _sec_tutorial:
 
+Tutorial
+========
 
 .. admonition:: Tutorial Preliminaries: Data Preparation and Helpers
   :class: toggle
