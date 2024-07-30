@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional, Union
 
 import daisy
@@ -6,17 +7,20 @@ import numpy as np
 import pytest
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array, prepare_ds
-from scipy.ndimage.measurements import label
+from scipy.ndimage import label
 from skimage import data
 from skimage.filters import gaussian
 
-from volara.blockwise import BlockwiseTask
+from volara.blockwise import AffAgglom, BlockwiseTask
+from volara.dataset import Affs, Labels
+from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
 
 
 @pytest.fixture()
-def cell_array(tmp_path) -> Array:
+def cell_array(tmp_path) -> tuple[Array, Path]:
     cell_data = (data.cells3d().transpose((1, 0, 2, 3)) / 256).astype(np.uint8)
+    cell_path = tmp_path / "cells3d.zarr/raw"
 
     # Handle metadata
     # This is a single sample image, so we don't need an
@@ -31,7 +35,7 @@ def cell_array(tmp_path) -> Array:
 
     # Creates the zarr array with appropriate metadata
     cell_array = prepare_ds(
-        tmp_path / "cells3d.zarr/raw",
+        cell_path,
         cell_data.shape,
         offset=offset,
         voxel_size=voxel_size,
@@ -47,10 +51,11 @@ def cell_array(tmp_path) -> Array:
 
 
 @pytest.fixture()
-def mask_array(tmp_path, cell_array: Array) -> Array:
+def mask_array(tmp_path, cell_array: Array) -> tuple[Array, Path]:
+    mask_path = tmp_path / "cells3d.zarr/mask"
     # generate and save some psuedo gt data
     mask_array = prepare_ds(
-        tmp_path / "cells3d.zarr/mask",
+        mask_path,
         cell_array.shape[1:],
         offset=cell_array.offset,
         voxel_size=cell_array.voxel_size,
@@ -64,44 +69,48 @@ def mask_array(tmp_path, cell_array: Array) -> Array:
         np.clip(gaussian(cell_array[0] / 255.0, sigma=1), 0, 255) * 255 < 10
     )
     mask_array[:] = cell_mask * not_membrane_mask
-    return mask_array
+    return mask_array, mask_path
 
 
 @pytest.fixture()
-def labels_array(tmp_path, mask_array: Array) -> Array:
+def labels_array(tmp_path, mask_array: tuple[Array, Path]) -> tuple[Array, Path]:
+    mask_array, _mask_array_path = mask_array
+    labels_path = tmp_path / "cells3d.zarr/labels"
     # generate labels via connected components
     # generate and save some psuedo gt data
     labels_array = prepare_ds(
-        tmp_path / "cells3d.zarr/labels",
+        labels_path,
         mask_array.shape,
         offset=mask_array.offset,
         voxel_size=mask_array.voxel_size,
-        axis_names=mask_array.axis_names[1:],
+        axis_names=mask_array.axis_names,
         units=mask_array.units,
         mode="w",
         dtype=np.uint8,
     )
     labels_array[:] = label(mask_array[:])[0]
-    return labels_array
+    return labels_array, labels_path
 
 
 @pytest.fixture()
-def affs_array(tmp_path, cell_array: Array) -> Array:
+def affs_array(tmp_path, labels_array: tuple[Array, Path]) -> tuple[Array, Path]:
+    labels_array, _ = labels_array
+    affs_path = tmp_path / "cells3d.zarr/affs"
     # generate affinity graph
     affs_array = prepare_ds(
-        tmp_path / "cells3d.zarr/affs",
-        (3,) + cell_array.shape[1:],
-        offset=cell_array.offset,
-        voxel_size=cell_array.voxel_size,
-        axis_names=["neighborhood^"] + cell_array.axis_names[1:],
-        units=cell_array.units,
+        affs_path,
+        (3,) + labels_array.shape,
+        offset=labels_array.offset,
+        voxel_size=labels_array.voxel_size,
+        axis_names=["neighborhood^"] + labels_array.axis_names,
+        units=labels_array.units,
         mode="w",
         dtype=np.uint8,
     )
     affs_array[:] = (
-        seg_to_affgraph(cell_array[:], nhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]) * 255
+        seg_to_affgraph(labels_array[:], nhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]) * 255
     )
-    return affs_array
+    return affs_array, affs_path
 
 
 def test_dummy_blockwise(tmpdir):
@@ -158,8 +167,25 @@ def test_dummy_blockwise(tmpdir):
     config.run_blockwise(multiprocessing=False)
 
 
-def test_aff_agglom():
-    pass
+def test_aff_agglom(affs_array, labels_array, tmp_path):
+    affs_array, affs_path = affs_array
+    labels_array, labels_path = labels_array
+    db = SQLite(
+        path=tmp_path / "db.sqlite",
+        node_attrs={"xy_aff": "float", "z_aff": "float"},
+    )
+    affs_config = AffAgglom(
+        db=db,
+        affs_data=Affs(store=affs_path, neighborhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        frags_data=Labels(store=labels_path),
+        block_size=(20, 20, 20),
+        context=(2, 2, 2),
+        scores={"xy_aff": [(1, 0, 0), (0, 1, 0)], "z_aff": [(0, 0, 1)]},
+    )
+    affs_config.run_blockwise(multiprocessing=False)
+
+    g = db.open("r").read_graph()
+    assert g.number_of_edges() == 0
 
 
 def test_argmax():

@@ -168,7 +168,7 @@ def build_configs(tmpdir):
         frags_data=frags,
         db=db_config,
         lut=zarr_dir / "luts" / "test",
-        bias={"adj_weight": 0.0, "lr_weight": 0.0},
+        bias={"x_aff": 0.0},
     )
     lut_config = LUT(
         frags_data=frags,
@@ -373,8 +373,8 @@ def test_distance_agglom_block(blockwise_configs, distance_metric_and_score):
     ), graph.edges[(1, 2)]
 
 
-@pytest.mark.parametrize("adj_weight", [0.5, -0.5])
-def test_global_mws_block(blockwise_configs, adj_weight):
+@pytest.mark.parametrize("x_aff", [0.5, -0.5])
+def test_global_mws_block(blockwise_configs, x_aff):
     config: GlobalMWS = blockwise_configs["global_mws"]
     block = daisy.Block(
         total_roi=Roi((0, 0, 0), (10, 10, 10)),
@@ -389,9 +389,7 @@ def test_global_mws_block(blockwise_configs, adj_weight):
     graph.add_edge(
         1,
         2,
-        raw_intensity_similarity=0.1,
-        adj_weight=adj_weight,
-        lr_weight=0.0,
+        x_aff=x_aff,
     )
     db.write_graph(graph, roi=block.write_roi)
 
@@ -400,7 +398,7 @@ def test_global_mws_block(blockwise_configs, adj_weight):
 
     lut = np.load(f"{config.lut}.npz")["fragment_segment_lut"]
     assert len(np.unique(lut[0, :])) == 2, lut
-    assert len(np.unique(lut[1, :])) == 1 + (adj_weight < 0), lut
+    assert len(np.unique(lut[1, :])) == 1 + (x_aff < 0), lut
 
 
 def test_lut_block(blockwise_configs):
