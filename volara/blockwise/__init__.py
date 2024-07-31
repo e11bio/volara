@@ -11,7 +11,6 @@ from .components import (
     ExtractFrags,
     GlobalMWS,
     Predict,
-    PsuedoAff,
     SeededExtractFrags,
 )
 from .pipeline import MWSPipeline
@@ -26,7 +25,6 @@ BlockwiseTasks = TypeAdapter(
             DistanceAgglom,
             GlobalMWS,
             LUT,
-            PsuedoAff,
             Argmax,
         ],
         Field(discriminator="task_type"),
@@ -57,7 +55,6 @@ __all__ = [
     "GlobalMWS",
     "ExtractFrags",
     "SeededExtractFrags",
-    "PsuedoAff",
     "Argmax",
     "BlockwiseTask",
     "MWSPipeline",

@@ -14,5 +14,4 @@ Easy application of common blockwise operations for image processing of arbitrar
 - `DistanceAgglom`: Supervoxel distance score edge creation
 - `GlobalSeg`: Global creation of look up tables for fragment -> segment agglomeration
 - `LUT`: Remapping and saving fragments as segments
-- `PsuedoAffs`: Create "psueodo affinities" from distance measures (e.g. cosine similarity on LSD predictions)
 - `SeededExtractFrags`: Fragment extraction via mutex watershed that accepts skeletonized seed points for constrained fragment extraction

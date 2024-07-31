@@ -17,7 +17,6 @@ from volara.blockwise import (
     ExtractFrags,
     GlobalMWS,
     Predict,
-    PsuedoAff,
     SeededExtractFrags,
 )
 from volara.dataset import Affs, Labels, Raw
@@ -176,9 +175,6 @@ def build_configs(tmpdir):
         lut=zarr_dir / "luts" / "test",
         block_size=Coordinate(10, 10, 10),
     )
-    psuedo_aff_config = PsuedoAff(
-        embedding_data=raw, affs_data=affs, block_size=Coordinate(10, 10, 10)
-    )
     argmax_config = Argmax(
         probs_data=raw, sem_data=segments, block_size=Coordinate(10, 10, 10)
     )
@@ -191,7 +187,6 @@ def build_configs(tmpdir):
         "distance_agglom": distance_agglom_config,
         "global_mws": global_mws_config,
         "lut": lut_config,
-        "psuedo_aff": psuedo_aff_config,
         "argmax": argmax_config,
     }
 
@@ -211,7 +206,6 @@ def blockwise_configs(tmpdir):
         "distance_agglom",
         "global_mws",
         "lut",
-        "psuedo_aff",
         "argmax",
     ],
 )

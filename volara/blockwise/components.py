@@ -6,7 +6,6 @@ from .extract_frags import ExtractFrags
 from .global_seg import GlobalMWS
 from .lut import LUT
 from .predict import Predict
-from .psuedo_affs import PsuedoAff
 from .seeded_extract_frags import SeededExtractFrags
 
 __all__ = [
@@ -18,6 +17,5 @@ __all__ = [
     "ExtractFrags",
     "GlobalMWS",
     "LUT",
-    "PsuedoAff",
     "SeededExtractFrags",
 ]
