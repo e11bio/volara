@@ -32,17 +32,12 @@ class DistanceAgglom(BlockwiseTask):
     distance_threshold: Optional[float] = None
     distance_metric: Literal["euclidean", "cosine", "max"] = "cosine"
 
+    fit: Literal["shrink"] = "shrink"
+    read_write_conflict: Literal[False] = False
+
     @property
     def task_name(self) -> str:
         return f"{self.frags_data.name}-{self.task_type}"
-
-    @property
-    def fit(self):
-        return "shrink"
-
-    @property
-    def read_write_conflict(self):
-        return False
 
     @property
     def write_roi(self) -> Roi:

@@ -15,23 +15,18 @@ class Argmax(BlockwiseTask):
     A blockwise task that performs an argmax operation on a given set of
     probabilities and writes the result to a semantic segmentation dataset.
     """
+
     task_type: Literal["argmax"] = "argmax"
     probs_data: Raw
     sem_data: Labels
     combine_classes: Optional[list[list]] = None
     block_size: PydanticCoordinate
+    fit: Literal["shrink"] = "shrink"
+    read_write_conflict: Literal[False] = False
 
     @property
     def task_name(self) -> str:
         return f"{self.probs_data.name}-{self.task_type}"
-
-    @property
-    def fit(self):
-        return "shrink"
-
-    @property
-    def read_write_conflict(self):
-        return False
 
     @property
     def write_roi(self) -> Roi:

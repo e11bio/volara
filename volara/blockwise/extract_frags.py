@@ -40,6 +40,8 @@ class ExtractFrags(BlockwiseTask):
     filter_fragments: float = 0.0
     remove_debris: int = 0
 
+    fit: Literal["shrink"] = "shrink"
+    read_write_conflict: Literal[False] = False
     _out_array_dtype: np.dtype = np.dtype(np.uint64)
 
     @property
@@ -49,14 +51,6 @@ class ExtractFrags(BlockwiseTask):
     @property
     def task_name(self) -> str:
         return f"{self.affs_data.name}-{self.task_type}"
-
-    @property
-    def fit(self):
-        return "shrink"
-
-    @property
-    def read_write_conflict(self):
-        return False
 
     @property
     def write_roi(self) -> Roi:

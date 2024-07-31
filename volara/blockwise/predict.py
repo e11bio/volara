@@ -72,6 +72,8 @@ class Predict(BlockwiseTask):
     in_data: Union[Raw]
     out_data: list[Optional[OutDataType]]
 
+    fit: Literal["shrink"] = "shrink"
+    read_write_conflict: Literal[False] = False
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
     @property
@@ -101,14 +103,6 @@ class Predict(BlockwiseTask):
     @property
     def task_name(self) -> str:
         return f"{self.in_data.name}-{self.task_type}"
-
-    @property
-    def fit(self):
-        return "shrink"
-
-    @property
-    def read_write_conflict(self):
-        return False
 
     @property
     def output_datasets(self) -> list[Dataset]:

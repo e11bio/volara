@@ -29,17 +29,13 @@ class GlobalMWS(BlockwiseTask):
     store_segment_intensities: Optional[dict[str, str]] = None
     out_db: Optional[DB] = None
 
+    fit: Literal["shrink"] = "shrink"
+    read_write_conflict: Literal[False] = False
+
     @property
     def task_name(self) -> str:
         return f"{self.frags_data.name}-{self.task_type}"
 
-    @property
-    def fit(self):
-        return "shrink"
-
-    @property
-    def read_write_conflict(self):
-        return False
 
     @property
     def write_roi(self) -> Roi:

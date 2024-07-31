@@ -48,6 +48,8 @@ class AffAgglom(BlockwiseTask):
             "z": [(0, 0, 1)]
         }
     """
+    fit: Literal["shrink"] = "shrink"
+    read_write_conflict: Literal[False] = False
 
     @property
     def neighborhood(self):
@@ -56,14 +58,6 @@ class AffAgglom(BlockwiseTask):
     @property
     def task_name(self) -> str:
         return f"{self.affs_data.name}-{self.task_type}"
-
-    @property
-    def fit(self):
-        return "shrink"
-
-    @property
-    def read_write_conflict(self):
-        return False
 
     @property
     def write_roi(self) -> Roi:

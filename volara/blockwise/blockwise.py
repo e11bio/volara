@@ -27,6 +27,9 @@ class BlockwiseTask(ABC, StrictBaseModel):
     worker_config: Optional[Worker] = None
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
+    fit: str
+    read_write_conflict: bool
+
     # TODO: do we still want task_type as a property?
 
     # @property
@@ -52,16 +55,6 @@ class BlockwiseTask(ABC, StrictBaseModel):
     @property
     @abstractmethod
     def context_size(self) -> Union[Coordinate, tuple[Coordinate, Coordinate]]:
-        pass
-
-    @property
-    @abstractmethod
-    def fit(self) -> str:
-        pass
-
-    @property
-    @abstractmethod
-    def read_write_conflict(self) -> bool:
         pass
 
     def init(self):

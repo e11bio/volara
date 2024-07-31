@@ -18,7 +18,7 @@ from volara.tmp import seg_to_affgraph
 
 
 @pytest.fixture()
-def cell_array(tmp_path) -> tuple[Array, Path]:
+def cell(tmp_path) -> tuple[Array, Path]:
     cell_data = (data.cells3d().transpose((1, 0, 2, 3)) / 256).astype(np.uint8)
     cell_path = tmp_path / "cells3d.zarr/raw"
 
@@ -47,11 +47,12 @@ def cell_array(tmp_path) -> tuple[Array, Path]:
 
     # Saves the cell data to the zarr array
     cell_array[:] = cell_data
-    return cell_array
+    return cell_array, cell_path
 
 
 @pytest.fixture()
-def mask_array(tmp_path, cell_array: Array) -> tuple[Array, Path]:
+def mask(tmp_path, cell: tuple[Array, Path]) -> tuple[Array, Path]:
+    cell_array, _cell_path = cell
     mask_path = tmp_path / "cells3d.zarr/mask"
     # generate and save some psuedo gt data
     mask_array = prepare_ds(
@@ -73,8 +74,8 @@ def mask_array(tmp_path, cell_array: Array) -> tuple[Array, Path]:
 
 
 @pytest.fixture()
-def labels_array(tmp_path, mask_array: tuple[Array, Path]) -> tuple[Array, Path]:
-    mask_array, _mask_array_path = mask_array
+def labels(tmp_path, mask: tuple[Array, Path]) -> tuple[Array, Path]:
+    mask_array, _mask_array_path = mask
     labels_path = tmp_path / "cells3d.zarr/labels"
     # generate labels via connected components
     # generate and save some psuedo gt data
@@ -93,8 +94,8 @@ def labels_array(tmp_path, mask_array: tuple[Array, Path]) -> tuple[Array, Path]
 
 
 @pytest.fixture()
-def affs_array(tmp_path, labels_array: tuple[Array, Path]) -> tuple[Array, Path]:
-    labels_array, _ = labels_array
+def affs(tmp_path, labels: tuple[Array, Path]) -> tuple[Array, Path]:
+    labels_array, _ = labels
     affs_path = tmp_path / "cells3d.zarr/affs"
     # generate affinity graph
     affs_array = prepare_ds(
@@ -167,9 +168,9 @@ def test_dummy_blockwise(tmpdir):
     config.run_blockwise(multiprocessing=False)
 
 
-def test_aff_agglom(affs_array, labels_array, tmp_path):
-    affs_array, affs_path = affs_array
-    labels_array, labels_path = labels_array
+def test_aff_agglom(affs, labels, tmp_path):
+    affs_array, affs_path = affs
+    labels_array, labels_path = labels
     db = SQLite(
         path=tmp_path / "db.sqlite",
         node_attrs={"xy_aff": "float", "z_aff": "float"},
