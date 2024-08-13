@@ -1,7 +1,7 @@
 from .aff_agglom import AffAgglom
 from .argmax import Argmax
 from .blockwise import BlockwiseTask
-from .distance_agglom import DistanceAgglom
+from .distance_agglom import DistanceAgglom, DistanceAgglomSimple
 from .extract_frags import ExtractFrags
 from .global_seg import GlobalMWS
 from .lut import LUT
@@ -13,6 +13,7 @@ __all__ = [
     "AffAgglom",
     "Argmax",
     "DistanceAgglom",
+    "DistanceAgglomSimple",
     "BlockwiseTask",
     "ExtractFrags",
     "GlobalMWS",

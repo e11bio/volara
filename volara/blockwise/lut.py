@@ -52,7 +52,7 @@ class LUT(BlockwiseTask):
         return [self.seg_data]
 
     def drop_artifacts(self):
-        rmtree(self.seg_data.store)
+        rmtree(self.seg_data.store, ignore_errors=True)
 
     def init(self):
         self.init_out_array()

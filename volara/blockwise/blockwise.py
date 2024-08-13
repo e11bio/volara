@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
 from typing import Optional, Union
+from contextlib import contextmanager
 
 import daisy
 import numpy as np
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class BlockwiseTask(ABC, StrictBaseModel):
     roi: Optional[tuple[PydanticCoordinate, PydanticCoordinate]] = None
-    num_workers: Optional[int] = None
+    num_workers: int = 1
     num_cache_workers: Optional[int] = None
     worker_config: Optional[Worker] = None
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
@@ -114,7 +115,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
     def mark_block_done_func(self):
         def write_check_block(block):
-            block_array = open_ds(str(self.block_ds[0]), self.block_ds[1], mode="a")
+            block_array = open_ds(self.block_ds, mode="a")
             write_roi = block.write_roi.intersect(block_array.roi)
             block_array[write_roi] = np.full(
                 write_roi.shape // block_array.voxel_size,
@@ -196,7 +197,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
                         process_block(block)
                         mark_block_done(block)
 
-            if self.num_cache_workers > 1:
+            if self.num_cache_workers is not None:
                 workers = [
                     multiprocessing.Process(target=worker_loop)
                     for _ in range(self.num_cache_workers)
@@ -256,11 +257,14 @@ class BlockwiseTask(ABC, StrictBaseModel):
             voxel_size=block_voxel_size,
             chunk_shape=block_voxel_size,
             dtype=get_dtype(self.write_roi, self.write_size),
-            mode="w",
+            mode="a",
         )
 
+    @contextmanager
     def task(
-        self, upstream_tasks: Optional[Union[daisy.Task, list[daisy.Task]]] = None
+        self,
+        upstream_tasks: Optional[Union[daisy.Task, list[daisy.Task]]] = None,
+        multiprocessing: bool = True,
     ) -> daisy.Task:
         # create task
         context = self.context_size
@@ -270,12 +274,16 @@ class BlockwiseTask(ABC, StrictBaseModel):
         else:
             context_low, context_high = context, context
 
-        if self.num_workers is not None:
+        if multiprocessing:
             process_func = self.worker_func()
-            num_workers = self.num_workers
         else:
-            process_func = self.process_block_func().__enter__()
-            num_workers = 1 # dummy value
+            process_block_func = self.process_block_func()
+            process_block = process_block_func.__enter__()
+            mark_block = self.mark_block_done_func()
+
+            def process_func(block):
+                process_block(block)
+                mark_block(block)
 
         task = daisy.Task(
             self.task_name,
@@ -285,7 +293,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
             process_function=process_func,
             read_write_conflict=self.read_write_conflict,
             fit=self.fit,
-            num_workers=num_workers,
+            num_workers=self.num_workers,
             check_function=self.check_block_func(),
             max_retries=2,
             timeout=None,
@@ -300,7 +308,10 @@ class BlockwiseTask(ABC, StrictBaseModel):
             ),
         )
 
-        return task
+        yield task
+
+        if self.num_workers is None:
+            process_block_func.__exit__(None, None, None)
 
     def run_blockwise(
         self,
@@ -309,10 +320,10 @@ class BlockwiseTask(ABC, StrictBaseModel):
     ):
         self.init_block_array()
         self.init()
-        task = self.task(upstream_tasks)
-        if multiprocessing:
-            daisy.run_blockwise(task)
-        else:
-            server = daisy.SerialServer()
-            cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
-            server.run_blockwise([task])
+        with self.task(upstream_tasks, multiprocessing) as task:
+            if multiprocessing:
+                daisy.run_blockwise([task])
+            else:
+                server = daisy.SerialServer()
+                cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                server.run_blockwise([task])
