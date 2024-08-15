@@ -143,6 +143,7 @@ def test_dummy_blockwise(tmpdir):
         def drop_artifacts(self):
             pass
 
+        @contextmanager
         def task(
             self, upstream_tasks: Optional[Union[daisy.Task, list[daisy.Task]]] = None
         ) -> daisy.Task:
@@ -159,7 +160,7 @@ def test_dummy_blockwise(tmpdir):
                 check_function=self.check_block_func(),
             )
 
-            return task
+            yield task
 
         def init(self):
             pass
