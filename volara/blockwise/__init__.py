@@ -14,7 +14,6 @@ from .components import (
     Predict,
     SeededExtractFrags,
 )
-from .pipeline import MWSPipeline
 
 BlockwiseTasks = TypeAdapter(
     Annotated[
@@ -60,6 +59,5 @@ __all__ = [
     "SeededExtractFrags",
     "Argmax",
     "BlockwiseTask",
-    "MWSPipeline",
     "BlockwiseTasks",
 ]
