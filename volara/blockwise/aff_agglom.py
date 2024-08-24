@@ -183,11 +183,13 @@ class AffAgglom(BlockwiseTask):
 
         rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
 
+    def init(self) -> None:
+        self.db.init()
+
     @contextmanager
     def process_block_func(self) -> Generator[Callable, None, None]:
         affs = self.affs_data.array("r")
         frags = self.frags_data.array("r")
-
         rag_provider = self.db.open("r+")
 
         def process_block(block) -> None:

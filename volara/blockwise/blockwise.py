@@ -2,10 +2,10 @@ import logging
 import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from pathlib import Path
 from shutil import rmtree
 from typing import Optional, Union
-from contextlib import contextmanager
 
 import daisy
 import numpy as np

@@ -1,16 +1,16 @@
 import logging
-from pathlib import Path
 from contextlib import contextmanager
 from itertools import chain, combinations, product
-from typing import Annotated, Literal, Optional, Union
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Annotated, Literal, Optional, Union
 
+import mwatershed as mws
 import numpy as np
 from funlib.geometry import Roi
 from pydantic import Field
 from scipy.ndimage import laplace
 from scipy.spatial import cKDTree
-import mwatershed as mws
 
 from ..dataset import Dataset, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
