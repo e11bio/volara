@@ -252,10 +252,10 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
         prepare_ds(
             self.block_ds,
-            shape=self.write_roi.shape // block_voxel_size,
+            shape=self.write_roi.shape / block_voxel_size,
             offset=self.write_roi.offset,
             voxel_size=block_voxel_size,
-            chunk_shape=block_voxel_size,
+            chunk_shape=self.write_size / block_voxel_size,
             dtype=get_dtype(self.write_roi, self.write_size),
             mode="a",
         )
