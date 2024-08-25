@@ -34,7 +34,6 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
-    "autoapi.extension",  # autobuild api docs
     "sphinx_click",  # auto document cli
     "myst_parser",  # include md files in rst files
 ]
@@ -46,18 +45,6 @@ templates_path = ["_templates"]
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-
-# -- AutoAPI configuration ---------------------------------------------------
-autoapi_dirs = ["../../volara"]
-autoapi_type = "python"
-
-autoapi_options = [
-    "members",
-    "undoc-members",
-    "show-module-summary",
-    "imported-members",
-]
-autoapi_ignore = ["*/cli.py"]
 
 # -- Options for HTML output -------------------------------------------------
 
