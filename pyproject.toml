@@ -19,16 +19,17 @@ requires-python = ">=3.11"
 
 dependencies = [
     "click",
-    "daisy @ git+https://github.com/funkelab/daisy@serial-execution",
+    "daisy >= 1.2",
     "funlib.geometry",
     "funlib.learn.torch @ git+https://github.com/funkelab/funlib.learn.torch",
-    "funlib.persistence @ git+https://github.com/funkelab/funlib.persistence@drop-edges",
-    "gunpowder @ git+https://github.com/funkelab/gunpowder@dev-v1.4",
+    "funlib.persistence >= 0.5.0",
+    "gunpowder >= 1.4.0",
     "mwatershed >= 0.5.1",
     "pydantic == 2.6.3",
     "wandb",
     "torch",
     "dask",
+    "numba",
 ]
 
 [project.optional-dependencies]
