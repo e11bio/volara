@@ -1,5 +1,7 @@
 from typing import Iterable, Union
 
+import numba
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -93,17 +95,14 @@ def seg_to_affgraph(seg, nhood):
     return aff
 
 
-def replace_values(
-    labels: NDArray[np.int_], a: Union[Iterable[int], int], b: Union[Iterable[int]]
-) -> NDArray[np.int_]:
-    if isinstance(a, int):
-        a = iter([a])
-    else:
-        a = iter(a)
-    if isinstance(b, int):
-        b = iter([b])
-    else:
-        b = iter(b)
-    for u, v in zip(a, b):
-        labels[labels == u] = v
-    return labels
+@numba.njit(parallel=True)
+def replace_values(arr, src, dst):
+    shape = arr.shape
+    arr = arr.ravel()
+    label_map = {src[i]: dst[i] for i in range(len(src))}
+    relabeled_arr = np.zeros_like(arr)
+
+    for i in numba.prange(arr.shape[0]):
+        relabeled_arr[i] = label_map.get(arr[i], arr[i])
+
+    return relabeled_arr.reshape(shape)
