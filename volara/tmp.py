@@ -1,9 +1,6 @@
-from typing import Iterable, Union
 
 import numba
-
 import numpy as np
-from numpy.typing import NDArray
 
 
 def seg_to_affgraph(seg, nhood):
