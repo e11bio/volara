@@ -7,11 +7,12 @@ jobs:
     name: Python Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
       - name: Setup checkout
         uses: actions/checkout@master
+
+      - name: Set up uv
+        # Install a specific uv version using the installer
+        run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
+
       - name: Lint with ruff
-        run: |
-          pip install ruff
-          ruff check volara tests
+        run: uvx ruff check volara tests

@@ -22,18 +22,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: "3.11"
-
-      - name: Install package and dependencies
-        run: |
-          pip install uv
-          uv pip install ".[docs]" --system
+      - name: Set up uv
+        # Install a specific uv version using the installer
+        run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
 
       - name: Build documentation
-        run: sphinx-build docs/source docs/build/html -b html
+        run: uv run --extra docs sphinx-build docs/source docs/build/html -b html
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v2
