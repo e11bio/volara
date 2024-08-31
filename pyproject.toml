@@ -69,5 +69,6 @@ module = [
     "mwatershed.*",
     "funlib.math.*",
     "dacapo.*",
+    "numba.*",
 ]
 ignore_missing_imports = true
