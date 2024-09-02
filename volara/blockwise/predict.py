@@ -1,7 +1,7 @@
 import logging
 from contextlib import contextmanager
 from shutil import rmtree
-from typing import Annotated, Callable, Literal, Optional, Union
+from typing import Annotated, Callable, Literal
 
 import daisy
 import gunpowder as gp
@@ -12,7 +12,7 @@ from funlib.persistence import Array
 from gunpowder import ArrayKey, Batch, BatchProvider
 from pydantic import Field
 
-from ..dataset import LSD, Affs, Dataset, Raw
+from ..datasets import LSD, Affs, Dataset, Raw
 from ..models import Checkpoint, DaCapo, Model
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -57,20 +57,20 @@ class ArrayWrite(gp.BatchFilter):
 
 
 OutDataType = Annotated[
-    Union[Raw, Affs, LSD],
+    Raw | Affs | LSD,
     Field(discriminator="dataset_type"),
 ]
 
 
 class Predict(BlockwiseTask):
     task_type: Literal["predict"] = "predict"
-    roi: Optional[tuple[PydanticCoordinate, PydanticCoordinate]] = None
+    roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     checkpoint: Annotated[
-        Union[DaCapo, Checkpoint],
+        DaCapo | Checkpoint,
         Field(discriminator="checkpoint_type"),
     ]
-    in_data: Union[Raw]
-    out_data: list[Optional[OutDataType]]
+    in_data: Raw
+    out_data: list[OutDataType | None]
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False

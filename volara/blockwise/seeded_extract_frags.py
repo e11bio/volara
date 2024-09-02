@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 import daisy
 import mwatershed as mws
@@ -14,7 +14,7 @@ from funlib.persistence import Array
 from pydantic import Field
 from scipy.ndimage.filters import gaussian_filter
 
-from ..dataset import Affs, Dataset, Labels
+from ..datasets import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -25,7 +25,7 @@ logger = logging.getLogger(__file__)
 class SeededExtractFrags(BlockwiseTask):
     task_type: Literal["seeded-extract-frags"] = "seeded-extract-frags"
     db: Annotated[
-        Union[PostgreSQL, SQLite],
+        PostgreSQL | SQLite,
         Field(discriminator="db_type"),
     ]
     affs_data: Affs
@@ -33,7 +33,7 @@ class SeededExtractFrags(BlockwiseTask):
     block_size: PydanticCoordinate
     context: PydanticCoordinate
     bias: list[float]
-    strides: Optional[list[PydanticCoordinate]] = None
+    strides: list[PydanticCoordinate] | None = None
     nml_file: Path = Path(
         "/home/arlo/Desktop/Workspace/Projects/data/skeletons/full_dataset.nml"
     )
