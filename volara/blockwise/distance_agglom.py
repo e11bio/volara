@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from itertools import chain, combinations, product
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 import mwatershed as mws
 import numpy as np
@@ -12,7 +12,7 @@ from pydantic import Field
 from scipy.ndimage import laplace
 from scipy.spatial import cKDTree
 
-from ..dataset import Dataset, Labels, Raw
+from ..datasets import Dataset, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -23,19 +23,16 @@ logger = logging.getLogger(__file__)
 class DistanceAgglom(BlockwiseTask):
     task_type: Literal["distance-agglom"] = "distance-agglom"
     db: Annotated[
-        Union[
-            PostgreSQL,
-            SQLite,
-        ],
+        PostgreSQL | SQLite,
         Field(discriminator="db_type"),
     ]
     frags_data: Labels
     block_size: PydanticCoordinate
     context: PydanticCoordinate
-    distance_keys: Optional[list[str]] = None
-    background_intensities: Optional[list[float]] = None
+    distance_keys: list[str] | None = None
+    background_intensities: list[float] | None = None
     eps: float = 1e-8
-    distance_threshold: Optional[float] = None
+    distance_threshold: float | None = None
     distance_metric: Literal["euclidean", "cosine", "max"] = "cosine"
 
     fit: Literal["shrink"] = "shrink"
@@ -175,7 +172,7 @@ class DistanceAgglomSimple(BlockwiseTask):
     raw_data: Raw
     block_size: PydanticCoordinate
     context: PydanticCoordinate
-    background_intensity: Optional[float] = None
+    background_intensity: float | None = None
     eps: float = 1e-8
     distance_threshold: float
     distance_metric: Literal["euclidean", "cosine", "max"] = "cosine"

@@ -2,11 +2,12 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Sequence
 
 import numpy as np
 import zarr
-from funlib.persistence import open_ds, prepare_ds
+from funlib.geometry import Coordinate
+from funlib.persistence import Array, open_ds, prepare_ds
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -20,15 +21,16 @@ class Dataset(ABC, StrictBaseModel):
     A Dataset base class that defines the common attributes and methods
     for all dataset types.
     """
-    store: Union[str, Path]
 
-    voxel_size: Optional[PydanticCoordinate] = None
-    offset: Optional[PydanticCoordinate] = None
-    axis_names: Optional[list[str]] = None
-    units: Optional[list[str]] = None
+    store: str | Path
+
+    voxel_size: PydanticCoordinate | None = None
+    offset: PydanticCoordinate | None = None
+    axis_names: list[str] | None = None
+    units: list[str] | None = None
 
     @property
-    def name(self):
+    def name(self) -> str:
         """
         A name for this dataset. Often it is simply the name of the
         path provided as the store. We use it to differentiate between
@@ -39,10 +41,21 @@ class Dataset(ABC, StrictBaseModel):
         else:
             return self.store.split("/")[-1]
 
-    def drop(self):
+    def drop(self) -> None:
+        """
+        Delete this dataset
+        """
         rmtree(self.store)
 
-    def prepare(self, shape, chunk_shape, offset, voxel_size, dtype, **ds_kwargs):
+    def prepare(
+        self,
+        shape: Sequence[int],
+        chunk_shape: Sequence[int],
+        offset: Coordinate,
+        voxel_size: Coordinate,
+        dtype,
+        **ds_kwargs: dict[str, Any],
+    ) -> None:
         # prepare ds
         array = prepare_ds(
             self.store,
@@ -55,7 +68,7 @@ class Dataset(ABC, StrictBaseModel):
         )
         array._source_data.attrs.update(ds_kwargs)
 
-    def array(self, mode="r"):
+    def array(self, mode: str = "r") -> Array:
         return open_ds(self.store, mode=mode)
 
     @property
@@ -71,13 +84,14 @@ class Raw(Dataset):
     with provided scale and shifting, or reading in normalization
     bounds from OMERO metadata.
     """
+
     dataset_type: Literal["raw"] = "raw"
-    channels: Optional[list[int]] = None
-    ome_norm: Optional[Union[Path, str]] = None
-    scale_shift: Optional[tuple[float, float]] = None
+    channels: list[int] | None = None
+    ome_norm: Path | str | None = None
+    scale_shift: tuple[float, float] | None = None
 
     @property
-    def bounds(self) -> Optional[list[tuple[float, float]]]:
+    def bounds(self) -> list[tuple[float, float]] | None:
         if self.ome_norm is not None:
             array = open_ds(self.store, mode="r")
             metadata_group = zarr.open(self.ome_norm)
@@ -106,14 +120,9 @@ class Raw(Dataset):
             return norm
 
         def ome_norm(data, bounds):
-            norm = np.zeros(data.shape, np.float32)
             for c, (b_min, b_max) in enumerate(bounds):
-                norm[c] = (data[c] - b_min) / (b_max - b_min)
-            return norm
-
-        def select_channels(data, channels):
-            channel_data = data[channels]
-            return channel_data
+                data[c] = (data[c] - b_min) / (b_max - b_min)
+            return data
 
         metadata = {
             "voxel_size": self.voxel_size if self.voxel_size is not None else None,
@@ -144,6 +153,7 @@ class Affs(Dataset):
     Requires the inclusion of the neighborhood for these
     affinities.
     """
+
     dataset_type: Literal["affs"] = "affs"
     neighborhood: list[PydanticCoordinate]
 
@@ -156,6 +166,7 @@ class LSD(Dataset):
     """
     Represents a dataset containing local shape descriptors.
     """
+
     dataset_type: Literal["lsd"] = "lsd"
 
     @property
@@ -167,6 +178,7 @@ class Labels(Dataset):
     """
     Represents an integer label dataset.
     """
+
     dataset_type: Literal["labels"] = "labels"
 
     @property

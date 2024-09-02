@@ -8,7 +8,7 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.tmp import replace_values
 
-from ..dataset import Dataset, Labels
+from ..datasets import Dataset, Labels
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 

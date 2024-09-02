@@ -4,7 +4,8 @@
 
    overview
    install
-   tutorial
+   .. tutorial
+   
    cli
    api
 

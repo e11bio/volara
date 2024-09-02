@@ -1,33 +1,34 @@
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 import mwatershed as mws
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 
-from ..dataset import Labels
+from ..datasets import Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
 DB = Annotated[
-    Union[PostgreSQL, SQLite],
+    PostgreSQL | SQLite,
     Field(discriminator="db_type"),
 ]
+
 
 class GlobalMWS(BlockwiseTask):
     task_type: Literal["create-lut"] = "create-lut"
     frags_data: Labels
     db: DB
     lut: Path
-    starting_lut: Optional[Path] = None
+    starting_lut: Path | None = None
     bias: dict[str, float]
-    roi: Optional[tuple[PydanticCoordinate, PydanticCoordinate]] = None
+    roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     edge_per_attr: bool = True
-    store_segment_intensities: Optional[dict[str, str]] = None
-    out_db: Optional[DB] = None
+    store_segment_intensities: dict[str, str] | None = None
+    out_db: DB | None = None
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -35,7 +36,6 @@ class GlobalMWS(BlockwiseTask):
     @property
     def task_name(self) -> str:
         return f"{self.frags_data.name}-{self.task_type}"
-
 
     @property
     def write_roi(self) -> Roi:
@@ -155,4 +155,3 @@ class GlobalMWS(BlockwiseTask):
                 out_rag_provider.write_graph(out_graph, block.write_roi)
 
         yield process_block
-

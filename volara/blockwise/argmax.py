@@ -1,11 +1,11 @@
 from contextlib import contextmanager
 from shutil import rmtree
-from typing import Literal, Optional
+from typing import Literal
 
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
-from ..dataset import Dataset, Labels, Raw
+from ..datasets import Dataset, Labels, Raw
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -19,7 +19,7 @@ class Argmax(BlockwiseTask):
     task_type: Literal["argmax"] = "argmax"
     probs_data: Raw
     sem_data: Labels
-    combine_classes: Optional[list[list]] = None
+    combine_classes: list[list[int]] | None = None
     block_size: PydanticCoordinate
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False

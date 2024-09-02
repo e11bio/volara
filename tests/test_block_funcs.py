@@ -19,7 +19,7 @@ from volara.blockwise import (
     Predict,
     SeededExtractFrags,
 )
-from volara.dataset import Affs, Labels, Raw
+from volara.datasets import Affs, Labels, Raw
 from volara.dbs import SQLite
 from volara.models import Checkpoint
 

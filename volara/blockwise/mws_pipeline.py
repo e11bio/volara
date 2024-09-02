@@ -1,21 +1,20 @@
 from pathlib import Path
-from typing import Optional, Union
 
 import daisy
 from funlib.geometry import Roi
 
-from .blockwise.components import (
+from ..datasets import Affs, Labels, Raw
+from ..dbs import PostgreSQL, SQLite
+from ..models import Checkpoint
+from ..utils import PydanticCoordinate
+from ..workers import Worker
+from .components import (
     LUT,
     AffAgglom,
     ExtractFrags,
     GlobalMWS,
     Predict,
 )
-from .dataset import Affs, Labels, Raw
-from .dbs import PostgreSQL, SQLite
-from .models import Checkpoint
-from .utils import PydanticCoordinate
-from .workers import Worker
 
 
 class MWSPipeline:
@@ -26,7 +25,7 @@ class MWSPipeline:
 
     num_cache_workers: int = 1
     num_workers_per_task: int = 1
-    worker_config: Optional[Worker] = None
+    worker_config: Worker | None = None
 
     block_size: PydanticCoordinate
     context: PydanticCoordinate
@@ -38,9 +37,9 @@ class MWSPipeline:
     edge_biases: dict[str, float] = {"adj_weight": -0.0, "lr_weight": -1.0}
     scores: dict[str, list[PydanticCoordinate]]
 
-    affs_model_config: Optional[Checkpoint] = None
+    affs_model_config: Checkpoint | None = None
 
-    db_config: Union[PostgreSQL, SQLite]
+    db_config: PostgreSQL | SQLite
 
     roi: tuple[PydanticCoordinate, PydanticCoordinate]
 
@@ -65,7 +64,7 @@ class MWSPipeline:
         raise NotImplementedError()
 
     @property
-    def affs_pred_config(self) -> Optional[Predict]:
+    def affs_pred_config(self) -> Predict | None:
         if self.affs_model_config is None:
             return None
         else:
@@ -129,7 +128,7 @@ class MWSPipeline:
         )
 
     def task(
-        self, upstream_tasks: Optional[Union[daisy.Task, list[daisy.Task]]] = None
+        self, upstream_tasks: daisy.Task | list[daisy.Task] | None = None
     ) -> daisy.Task:
         assert upstream_tasks is None, "MWSPipeline does not accept upstream tasks!"
 

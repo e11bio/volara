@@ -1,7 +1,7 @@
 import logging
 from contextlib import contextmanager
 from itertools import chain
-from typing import Annotated, Callable, Generator, Literal, Union
+from typing import Annotated, Callable, Generator, Literal
 
 import numpy as np
 from daisy import Block
@@ -12,7 +12,7 @@ from funlib.persistence.graphs.graph_database import GraphDataBase
 from pydantic import Field
 from scipy.ndimage import measurements
 
-from ..dataset import Affs, Dataset, Labels
+from ..datasets import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -29,7 +29,7 @@ class AffAgglom(BlockwiseTask):
     """
     task_type: Literal["aff-agglom"] = "aff-agglom"
     db: Annotated[
-        Union[PostgreSQL, SQLite],
+        PostgreSQL | SQLite,
         Field(discriminator="db_type"),
     ]
     affs_data: Affs

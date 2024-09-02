@@ -1,8 +1,8 @@
-from typing import Annotated, Union
+from typing import Annotated
 
 from pydantic import Field, TypeAdapter
 
-from .blockwise import BlockwiseTask
+from .blockwise import BlockwiseTask as BlockwiseTask
 from .components import (
     LUT,
     AffAgglom,
@@ -17,47 +17,15 @@ from .components import (
 
 BlockwiseTasks = TypeAdapter(
     Annotated[
-        Union[
-            Predict,
-            ExtractFrags,
-            SeededExtractFrags,
-            AffAgglom,
-            DistanceAgglom,
-            DistanceAgglomSimple,
-            GlobalMWS,
-            LUT,
-            Argmax,
-        ],
+        Predict
+        | ExtractFrags
+        | SeededExtractFrags
+        | AffAgglom
+        | DistanceAgglom
+        | DistanceAgglomSimple
+        | GlobalMWS
+        | LUT
+        | Argmax,
         Field(discriminator="task_type"),
     ]
 )
-
-__all__ = [
-    "PostProcess",
-    "Predict",
-    "DB",
-    "SQLite",
-    "PostgreSQL",
-    "Agglom",
-    "MWatershed",
-    "EmbeddingFrags",
-    "Waterz",
-    "Model",
-    "DaCapo",
-    "Checkpoint",
-    "Contrastive",
-    "Raw",
-    "Affs",
-    "Labels",
-    "Worker",
-    "AffAgglom",
-    "DistanceAgglom",
-    "DistanceAgglomSimple",
-    "LUT",
-    "GlobalMWS",
-    "ExtractFrags",
-    "SeededExtractFrags",
-    "Argmax",
-    "BlockwiseTask",
-    "BlockwiseTasks",
-]

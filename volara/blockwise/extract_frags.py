@@ -1,7 +1,7 @@
 import logging
 from contextlib import contextmanager
 from shutil import rmtree
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 import daisy
 import mwatershed as mws
@@ -13,7 +13,7 @@ from scipy.ndimage import measurements
 from scipy.ndimage.filters import gaussian_filter
 from skimage.measure import label as relabel
 
-from ..dataset import Affs, Labels, Raw
+from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
 from ..tmp import replace_values
 from ..utils import PydanticCoordinate
@@ -25,18 +25,18 @@ logger = logging.getLogger(__file__)
 class ExtractFrags(BlockwiseTask):
     task_type: Literal["extract-frags"] = "extract-frags"
     db: Annotated[
-        Union[PostgreSQL, SQLite],
+        PostgreSQL | SQLite,
         Field(discriminator="db_type"),
     ]
     affs_data: Affs
     frags_data: Labels
-    mask_data: Optional[Raw] = None
+    mask_data: Raw | None = None
     block_size: PydanticCoordinate
     context: PydanticCoordinate
-    save_intensities: Optional[dict[str, Raw]] = None
+    save_intensities: dict[str, Raw] | None = None
     bias: list[float]
-    sigma: Optional[PydanticCoordinate] = None
-    noise_eps: Optional[float] = None
+    sigma: PydanticCoordinate | None = None
+    noise_eps: float | None = None
     filter_fragments: float = 0.0
     remove_debris: int = 0
 
@@ -182,7 +182,7 @@ class ExtractFrags(BlockwiseTask):
         affs: Array,
         frags: Array,
         rag_provider,
-        mask: Optional[Array] = None,
+        mask: Array | None = None,
     ):
         # todo: simplify or break into more functions
 

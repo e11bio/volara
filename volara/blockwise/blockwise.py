@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import Optional, Union
 
 import daisy
 import numpy as np
@@ -13,7 +12,7 @@ from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
 from funlib.persistence import open_ds, prepare_ds
 
-from volara.logging import LOG_BASEDIR
+from volara.logging import get_log_basedir
 
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
@@ -22,10 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 class BlockwiseTask(ABC, StrictBaseModel):
-    roi: Optional[tuple[PydanticCoordinate, PydanticCoordinate]] = None
+    roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     num_workers: int = 1
-    num_cache_workers: Optional[int] = None
-    worker_config: Optional[Worker] = None
+    num_cache_workers: int | None = None
+    worker_config: Worker | None = None
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
     fit: str
@@ -55,7 +54,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
     @property
     @abstractmethod
-    def context_size(self) -> Union[Coordinate, tuple[Coordinate, Coordinate]]:
+    def context_size(self) -> Coordinate | tuple[Coordinate, Coordinate]:
         pass
 
     def init(self):
@@ -76,7 +75,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
     @property
     def meta_dir(self) -> Path:
-        return LOG_BASEDIR / f"{self.task_name}-meta"
+        return get_log_basedir() / f"{self.task_name}-meta"
 
     @property
     def config_file(self) -> Path:
@@ -86,7 +85,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def block_ds(self) -> Path:
         return self.meta_dir / "blocks_done.zarr"
 
-    def process_roi(self, roi: Roi, context: Optional[Coordinate] = None):
+    def process_roi(self, roi: Roi, context: Coordinate | None = None):
         block = daisy.Block(
             roi, roi if context is None else roi.grow(context, context), roi
         )
@@ -263,7 +262,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
     @contextmanager
     def task(
         self,
-        upstream_tasks: Optional[Union[daisy.Task, list[daisy.Task]]] = None,
+        upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
     ) -> daisy.Task:
         # create task
@@ -315,7 +314,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
     def run_blockwise(
         self,
-        upstream_tasks: Optional[list[daisy.Task]] = None,
+        upstream_tasks: list[daisy.Task] | None = None,
         multiprocessing: bool = True,
     ):
         self.init_block_array()

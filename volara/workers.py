@@ -1,7 +1,6 @@
 import logging
 import subprocess as sp
 from abc import ABC
-from typing import List, Optional, Union
 
 from .utils import StrictBaseModel
 
@@ -9,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class Worker(ABC, StrictBaseModel):
-    queue: Optional[str] = None
+    queue: str | None = None
     num_gpus: int = 0
     num_cpus: int = 1
 
@@ -41,11 +40,11 @@ class Worker(ABC, StrictBaseModel):
         expand: bool = True,
         job_name: str = "",
         array_size: int = 1,
-        array_limit: Optional[int] = None,
-        log_file: Optional[str] = None,
-        error_file: Optional[str] = None,
-        flags: Optional[List[str]] = None,
-    ) -> Union[str, List[str], None]:
+        array_limit: int = None,
+        log_file: str = None,
+        error_file: str = None,
+        flags: list[str] = None,
+    ) -> str | list[str] | None:
         """
         Prepares and optionally executes a command on a slurm cluster,
 
@@ -66,17 +65,17 @@ class Worker(ABC, StrictBaseModel):
             job_name (str, optional): Name assigned to the Slurm job. Defaults to "".
             array_size (int, optional): If greater than 1, submits a job array of
                 this size. Defaults to 1.
-            array_limit (Optional[int], optional): Limits the number of
+            array_limit (int | None, optional): Limits the number of
                 simultaneously running tasks in the job array. Defaults to None.
-            log_file (Optional[str], optional): Path for standard output logging.
+            log_file (str | None, optional): Path for standard output logging.
                 Defaults to None.
-            error_file (Optional[str], optional): Path for standard error logging.
+            error_file (str | None, optional): Path for standard error logging.
                 Defaults to None.
-            flags (Optional[List[str]], optional): Additional sbatch flags as a
+            flags (list[str] | None, optional): Additional sbatch flags as a
                 list. Defaults to None.
 
         Returns:
-            Union[str, List[str], None]: Depending on `execute` and `expand`,
+            str | list[str] | None: Depending on `execute` and `expand`,
                 returns the job ID (if executed), the constructed command as a string or
                 list, or None if an error occurred.
         """

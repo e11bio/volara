@@ -1,11 +1,14 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 from funlib.persistence.graphs import PgSQLGraphDatabase, SQLiteGraphDataBase
+from funlib.persistence.graphs.graph_database import GraphDataBase
 from funlib.persistence.types import Vec
 
 from .utils import StrictBaseModel
+
+AttrsDict = dict[str, Any]
 
 
 class DB(ABC, StrictBaseModel):
@@ -13,19 +16,71 @@ class DB(ABC, StrictBaseModel):
     A base class for defining the common attributes and methods for all
     database types.
     """
-    node_attrs: Optional[dict[str, Union[str, int]]] = None
-    edge_attrs: Optional[dict[str, Union[str, int]]] = None
+
+    node_attrs: dict[str, str | int] | None = None
+    """
+    node_attrs defines the custom node attributes you may want to save for
+    your super voxels. An example of some custom node attrs is provided here:
+
+        `node_attrs={"raw_intensity": "float"}`
+
+    This adds a float column with name "raw_intensity" to the nodes table
+    in your graph db. You can later use this attribute by name to use this
+    value in a blockwise task.
+    """
+    edge_attrs: dict[str, str | int] | None = None
+    """
+    edge_attrs defines the custom edge attributes you may want to save between
+    your super voxels. An example of some custom edge attrs is provided here:
+
+        `edge_attrs={"z_aff": "float", "y_aff": "float", "x_aff": "float"}`
+
+    This adds a float columns with names ["{zyx}_affinity"] to the edges table
+    in your graph db. You can later use these attributes by name to use these
+    values in a blockwise task.
+    """
 
     @property
-    def default_node_attrs(self) -> dict[str, Union[Any]]:
+    def default_node_attrs(self) -> AttrsDict:
+        """
+        The type definitions for the default node attributes stored in our database.
+
+        Our DBs will always store supervoxels with the following attributes:
+
+        position: `(float, float, float)`:
+
+            The center of mass of the supervoxel
+
+        size: `int`:
+
+            the number of voxels in this supervoxel
+
+        filtered: `bool`:
+
+            whether or not this fragment has been filtered out
+
+        """
         return {"position": Vec(float, 3), "size": int, "filtered": bool}
 
     @property
-    def default_edge_attrs(self):
+    def default_edge_attrs(self) -> AttrsDict:
+        """
+        The type definitions for the default edge attributes stored in our database.
+
+        Our DBs will always store edges between supervoxels with the following attributes:
+
+        distance: `float`:
+
+            The distance between center of masses of our super voxels
+
+        """
         return {"distance": float}
 
     @property
-    def graph_attrs(self):
+    def graph_attrs(self) -> tuple[AttrsDict, AttrsDict]:
+        """
+        Get all node and edge attributes including default and user provided attributes
+        """
         node_attrs = self.node_attrs if self.node_attrs is not None else {}
         node_attrs = {
             k: (Vec(float, v) if isinstance(v, int) else eval(v))
@@ -41,21 +96,34 @@ class DB(ABC, StrictBaseModel):
         return node_attrs, edge_attrs
 
     @abstractmethod
-    def open(self):
+    def open(self) -> GraphDataBase:
+        """
+        Return a `funlib.persistence.graphs.GraphDB` instance.
+        """
         pass
 
-    def init(self):
+    def init(self) -> None:
+        """
+        Create database if it doesn't exist yet.
+        """
         try:
             self.open("r")
         except RuntimeError:
             self.open("w")
 
     @abstractmethod
-    def drop(self):
+    def drop(self) -> None:
+        """
+        Drop all nodes (supervoxels), edges, and metadata
+        """
         pass
 
     @abstractmethod
-    def drop_edges(self):
+    def drop_edges(self) -> None:
+        """
+        Drop all edges between nodes (supervoxels) leaving the nodes and metadata
+        in tact.
+        """
         pass
 
 
@@ -63,10 +131,18 @@ class SQLite(DB):
     """
     An SQLite database for storing and retrieving graph data.
     """
-    db_type: Literal["sqlite"] = "sqlite"
-    path: Path
 
-    def open(self, mode="r"):
+    db_type: Literal["sqlite"] = "sqlite"
+    """
+    A literal used for pydantic serialization and deserialization of
+    DB Union types.
+    """
+    path: Path
+    """
+    The path to the SQLite db file to use.
+    """
+
+    def open(self, mode="r") -> SQLiteGraphDataBase:
         node_attrs, edge_attrs = self.graph_attrs
 
         return SQLiteGraphDataBase(
@@ -77,14 +153,14 @@ class SQLite(DB):
             mode=mode,
         )
 
-    def drop(self):
+    def drop(self) -> None:
         if self.path.exists():
             self.path.unlink()
         meta_path = self.path.parent / f"{self.path.stem}-meta.json"
         if meta_path.exists():
             meta_path.unlink()
 
-    def drop_edges(self):
+    def drop_edges(self) -> None:
         db = self.open("a")
         db._drop_edges()
         db._create_tables()
@@ -94,13 +170,14 @@ class PostgreSQL(DB):
     """
     A PostgreSQL database for storing and retrieving graph data.
     """
-    db_type: Literal["postgresql"] = "postgresql"
-    host: Optional[str] = None
-    name: Optional[str] = None
-    user: Optional[str] = None
-    password: Optional[str] = None
 
-    def open(self, mode="r"):
+    db_type: Literal["postgresql"] = "postgresql"
+    host: str | None = None
+    name: str | None = None
+    user: str | None = None
+    password: str | None = None
+
+    def open(self, mode="r") -> PgSQLGraphDatabase:
         node_attrs, edge_attrs = self.graph_attrs
 
         return PgSQLGraphDatabase(
@@ -114,12 +191,12 @@ class PostgreSQL(DB):
             mode=mode,
         )
 
-    def drop(self):
+    def drop(self) -> None:
         db = self.open("a")
         db._drop_tables()
         db._create_tables()
 
-    def drop_edges(self):
+    def drop_edges(self) -> None:
         db = self.open("a")
         db._drop_edges()
         db._create_tables()

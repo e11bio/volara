@@ -186,7 +186,7 @@ running a watershed within each chunk we process.
 .. jupyter-execute::
 
   from volara.blockwise import ExtractFrags
-  from volara.dataset import Affs, Labels
+  from volara.datasets import Affs, Labels
   from volara.dbs import SQLite
 
   # Configure your db

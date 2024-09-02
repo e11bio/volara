@@ -1,6 +1,5 @@
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, Union
 
 import daisy
 import numpy as np
@@ -12,7 +11,7 @@ from skimage import data
 from skimage.filters import gaussian
 
 from volara.blockwise import AffAgglom, BlockwiseTask
-from volara.dataset import Affs, Labels
+from volara.datasets import Affs, Labels
 from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
 
@@ -146,7 +145,7 @@ def test_dummy_blockwise(tmpdir):
         @contextmanager
         def task(
             self,
-            upstream_tasks: Optional[Union[daisy.Task, list[daisy.Task]]] = None,
+            upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
             multiprocessing: bool = False,
         ) -> daisy.Task:
             if multiprocessing:
