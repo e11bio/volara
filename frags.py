@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Literal, Optional
+from typing import Literal
 
 import mwatershed as mws
 import numpy as np
@@ -561,7 +561,7 @@ class Agglom(ABC, StrictBaseModel):
     fragments_in_xy: bool = False
     filter_fragments: float = 0.0
     remove_debris: int = 0
-    epsilon_agglomerate: Optional[float] = None
+    epsilon_agglomerate: float | None = None
 
     @abstractmethod
     def compute_fragments(self, affs_data):
@@ -604,9 +604,9 @@ class MWatershed(Agglom):
     agglom_type: Literal["mwatershed"] = "mwatershed"
     bias: list[float]
     neighborhood: list[PydanticCoordinate]
-    strides: Optional[list[PydanticCoordinate]] = None
-    sigma: Optional[PydanticCoordinate] = None
-    noise_eps: Optional[float] = None
+    strides: list[PydanticCoordinate] | None = None
+    sigma: PydanticCoordinate | None = None
+    noise_eps: float | None = None
 
     def agglomerate(self, affs, frags, rag):
         from funlib.math import inv_cantor_number

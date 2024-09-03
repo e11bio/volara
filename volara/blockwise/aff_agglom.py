@@ -22,37 +22,65 @@ logger = logging.getLogger(__file__)
 
 class AffAgglom(BlockwiseTask):
     """
-    A blockwise task that performs affinity agglomeration on a given
-    set of affinities and fragments. Will compute the mean affinity
-    between fragments bridged by the affinities and add edges to the
-    provided database.
+    A blockwise task that computes edges between supervoxels
+    sharing affinity edges and stores statistics such as the
+    mean affinity value between the supervoxels.
     """
+
     task_type: Literal["aff-agglom"] = "aff-agglom"
     db: Annotated[
         PostgreSQL | SQLite,
         Field(discriminator="db_type"),
     ]
+    """
+    The database containing nodes associated with the fragment supervoxels
+    to which we will add the supervoxel edge affinity statistics
+    """
     affs_data: Affs
+    """
+    The affs to read for creating supervoxel affinity statistics
+    """
     frags_data: Labels
+    """
+    The labels array containing the supervoxels for computing affinity statistics
+    """
     block_size: PydanticCoordinate
+    """
+    The blocksize within which to compute supervoxel affinity statistics
+    """
     context: PydanticCoordinate
+    """
+    The amount of context to use when computing supervoxel affinity statistics
+    """
     scores: dict[str, list[PydanticCoordinate]]
     """
     A dictionary of score names and their respective neighborhoods.
-    This allows us to compute the mean affinity in subgroups of the
+    This allows us to compute the affinity statistics in subgroups of the
     neighborhood. For example if you wanted to compute the mean affinity
     between fragments in x and y separately from z, you would provide
     a dictionary like so:
+
         scores = {
             "xy": [(1, 0, 0), (0, 1, 0)],
             "z": [(0, 0, 1)]
         }
+
     """
     fit: Literal["shrink"] = "shrink"
+    """
+    The boundary behavior for our daisy task.
+    """
     read_write_conflict: Literal[False] = False
+    """
+    We don't have read write conflicts in this task and can compute
+    every block independently in an arbitrary order.
+    """
 
     @property
     def neighborhood(self):
+        """
+        The affinity neighborhood read from `self.affs_data`
+        """
         return self.affs_data.neighborhood
 
     @property

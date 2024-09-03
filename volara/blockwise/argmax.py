@@ -18,9 +18,23 @@ class Argmax(BlockwiseTask):
 
     task_type: Literal["argmax"] = "argmax"
     probs_data: Raw
+    """
+    The dataset containing raw probabilities for which you want to
+    compute the argmax.
+    """
     sem_data: Labels
+    """
+    The dataset in which we will store the final semantic labels.
+    """
     combine_classes: list[list[int]] | None = None
+    """
+    A list of lists containing the ids to combine. All channels in `combine_classes[i]`
+    will be summed into a new channel `i` before computing the argmax.
+    """
     block_size: PydanticCoordinate
+    """
+    The block size with which to chunk our argmax task.
+    """
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
 
