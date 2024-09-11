@@ -30,14 +30,14 @@ Models
 .. .. autoclass:: volara.models.Model
 ..     :members:
 
-Datasets
---------
+.. Datasets
+.. --------
 
-.. automodule:: volara.datasets
-    :members:
+.. .. automodule:: volara.datasets
+..     :members:
 
-Blockwise Tasks
----------------
+.. Blockwise Tasks
+.. ---------------
 
-.. automodule:: volara.blockwise
-    :members:
+.. .. automodule:: volara.blockwise
+..     :members:
