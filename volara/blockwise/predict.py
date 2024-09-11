@@ -121,12 +121,14 @@ class Predict(BlockwiseTask):
             self.out_data, self.checkpoint_config.num_out_channels
         ):
             if out_data is not None:
+                shape = (num_channels, *(self.write_roi.shape / self.voxel_size))
+                chunk_shape = (num_channels, *self.write_size / self.voxel_size)
                 out_data.prepare(
-                    self.write_roi,
-                    self.voxel_size,
-                    self.write_size,
-                    self._out_array_dtype,
-                    num_channels,
+                    shape=shape,
+                    chunk_shape=chunk_shape,
+                    offset=self.write_roi.offset,
+                    voxel_size=self.voxel_size,
+                    dtype=self._out_array_dtype,
                     kwargs=out_data.attrs,
                 )
 
