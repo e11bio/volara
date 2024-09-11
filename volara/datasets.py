@@ -139,11 +139,11 @@ class Raw(Dataset):
         )
 
         if self.ome_norm:
-            array.adapt(lambda data: ome_norm(data, self.bounds))
+            array.lazy_op(lambda data: ome_norm(data, self.bounds))
         if self.scale_shift is not None:
-            array.adapt(lambda data: scale_shift(data, self.scale_shift))
+            array.lazy_op(lambda data: scale_shift(data, self.scale_shift))
         if self.channels is not None:
-            array.adapt(np.s_[self.channels])
+            array.lazy_op(np.s_[self.channels])
 
         return array
 
