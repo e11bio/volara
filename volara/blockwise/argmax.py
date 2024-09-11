@@ -73,14 +73,15 @@ class Argmax(BlockwiseTask):
 
     def init_out_array(self):
         # get data from in_array
-        voxel_size = self.probs_data.array("r").voxel_size
+        shape = self.write_roi.shape // self.voxel_size
+        chunk_shape = self.write_size // self.voxel_size
 
         self.sem_data.prepare(
-            self.write_roi,
-            voxel_size,
-            self.write_size,
+            shape,
+            chunk_shape,
+            self.write_roi.offset,
+            self.voxel_size,
             self._out_array_dtype,
-            None,
             kwargs=self.sem_data.attrs,
         )
 

@@ -31,8 +31,9 @@ class ArraySource(BatchProvider):
 
     def provide(self, request):
         outputs = Batch()
+        data = self.array[request[self.key].roi]
         outputs[self.key] = gp.Array(
-            data=self.array.to_ndarray(roi=request[self.key].roi, fill_value=0),
+            data=data,
             spec=gp.ArraySpec(
                 roi=request[self.key].roi,
                 voxel_size=self.array.voxel_size,
@@ -102,7 +103,7 @@ class Predict(BlockwiseTask):
 
     @property
     def task_name(self) -> str:
-        return f"{self.in_data.name}-{self.task_type}"
+        return f"{'-'.join(dataset.name for dataset in self.output_datasets)}-{self.task_type}"
 
     @property
     def output_datasets(self) -> list[Dataset]:
@@ -120,6 +121,8 @@ class Predict(BlockwiseTask):
         for out_data, num_channels in zip(
             self.out_data, self.checkpoint_config.num_out_channels
         ):
+            if num_channels is None:
+                num_channels = self.in_data.array("r").shape[0]
             if out_data is not None:
                 shape = (num_channels, *(self.write_roi.shape / self.voxel_size))
                 chunk_shape = (num_channels, *self.write_size / self.voxel_size)

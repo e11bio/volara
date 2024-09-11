@@ -161,9 +161,12 @@ class SQLite(DB):
             meta_path.unlink()
 
     def drop_edges(self) -> None:
-        db = self.open("a")
-        db._drop_edges()
-        db._create_tables()
+        try:
+            db = self.open("r+")
+            db._drop_edges()
+            db._create_tables()
+        except RuntimeError:
+            pass
 
 
 class PostgreSQL(DB):

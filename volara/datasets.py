@@ -115,6 +115,7 @@ class Raw(Dataset):
 
     def array(self, mode="r"):
         def scale_shift(data, scale_shift):
+            data = data.astype(np.float32)
             scale, shift = scale_shift
             norm = data * scale + shift
             return norm

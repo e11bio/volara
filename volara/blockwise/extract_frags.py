@@ -12,6 +12,7 @@ from pydantic import Field
 from scipy.ndimage import measurements
 from scipy.ndimage.filters import gaussian_filter
 from skimage.measure import label as relabel
+from skimage.morphology import remove_small_objects
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
@@ -112,7 +113,7 @@ class ExtractFrags(BlockwiseTask):
 
         filtered_fragments = np.array(filtered_fragments, dtype=fragments_data.dtype)
         replace = np.zeros_like(filtered_fragments)
-        replace_values(fragments_data, filtered_fragments, replace, inplace=True)
+        replace_values(fragments_data, filtered_fragments, replace)
 
     def get_fragments(self, affs_data):
         fragments_data = self.compute_fragments(affs_data)
@@ -129,7 +130,7 @@ class ExtractFrags(BlockwiseTask):
         if self.remove_debris > 0:
             fragments_dtype = fragments_data.dtype
             fragments_data = fragments_data.astype(np.int64)
-            self.remove_small_objects(fragments_data, min_size=self.remove_debris)
+            fragments_data = remove_small_objects(fragments_data, min_size=self.remove_debris)
             fragments_data = fragments_data.astype(fragments_dtype)
 
         return fragments_data
