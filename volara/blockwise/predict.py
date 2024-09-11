@@ -72,7 +72,7 @@ class Predict(BlockwiseTask):
     in_data: Raw
     out_data: list[OutDataType | None]
 
-    fit: Literal["shrink"] = "shrink"
+    fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
