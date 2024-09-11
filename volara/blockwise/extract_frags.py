@@ -60,11 +60,11 @@ class ExtractFrags(BlockwiseTask):
         return total_roi
 
     @property
-    def write_size(self) -> PydanticCoordinate:
+    def write_size(self) -> Coordinate:
         return self.block_size * self.affs_data.array("r").voxel_size
 
     @property
-    def context_size(self) -> PydanticCoordinate:
+    def context_size(self) -> Coordinate:
         return self.context * self.affs_data.array("r").voxel_size
 
     @property

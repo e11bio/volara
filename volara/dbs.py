@@ -82,21 +82,21 @@ class DB(ABC, StrictBaseModel):
         Get all node and edge attributes including default and user provided attributes
         """
         node_attrs = self.node_attrs if self.node_attrs is not None else {}
-        node_attrs = {
+        parsed_node_attrs = {
             k: (Vec(float, v) if isinstance(v, int) else eval(v))
             for k, v in node_attrs.items()
         }
-        node_attrs = {**self.default_node_attrs, **node_attrs}
+        parsed_node_attrs = {**self.default_node_attrs, **parsed_node_attrs}
         edge_attrs = self.edge_attrs if self.edge_attrs is not None else {}
-        edge_attrs = {
+        parsed_edge_attrs = {
             k: (Vec(float, v) if isinstance(v, int) else eval(v))
             for k, v in edge_attrs.items()
         }
-        edge_attrs = {**self.default_edge_attrs, **edge_attrs}
-        return node_attrs, edge_attrs
+        parsed_edge_attrs = {**self.default_edge_attrs, **parsed_edge_attrs}
+        return parsed_node_attrs, parsed_edge_attrs
 
     @abstractmethod
-    def open(self) -> GraphDataBase:
+    def open(self, mode: str = "r") -> GraphDataBase:
         """
         Return a `funlib.persistence.graphs.GraphDB` instance.
         """
@@ -172,8 +172,8 @@ class PostgreSQL(DB):
     """
 
     db_type: Literal["postgresql"] = "postgresql"
-    host: str | None = None
-    name: str | None = None
+    host: str = "localhost"
+    name: str = "volara"
     user: str | None = None
     password: str | None = None
 

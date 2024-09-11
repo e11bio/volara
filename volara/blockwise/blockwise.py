@@ -177,6 +177,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
         """
         A function to check whether a block has been completed.
         """
+
         def check_block(block):
             block_array = open_ds(self.block_ds, mode="r")
             offset = block.write_roi.offset
@@ -195,6 +196,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
         A helper function to mark a block as completed so that it
         can be skipped if we have to pause and resume processing later.
         """
+
         def write_check_block(block):
             block_array = open_ds(self.block_ds, mode="a")
             write_roi = block.write_roi.intersect(block_array.roi)
@@ -425,3 +427,4 @@ class BlockwiseTask(ABC, StrictBaseModel):
                 server = daisy.SerialServer()
                 cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
                 server.run_blockwise([task])
+

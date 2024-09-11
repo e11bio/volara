@@ -5,7 +5,7 @@ from typing import Annotated, Callable, Generator, Literal
 
 import numpy as np
 from daisy import Block
-from funlib.geometry import Roi
+from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
 from funlib.persistence.arrays import Array
 from funlib.persistence.graphs.graph_database import GraphDataBase
@@ -95,11 +95,11 @@ class AffAgglom(BlockwiseTask):
         return total_roi
 
     @property
-    def write_size(self) -> PydanticCoordinate:
+    def write_size(self) -> Coordinate:
         return self.block_size * self.frags_data.array("r").voxel_size
 
     @property
-    def context_size(self) -> PydanticCoordinate:
+    def context_size(self) -> Coordinate:
         return self.context * self.frags_data.array("r").voxel_size
 
     @property

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 import mwatershed as mws
 import numpy as np
-from funlib.geometry import Roi
+from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 from scipy.ndimage import laplace
 from scipy.spatial import cKDTree
@@ -50,11 +50,11 @@ class DistanceAgglom(BlockwiseTask):
         return total_roi
 
     @property
-    def write_size(self) -> PydanticCoordinate:
+    def write_size(self) -> Coordinate:
         return self.block_size * self.frags_data.array("r").voxel_size
 
     @property
-    def context_size(self) -> PydanticCoordinate:
+    def context_size(self) -> Coordinate:
         return self.context * self.frags_data.array("r").voxel_size
 
     @property
@@ -195,11 +195,11 @@ class DistanceAgglomSimple(BlockwiseTask):
         return total_roi
 
     @property
-    def write_size(self) -> PydanticCoordinate:
+    def write_size(self) -> Coordinate:
         return self.block_size * self.frags_data.array("r").voxel_size
 
     @property
-    def context_size(self) -> PydanticCoordinate:
+    def context_size(self) -> Coordinate:
         return self.context * self.frags_data.array("r").voxel_size
 
     @property

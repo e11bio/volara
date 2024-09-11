@@ -8,7 +8,7 @@ class Pipeline():
     A class to manage combinations of `BlockwiseTask`s that are grouped
     together in a pipeline.
     """
-    task_graph: nx.DiGraph()
+    task_graph: nx.DiGraph
 
     def __init__(self, task_graph: nx.DiGraph):
         self.task_graph = task_graph
@@ -20,7 +20,7 @@ class Pipeline():
         This means that every node in `self` without outgoing edges
         gets an edge to all nodes in `task` without incoming edges.
         """
-        pass
+        raise NotImplementedError()
 
     def __addl__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
         """
@@ -29,7 +29,7 @@ class Pipeline():
         This means that every node in `task` without outgoing edges
         gets an edge to all nodes in `self` without incoming edges.
         """
-        pass
+        raise NotImplementedError()
 
     def __or__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
         """
@@ -37,7 +37,7 @@ class Pipeline():
 
         Task graphs are merged, but no edges are added.
         """
-        pass
+        raise NotImplementedError()
 
     def __ror__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
         """
@@ -45,5 +45,5 @@ class Pipeline():
 
         Task graphs are merged, but no edges are added.
         """
-        pass
+        raise NotImplementedError()
 

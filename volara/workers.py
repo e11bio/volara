@@ -40,10 +40,10 @@ class Worker(ABC, StrictBaseModel):
         expand: bool = True,
         job_name: str = "",
         array_size: int = 1,
-        array_limit: int = None,
-        log_file: str = None,
-        error_file: str = None,
-        flags: list[str] = None,
+        array_limit: int | None = None,
+        log_file: str | None = None,
+        error_file: str | None = None,
+        flags: list[str] | None = None,
     ) -> str | list[str] | None:
         """
         Prepares and optionally executes a command on a slurm cluster,
