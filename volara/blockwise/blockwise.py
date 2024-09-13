@@ -421,10 +421,20 @@ class BlockwiseTask(ABC, StrictBaseModel):
         self.init_block_array()
         self.init()
         with self.task(upstream_tasks, multiprocessing) as task:
+            if upstream_tasks is None:
+                tasks = [task]
+            elif isinstance(upstream_tasks, list):
+                tasks = upstream_tasks + [task]
+            elif isinstance(upstream_tasks, daisy.Task):
+                tasks = [upstream_tasks, task]
+            else:
+                raise NotImplementedError(
+                    f"upstream tasks {upstream_tasks} with type {type(upstream_tasks)} not supported. "
+                    "Please provide a daisy.Task or a list of daisy.Task objects."
+                )
             if multiprocessing:
-                daisy.run_blockwise([task])
+                daisy.run_blockwise(tasks)
             else:
                 server = daisy.SerialServer()
                 cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
-                server.run_blockwise([task])
-
+                server.run_blockwise(tasks)
