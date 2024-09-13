@@ -3,11 +3,12 @@ import networkx as nx
 from .blockwise import BlockwiseTask
 
 
-class Pipeline():
+class Pipeline:
     """
     A class to manage combinations of `BlockwiseTask`s that are grouped
     together in a pipeline.
     """
+
     task_graph: nx.DiGraph
 
     def __init__(self, task_graph: nx.DiGraph):
@@ -46,4 +47,3 @@ class Pipeline():
         Task graphs are merged, but no edges are added.
         """
         raise NotImplementedError()
-

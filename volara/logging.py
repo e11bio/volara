@@ -25,6 +25,7 @@ def set_log_basedir(path: Path):
 
     daisy.logging.set_log_basedir(LOG_BASEDIR)
 
+
 def get_log_basedir():
     """Get the base directory for logging (indivudal worker logs and detailed
     task summaries).

@@ -130,7 +130,9 @@ class ExtractFrags(BlockwiseTask):
         if self.remove_debris > 0:
             fragments_dtype = fragments_data.dtype
             fragments_data = fragments_data.astype(np.int64)
-            fragments_data = remove_small_objects(fragments_data, min_size=self.remove_debris)
+            fragments_data = remove_small_objects(
+                fragments_data, min_size=self.remove_debris
+            )
             fragments_data = fragments_data.astype(fragments_dtype)
 
         return fragments_data

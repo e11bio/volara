@@ -190,6 +190,7 @@ def test_dummy_blockwise(tmpdir):
     config = DummyTask()
     config.run_blockwise(multiprocessing=False)
 
+
 @pytest.mark.skip(reason="pytest quitting for some reason")
 def test_aff_agglom(affs, labels, tmp_path):
     affs_array, affs_path = affs
