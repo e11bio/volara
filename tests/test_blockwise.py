@@ -118,7 +118,10 @@ def test_dummy_blockwise(tmpdir):
         task_type: str = "dummy"
         fit: str = "shrink"
         read_write_conflict: bool = False
-        task_name: str = "dummy"
+
+        @property
+        def task_name(self) -> str:
+            return "dummy"
 
         @property
         def write_roi(self):
@@ -141,48 +144,6 @@ def test_dummy_blockwise(tmpdir):
 
         def drop_artifacts(self):
             pass
-
-        @contextmanager
-        def task(
-            self,
-            upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
-            multiprocessing: bool = False,
-        ) -> daisy.Task:
-            if multiprocessing:
-                # create task
-                task = daisy.Task(
-                    self.task_type,
-                    total_roi=self.write_roi,
-                    read_roi=Roi((0, 0), (10, 10)),
-                    write_roi=Roi((0, 0), (10, 10)),
-                    process_function=self.worker_func(),
-                    read_write_conflict=False,
-                    fit="shrink",
-                    num_workers=1,
-                    check_function=self.check_block_func(),
-                )
-            else:
-                with self.process_block_func() as process_block:
-                    process_block = process_block
-                    mark_block = self.mark_block_done_func()
-
-                    def process_func(block):
-                        process_block(block)
-                        mark_block(block)
-
-                    task = daisy.Task(
-                        self.task_type,
-                        total_roi=self.write_roi,
-                        read_roi=Roi((0, 0), (10, 10)),
-                        write_roi=Roi((0, 0), (10, 10)),
-                        process_function=process_func,
-                        read_write_conflict=False,
-                        fit="shrink",
-                        num_workers=1,
-                        check_function=self.check_block_func(),
-                    )
-
-            yield task
 
         def init(self):
             pass
