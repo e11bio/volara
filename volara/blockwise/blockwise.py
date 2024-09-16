@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import rmtree
+from typing import TYPE_CHECKING
 
 import daisy
 import numpy as np
@@ -16,6 +17,9 @@ from volara.logging import get_log_basedir
 
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
+
+if TYPE_CHECKING:
+    from .pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,9 @@ class BlockwiseTask(ABC, StrictBaseModel):
     Whether blocks have read/write dependencies on neighborhing blocks requiring
     a specific ordering to the block processing to compute a seamless result.
     """
+
+    def __hash__(self):
+        return hash(self.task_name)
 
     # TODO: do we still want task_type as a property?
 
@@ -363,6 +370,11 @@ class BlockwiseTask(ABC, StrictBaseModel):
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.
         """
+
+        # initialize the arrays the task operates on
+        self.init_block_array()
+        self.init()
+
         # create task
         context = self.context_size
         if not isinstance(context, Coordinate):
@@ -407,7 +419,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
         yield task
 
-        if self.num_workers is None:
+        if not multiprocessing:
             process_block_func.__exit__(None, None, None)
 
     def run_blockwise(
@@ -418,8 +430,6 @@ class BlockwiseTask(ABC, StrictBaseModel):
         """
         Execute this task blockwise.
         """
-        self.init_block_array()
-        self.init()
         with self.task(upstream_tasks, multiprocessing) as task:
             if upstream_tasks is None:
                 tasks = [task]
@@ -438,3 +448,42 @@ class BlockwiseTask(ABC, StrictBaseModel):
                 server = daisy.SerialServer()
                 cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
                 server.run_blockwise(tasks)
+
+    def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
+        """
+        The task or pipeline (`task`) gets run in series after `self`.
+
+        This means that every node in `self` without outgoing edges
+        gets an edge to all nodes in `task` without incoming edges.
+        """
+        from .pipeline import Pipeline
+
+        print("Task add")
+
+        if isinstance(other, Pipeline):
+            return Pipeline(self) + other
+        elif isinstance(other, BlockwiseTask):
+            return Pipeline(self) + Pipeline(other)
+        else:
+            raise NotImplementedError(
+                f"We do not support other with type {type(other)}"
+            )
+
+    def __or__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
+        """
+        The task or pipeline (`task`) gets run in parallel with `self`.
+
+        Task graphs are merged, but no edges are added.
+        """
+        from .pipeline import Pipeline
+
+        print("Task or")
+
+        if isinstance(other, Pipeline):
+            return Pipeline(self) | other
+        elif isinstance(other, BlockwiseTask):
+            return Pipeline(self) | Pipeline(other)
+        else:
+            raise NotImplementedError(
+                f"We do not support other with type {type(other)}"
+            )

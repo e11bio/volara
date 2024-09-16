@@ -1,6 +1,12 @@
+from contextlib import ExitStack
+from itertools import product
+from typing import TYPE_CHECKING, Generator
+
+import daisy
 import networkx as nx
 
-from .blockwise import BlockwiseTask
+if TYPE_CHECKING:
+    from .blockwise import BlockwiseTask
 
 
 class Pipeline:
@@ -11,39 +17,92 @@ class Pipeline:
 
     task_graph: nx.DiGraph
 
-    def __init__(self, task_graph: nx.DiGraph):
-        self.task_graph = task_graph
+    def __init__(self, task: "BlockwiseTask | None" = None):
+        self.task_graph = nx.DiGraph()
+        if task is not None:
+            self.task_graph.add_node(task)
 
-    def __addr__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
+    def __add__(self, other: "Pipeline | BlockwiseTask") -> "Pipeline":
         """
         The task or pipeline (`task`) gets run in series after `self`.
 
         This means that every node in `self` without outgoing edges
         gets an edge to all nodes in `task` without incoming edges.
         """
-        raise NotImplementedError()
+        from volara.blockwise import BlockwiseTask
 
-    def __addl__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
-        """
-        The task or pipeline (`task`) gets run in series before `self`.
+        if isinstance(other, BlockwiseTask):
+            other = Pipeline(other)
+        sink_nodes = [
+            task
+            for task in self.task_graph.nodes()
+            if self.task_graph.out_degree(task) == 0
+        ]
+        source_nodes = [
+            task
+            for task in other.task_graph.nodes()
+            if other.task_graph.in_degree(task) == 0
+        ]
 
-        This means that every node in `task` without outgoing edges
-        gets an edge to all nodes in `self` without incoming edges.
-        """
-        raise NotImplementedError()
+        combined_pipeline = Pipeline()
+        combined_graph = combined_pipeline.task_graph
+        combined_graph.add_nodes_from(self.task_graph.nodes())
+        combined_graph.add_edges_from(self.task_graph.edges())
+        combined_graph.add_nodes_from(other.task_graph.nodes())
+        combined_graph.add_edges_from(other.task_graph.edges())
+        for sink, source in product(sink_nodes, source_nodes):
+            combined_graph.add_edge(sink, source)
 
-    def __or__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
+        return combined_pipeline
+
+    def __or__(self, other: "Pipeline | BlockwiseTask") -> "Pipeline":
         """
         The task or pipeline (`task`) gets run in parallel with `self`.
 
         Task graphs are merged, but no edges are added.
         """
-        raise NotImplementedError()
+        from volara.blockwise import BlockwiseTask
 
-    def __ror__(self, task: BlockwiseTask | "Pipeline") -> "Pipeline":
-        """
-        The task or pipeline ('task') gets run in parallel with `self`.
+        if isinstance(other, BlockwiseTask):
+            other = Pipeline(other)
 
-        Task graphs are merged, but no edges are added.
-        """
-        raise NotImplementedError()
+        combined_pipeline = Pipeline()
+        combined_graph = combined_pipeline.task_graph
+        combined_graph.add_nodes_from(self.task_graph.nodes())
+        combined_graph.add_edges_from(self.task_graph.edges())
+        combined_graph.add_nodes_from(other.task_graph.nodes())
+        combined_graph.add_edges_from(other.task_graph.edges())
+
+        return combined_pipeline
+
+    def run_blockwise(self, multiprocessing: bool = True):
+        with ExitStack() as stack:
+            node_ordering: list[BlockwiseTask] = list(nx.topological_sort(self.task_graph))
+
+            print([node.task_name for node in node_ordering])
+
+            task_map = {}
+            sinks = []
+            for node in node_ordering:
+                upstream_nodes = list(self.task_graph.predecessors(node))
+                print(
+                    node.task_name, [upstream.task_name for upstream in upstream_nodes]
+                )
+                upstream_tasks = [
+                    task_map[upstream]
+                    for upstream in self.task_graph.predecessors(node)
+                ]
+                task = node.task(upstream_tasks=upstream_tasks, multiprocessing=multiprocessing)
+                task = stack.enter_context(task)
+                task_map[node] = task
+                if self.task_graph.out_degree(node) == 0:
+                    sinks.append(task)
+
+            all_tasks = task_map.values()
+
+            if multiprocessing:
+                daisy.run_blockwise(all_tasks)
+            else:
+                server = daisy.SerialServer()
+                cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                server.run_blockwise(all_tasks)
