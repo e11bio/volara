@@ -77,6 +77,65 @@ class Model(ABC, StrictBaseModel):
         return data.astype(np.float32) / 255
 
 
+class JitModel(Model):
+    checkpoint_type: Literal["jit"] = "jit"
+    jit_path: Path
+    checkpoint_file: Path
+    meta_file: Path
+    pred_size_growth: PydanticCoordinate | None = None
+
+    def model(self):
+        import torch
+
+        model = torch.jit.load(self.jit_path, map_location="cpu")
+
+        model.load_state_dict(
+            torch.load(self.checkpoint_file, map_location="cpu")["model_state_dict"]
+        )
+        model.num_in_channels = self.conf["in_channels"]
+
+        return model
+
+    @property
+    def conf(self) -> dict:
+        with open(self.meta_file) as f:
+            meta_data = json.load(f)
+        return meta_data
+
+    @property
+    def eval_input_shape(self) -> Coordinate:
+        input_shape = Coordinate(self.conf["min_input_shape"])
+
+        assert (
+            np.sum(self.pred_size_growth % Coordinate(self.conf["min_step_shape"])) == 0
+        )
+        if self.pred_size_growth is not None:
+            input_shape = input_shape + self.pred_size_growth
+        return input_shape
+
+    @property
+    def eval_output_shape(self) -> Coordinate:
+        output_shape = Coordinate(self.conf["min_output_shape"])
+        if self.pred_size_growth is not None:
+            output_shape = output_shape + self.pred_size_growth
+        return output_shape
+
+    @property
+    def num_out_channels(self) -> list[int | None]:
+        num_channels = self.conf["out_channels"]
+
+        if isinstance(num_channels, int) or num_channels is None:
+            return [num_channels]
+        elif isinstance(num_channels, list):
+            return num_channels
+
+    def to_uint8(self, out_data: np.ndarray) -> np.ndarray:
+        out_min, out_max = self.conf["out_range"]
+        return np.clip((out_data + out_min) / (out_max - out_min) * 255).astype(
+            np.uint8
+        )
+
+
 class Checkpoint(Model):
     checkpoint_type: Literal["checkpoint"] = "checkpoint"
     saved_model: Path  # tmp
