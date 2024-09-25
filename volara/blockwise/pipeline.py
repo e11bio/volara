@@ -98,7 +98,7 @@ class Pipeline:
                 if self.task_graph.out_degree(node) == 0:
                     sinks.append(task)
 
-            all_tasks = task_map.values()
+            all_tasks = list(task_map.values())
 
             if multiprocessing:
                 daisy.run_blockwise(all_tasks)
