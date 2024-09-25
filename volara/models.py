@@ -106,9 +106,10 @@ class JitModel(Model):
     def eval_input_shape(self) -> Coordinate:
         input_shape = Coordinate(self.conf["min_input_shape"])
 
-        assert (
-            np.sum(self.pred_size_growth % Coordinate(self.conf["min_step_shape"])) == 0
-        )
+        if self.pred_size_growth is not None:
+            assert (
+                np.sum(self.pred_size_growth % Coordinate(self.conf["min_step_shape"])) == 0
+            )
         if self.pred_size_growth is not None:
             input_shape = input_shape + self.pred_size_growth
         return input_shape
@@ -131,7 +132,7 @@ class JitModel(Model):
 
     def to_uint8(self, out_data: np.ndarray) -> np.ndarray:
         out_min, out_max = self.conf["out_range"]
-        return np.clip((out_data + out_min) / (out_max - out_min) * 255).astype(
+        return np.clip((out_data + out_min) / (out_max - out_min) * 255, 0, 255).astype(
             np.uint8
         )
 
