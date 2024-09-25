@@ -13,7 +13,7 @@ from gunpowder import ArrayKey, Batch, BatchProvider
 from pydantic import Field
 
 from ..datasets import LSD, Affs, Dataset, Raw
-from ..models import Checkpoint, DaCapo, Model
+from ..models import Checkpoint, DaCapo, Model, JitModel
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -67,7 +67,7 @@ class Predict(BlockwiseTask):
     task_type: Literal["predict"] = "predict"
     roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     checkpoint: Annotated[
-        DaCapo | Checkpoint,
+        DaCapo | Checkpoint | JitModel,
         Field(discriminator="checkpoint_type"),
     ]
     in_data: Raw
