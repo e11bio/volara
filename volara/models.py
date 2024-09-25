@@ -148,6 +148,11 @@ class Checkpoint(Model):
                 f"Output channels ({num_channels}) must be an int or a list of ints."
             )
 
+    def to_uint8(self, out_data: np.ndarray) -> np.ndarray:
+        if "loss_func" in self.conf and self.conf["loss_func"] == "uniform":
+            return np.clip(out_data * 128 + 128, 0, 255).astype(np.uint8)
+        return super().to_uint8(out_data)
+
 
 class DaCapo(Model):
     checkpoint_type: Literal["dacapo"] = "dacapo"
