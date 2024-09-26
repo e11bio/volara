@@ -108,7 +108,8 @@ class JitModel(Model):
 
         if self.pred_size_growth is not None:
             assert (
-                np.sum(self.pred_size_growth % Coordinate(self.conf["min_step_shape"])) == 0
+                np.sum(self.pred_size_growth % Coordinate(self.conf["min_step_shape"]))
+                == 0
             )
         if self.pred_size_growth is not None:
             input_shape = input_shape + self.pred_size_growth

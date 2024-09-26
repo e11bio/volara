@@ -77,7 +77,9 @@ class Pipeline:
 
     def run_blockwise(self, multiprocessing: bool = True):
         with ExitStack() as stack:
-            node_ordering: list[BlockwiseTask] = list(nx.topological_sort(self.task_graph))
+            node_ordering: list[BlockwiseTask] = list(
+                nx.topological_sort(self.task_graph)
+            )
 
             print([node.task_name for node in node_ordering])
 
@@ -92,7 +94,9 @@ class Pipeline:
                     task_map[upstream]
                     for upstream in self.task_graph.predecessors(node)
                 ]
-                task = node.task(upstream_tasks=upstream_tasks, multiprocessing=multiprocessing)
+                task = node.task(
+                    upstream_tasks=upstream_tasks, multiprocessing=multiprocessing
+                )
                 task = stack.enter_context(task)
                 task_map[node] = task
                 if self.task_graph.out_degree(node) == 0:

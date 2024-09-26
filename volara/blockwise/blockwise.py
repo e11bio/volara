@@ -61,13 +61,6 @@ class BlockwiseTask(ABC, StrictBaseModel):
     def __hash__(self):
         return hash(self.task_name)
 
-    # TODO: do we still want task_type as a property?
-
-    # @property
-    # @abstractmethod
-    # def task_type(self) -> str:
-    # pass
-
     @property
     @abstractmethod
     def task_name(self) -> str:
@@ -220,7 +213,7 @@ class BlockwiseTask(ABC, StrictBaseModel):
         """
         The function defining how workers are started.
         """
-        if self.worker_config:
+        if self.worker_config is not None:
             config_file = self.config_file
 
             with open(config_file, "w") as f:
@@ -228,46 +221,12 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
             logging.info("Running block with config %s..." % config_file)
 
-            cmd = [
-                "e11-post",
-                "blockwise-worker",
-                "-c",
-                str(config_file),
-            ]
+            cmd = self.worker_config.get_command(config_file)
 
-            queue = self.worker_config.queue
+            def run_worker():
+                return subprocess.run(cmd)
 
-            if queue is not None:
-                # todo: figure out how to consolidate worker directories since
-                # we don't have access to worker ids yet here...
-
-                # context = daisy.Context()
-                # worker_id = context["worker_id"]
-
-                # log_base = daisy.logging.get_worker_log_basename(
-                # worker_id, context.get("task_id", None)
-                # )
-
-                # log_file = f"{log_base}.slurm.out"
-                # log_error = f"{log_base}.slurm.err"
-
-                log_base = f"./daisy_logs/{self.task_name}"
-
-                log_file = f"{log_base}/slurm_worker_%j.log"
-                log_error = f"{log_base}/slurm_worker_%j.err"
-
-                cmd = self.worker_config.get_slurm_command(
-                    command=" ".join(cmd),
-                    execute=False,
-                    expand=False,
-                    queue=queue,
-                    num_gpus=self.worker_config.num_gpus,
-                    num_cpus=self.worker_config.num_cpus,
-                    log_file=log_file,
-                    error_file=log_error,
-                )
-
-            return lambda: subprocess.run(cmd)
+            return run_worker
 
         else:
             return self.process_blocks

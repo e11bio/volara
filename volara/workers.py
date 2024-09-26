@@ -1,6 +1,7 @@
 import logging
 import subprocess as sp
 from abc import ABC
+from pathlib import Path
 
 from .utils import StrictBaseModel
 
@@ -11,6 +12,53 @@ class Worker(ABC, StrictBaseModel):
     queue: str | None = None
     num_gpus: int = 0
     num_cpus: int = 1
+
+    def get_command(self, config_path: Path) -> list[str]:
+        cmd = [
+            "volara-cli",
+            "blockwise-worker",
+            "-c",
+            str(config_path),
+        ]
+        return cmd
+
+
+class SlurmWorker(Worker):
+    queue: str
+    num_gpus: int = 0
+    num_cpus: int = 1
+
+    def get_command(self, config_path: Path) -> list[str]:
+        cmd = super().get_command(config_path)
+
+        # todo: figure out how to consolidate worker directories since
+        # we don't have access to worker ids yet here...
+
+        # context = daisy.Context()
+        # worker_id = context["worker_id"]
+
+        # log_base = daisy.logging.get_worker_log_basename(
+        # worker_id, context.get("task_id", None)
+        # )
+
+        # log_file = f"{log_base}.slurm.out"
+        # log_error = f"{log_base}.slurm.err"
+
+        log_base = f"./daisy_logs/{self.task_name}"
+
+        log_file = f"{log_base}/slurm_worker_%j.log"
+        log_error = f"{log_base}/slurm_worker_%j.err"
+
+        return self.get_slurm_command(
+            command=" ".join(cmd),
+            execute=False,
+            expand=False,
+            queue=self.queue,
+            num_gpus=self.num_gpus,
+            num_cpus=self.num_cpus,
+            log_file=log_file,
+            error_file=log_error,
+        )
 
     def is_sbatch_available(self) -> bool:
         try:
@@ -147,3 +195,11 @@ class Worker(ABC, StrictBaseModel):
                     else "Job ID not found"
                 )
                 return job_id
+
+
+class LSFWorker(Worker):
+    pass
+
+
+class LocalWorker(Worker):
+    pass

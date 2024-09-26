@@ -46,6 +46,9 @@ docs = [
     "pooch >= 1.8",
 ]
 
+[project.scripts]
+volara-cli = "volara.cli:cli"
+
 [tool.setuptools.dynamic]
 version = { attr = "volara.__version__" }
 

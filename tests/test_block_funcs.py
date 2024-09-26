@@ -9,6 +9,7 @@ import torch
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
+from volara.workers import LocalWorker
 from volara.blockwise import (
     LUT,
     AffAgglom,
@@ -116,7 +117,6 @@ def build_configs(tmpdir):
     db_config.open("w")
 
     pred_config = Predict(
-        task_type="predict",
         in_data=raw,
         out_data=[affs],
         checkpoint=Checkpoint(
@@ -176,7 +176,9 @@ def build_configs(tmpdir):
         block_size=Coordinate(10, 10, 10),
     )
     argmax_config = Argmax(
-        probs_data=raw, sem_data=segments, block_size=Coordinate(10, 10, 10)
+        probs_data=raw,
+        sem_data=segments,
+        block_size=Coordinate(10, 10, 10),
     )
 
     return {

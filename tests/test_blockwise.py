@@ -10,8 +10,9 @@ from scipy.ndimage import label
 from skimage import data
 from skimage.filters import gaussian
 
-from volara.blockwise import AffAgglom, BlockwiseTask
+from volara.blockwise import AffAgglom, BlockwiseTask, register_task
 from volara.datasets import Affs, Labels
+from volara.workers import LocalWorker
 from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
 
@@ -113,7 +114,9 @@ def affs(tmp_path, labels: tuple[Array, Path]) -> tuple[Array, Path]:
     return affs_array, affs_path
 
 
-def test_dummy_blockwise(tmpdir):
+@pytest.mark.parametrize("multiprocessing", [True, False])
+@pytest.mark.parametrize("worker", [None, LocalWorker()])
+def test_dummy_blockwise(multiprocessing, worker):
     class DummyTask(BlockwiseTask):
         task_type: str = "dummy"
         fit: str = "shrink"
@@ -148,8 +151,10 @@ def test_dummy_blockwise(tmpdir):
         def init(self):
             pass
 
-    config = DummyTask()
-    config.run_blockwise(multiprocessing=False)
+    register_task(DummyTask)
+
+    config = DummyTask(worker_config=worker)
+    config.run_blockwise(multiprocessing=multiprocessing)
 
 
 @pytest.mark.skip(reason="pytest quitting for some reason")
