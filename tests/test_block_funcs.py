@@ -9,7 +9,6 @@ import torch
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
-from volara.workers import LocalWorker
 from volara.blockwise import (
     LUT,
     AffAgglom,

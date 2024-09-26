@@ -1,6 +1,6 @@
 from contextlib import ExitStack
 from itertools import product
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING
 
 import daisy
 import networkx as nx

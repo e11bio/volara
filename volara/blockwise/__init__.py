@@ -1,6 +1,6 @@
 from typing import Annotated, Union
 
-from pydantic import Field, TypeAdapter, Discriminator
+from pydantic import Field, TypeAdapter
 
 from .blockwise import BlockwiseTask as BlockwiseTask
 from .components import (
@@ -12,6 +12,7 @@ from .components import (
     ExtractFrags,
     GlobalMWS,
     Predict,
+    PseudoAffs,
     SeededExtractFrags,
 )
 
@@ -25,6 +26,7 @@ BLOCKWISE_TASKS = [
     GlobalMWS,
     Predict,
     SeededExtractFrags,
+    PseudoAffs,
 ]
 
 
