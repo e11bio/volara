@@ -13,3 +13,4 @@ from .lut import LUT as LUT
 from .predict import Predict as Predict
 from .pseudo_affs import PseudoAffs as PseudoAffs
 from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags
+from .threshold import Threshold as Threshold

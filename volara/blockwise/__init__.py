@@ -14,6 +14,7 @@ from .components import (
     Predict,
     PseudoAffs,
     SeededExtractFrags,
+    Threshold,
 )
 
 BLOCKWISE_TASKS = [
@@ -27,6 +28,7 @@ BLOCKWISE_TASKS = [
     Predict,
     SeededExtractFrags,
     PseudoAffs,
+    Threshold,
 ]
 
 
