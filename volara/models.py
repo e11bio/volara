@@ -155,7 +155,10 @@ class Checkpoint(Model):
         )
 
         if "loss_func" in self.conf and self.conf["loss_func"] == "classification":
-            model = torch.nn.Sequential(model, torch.nn.Softmax(dim=1))
+            if self.conf["num_fmaps_out"] == 1:
+                model = torch.nn.Sequential(model, torch.nn.Sigmoid())
+            else:
+                model = torch.nn.Sequential(model, torch.nn.Softmax(dim=1))
 
         try:
             model.num_in_channels = self.conf["num_in_channels"]
