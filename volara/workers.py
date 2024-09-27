@@ -13,7 +13,7 @@ class Worker(ABC, StrictBaseModel):
     num_gpus: int = 0
     num_cpus: int = 1
 
-    def get_command(self, config_path: Path) -> list[str]:
+    def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = [
             "volara-cli",
             "blockwise-worker",
@@ -28,7 +28,7 @@ class SlurmWorker(Worker):
     num_gpus: int = 0
     num_cpus: int = 1
 
-    def get_command(self, config_path: Path) -> list[str]:
+    def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path)
 
         # todo: figure out how to consolidate worker directories since
@@ -44,7 +44,7 @@ class SlurmWorker(Worker):
         # log_file = f"{log_base}.slurm.out"
         # log_error = f"{log_base}.slurm.err"
 
-        log_base = f"./daisy_logs/{self.task_name}"
+        log_base = f"./daisy_logs/{task_name}"
 
         log_file = f"{log_base}/slurm_worker_%j.log"
         log_error = f"{log_base}/slurm_worker_%j.err"
