@@ -29,7 +29,7 @@ class SlurmWorker(Worker):
     num_cpus: int = 1
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
-        cmd = super().get_command(config_path)
+        cmd = super().get_command(config_path, task_name)
 
         # todo: figure out how to consolidate worker directories since
         # we don't have access to worker ids yet here...
