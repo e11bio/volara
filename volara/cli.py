@@ -24,11 +24,12 @@ def blockwise_worker(config_file: Path) -> None:
     import json
     from pathlib import Path
 
-    from volara.blockwise import BlockwiseTask, BlockwiseTasks
+    from volara.blockwise import BlockwiseTask, get_blockwise_tasks_type
 
     config_file = Path(config_file)
     config_json = json.loads(config_file.open("r").read())
 
+    BlockwiseTasks = get_blockwise_tasks_type()
     config = BlockwiseTasks.validate_python(config_json)
     assert isinstance(config, BlockwiseTask)
     config.process_blocks()
