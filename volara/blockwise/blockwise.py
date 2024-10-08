@@ -221,9 +221,9 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
             logging.info("Running block with config %s..." % config_file)
 
-            cmd = self.worker_config.get_command(config_file, self.task_name)
-
             def run_worker():
+
+                cmd = self.worker_config.get_command(config_file, self.task_name)
                 return subprocess.run(cmd)
 
             return run_worker
