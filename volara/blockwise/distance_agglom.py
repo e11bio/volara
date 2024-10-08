@@ -175,6 +175,7 @@ class DistanceAgglomSimple(BlockwiseTask):
     background_intensity: float | None = None
     eps: float = 1e-8
     distance_threshold: float
+    emb_distance_threshold: float = 0.05
     distance_metric: Literal["euclidean", "cosine", "max"] = "cosine"
     small_size_threshold: int = 512
     large_size_threshold: int = 512
@@ -307,18 +308,18 @@ class DistanceAgglomSimple(BlockwiseTask):
                     and size_b > self.large_size_threshold
                 ):
                     if self.distance_metric == "cosine":
-                        distance = 1 - np.dot(intensity_a, intensity_b) / max(
+                        emb_distance = 1 - np.dot(intensity_a, intensity_b) / max(
                             np.linalg.norm(intensity_a) * np.linalg.norm(intensity_b),
                             self.eps,
                         )
                     elif self.distance_metric == "euclidean":
-                        distance = np.linalg.norm(intensity_a - intensity_b)
+                        emb_distance = np.linalg.norm(intensity_a - intensity_b)
                     elif self.distance_metric == "max":
-                        distance = np.max(np.abs(intensity_a - intensity_b))
+                        emb_distance = np.max(np.abs(intensity_a - intensity_b))
                     else:
                         raise ValueError("Invalid distance metric")
-                    if distance < self.distance_threshold:
-                        edges.append((frag_i, frag_j, distance))
+                    if emb_distance < self.emb_distance_threshold:
+                        edges.append((frag_i, frag_j, emb_distance))
 
         np.savez(
             tmpdir / f"{block.block_id[1]}",
