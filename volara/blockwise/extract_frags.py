@@ -36,6 +36,7 @@ class ExtractFrags(BlockwiseTask):
     context: PydanticCoordinate
     save_intensities: dict[str, Raw] | None = None
     bias: list[float]
+    strides: list[PydanticCoordinate] | None = None
     sigma: PydanticCoordinate | None = None
     noise_eps: float | None = None
     filter_fragments: float = 0.0
@@ -174,7 +175,7 @@ class ExtractFrags(BlockwiseTask):
         fragments_data = mws.agglom(
             (affs_data + shift).astype(np.float64),
             offsets=self.neighborhood,
-            # strides=self.strides,
+            strides=self.strides,
         )
 
         return fragments_data
