@@ -24,7 +24,7 @@ dependencies = [
     "funlib.learn.torch @ git+https://github.com/funkelab/funlib.learn.torch",
     "funlib.persistence >= 0.5.0",
     "gunpowder >= 1.4.0",
-    "mwatershed >= 0.5.1",
+    "mwatershed >= 0.5.2",
     "pydantic >= 2.6.3",
     "wandb >= 0.17.8",
     "torch >= 2.0",

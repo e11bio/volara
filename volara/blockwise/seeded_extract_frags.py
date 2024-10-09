@@ -37,6 +37,7 @@ class SeededExtractFrags(BlockwiseTask):
     nml_file: Path = Path(
         "/home/arlo/Desktop/Workspace/Projects/data/skeletons/full_dataset.nml"
     )
+    randomized_strides: bool = False
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -151,6 +152,7 @@ class SeededExtractFrags(BlockwiseTask):
                 offsets=self.affs_data.neighborhood,
                 strides=self.strides,
                 seeds=seeds,
+                randomized_strides=self.randomized_strides,
             )
 
             logger.error(

@@ -41,6 +41,7 @@ class ExtractFrags(BlockwiseTask):
     noise_eps: float | None = None
     filter_fragments: float = 0.0
     remove_debris: int = 0
+    randomized_strides: bool = False
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -176,6 +177,7 @@ class ExtractFrags(BlockwiseTask):
             (affs_data + shift).astype(np.float64),
             offsets=self.neighborhood,
             strides=self.strides,
+            randomized_strides=self.randomized_strides,
         )
 
         return fragments_data
