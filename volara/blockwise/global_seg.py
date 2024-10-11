@@ -70,7 +70,12 @@ class GlobalMWS(BlockwiseTask):
             out_rag_provider = self.out_db.open("w")
 
         if self.starting_lut is not None:
-            starting_frags, starting_segs = np.load(f"{self.starting_lut}.npz")[
+            starting_lut = (
+                self.starting_lut
+                if self.starting_lut.name.endswith(".npz")
+                else f"{self.starting_lut}.npz"
+            )
+            starting_frags, starting_segs = np.load(starting_lut)[
                 "fragment_segment_lut"
             ]
             starting_map = {

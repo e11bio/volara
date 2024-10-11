@@ -165,13 +165,13 @@ def build_configs(tmpdir):
     global_mws_config = GlobalMWS(
         frags_data=frags,
         db=db_config,
-        lut=zarr_dir / "luts" / "test",
+        lut=zarr_dir / "luts" / "test.npz",
         bias={"x_aff": 0.0},
     )
     lut_config = LUT(
         frags_data=frags,
         seg_data=segments,
-        lut=zarr_dir / "luts" / "test",
+        lut=zarr_dir / "luts" / "test.npz",
         block_size=Coordinate(10, 10, 10),
     )
     argmax_config = Argmax(
@@ -391,7 +391,7 @@ def test_global_mws_block(blockwise_configs, x_aff):
     with config.process_block_func() as process_block:
         process_block(block)
 
-    lut = np.load(f"{config.lut}.npz")["fragment_segment_lut"]
+    lut = np.load(config.lut)["fragment_segment_lut"]
     assert len(np.unique(lut[0, :])) == 2, lut
     assert len(np.unique(lut[1, :])) == 1 + (x_aff < 0), lut
 

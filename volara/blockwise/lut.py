@@ -78,9 +78,8 @@ class LUT(BlockwiseTask):
         segs = self.seg_data.array("r+")
 
         def process_block(block):
-            mapping = np.load(Path(f"{self.lut}.npz"))["fragment_segment_lut"].astype(
-                np.uint64
-            )
+            lut = self.lut if self.lut.name.endswith(".npz") else f"{self.lut}.npz"
+            mapping = np.load(Path(lut))["fragment_segment_lut"].astype(np.uint64)
             self.map_block(block, frags, segs, mapping)
 
         yield process_block
