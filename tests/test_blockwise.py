@@ -1,7 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
 
-import daisy
 import numpy as np
 import pytest
 from funlib.geometry import Coordinate, Roi
@@ -12,9 +11,9 @@ from skimage.filters import gaussian
 
 from volara.blockwise import AffAgglom, BlockwiseTask, register_task
 from volara.datasets import Affs, Labels
-from volara.workers import LocalWorker
 from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
+from volara.workers import LocalWorker
 
 
 @pytest.fixture()
