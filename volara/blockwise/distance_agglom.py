@@ -347,23 +347,32 @@ class DistanceAgglomSimple(BlockwiseTask):
                     tmpdir,
                 )
 
-            yield process_block
+            if self.lut.exists():
+                pos_edges = [
+                    (a, b) for a, b in np.load(self.lut)["fragment_segment_lut"]
+                ]
+            else:
+                pos_edges = []
 
-            pos_edges = []
-            neg_edges = []
-            small_frags = []
-            for file in tmpdir.iterdir():
-                edges = np.load(file)
-                pos_edges.extend(edges["pos"])
-                neg_edges.extend(edges["neg"])
-                small_frags.extend(edges["small_frags"])
+            try:
+                yield process_block
+            finally:
+                neg_edges = []
+                small_frags = []
+                for file in tmpdir.iterdir():
+                    edges = np.load(file)
+                    pos_edges.extend(edges["pos"])
+                    neg_edges.extend(edges["neg"])
+                    small_frags.extend(edges["small_frags"])
 
-            pos_edges = [
-                (True, int(edge[0]), int(edge[1]))
-                for edge in sorted(pos_edges, key=lambda x: x[2])
-            ]
-            neg_edges = [(False, int(edge[0]), int(edge[1])) for edge in neg_edges]
+                pos_edges = [
+                    (True, int(edge[0]), int(edge[1]))
+                    for edge in sorted(pos_edges, key=lambda x: x[2])
+                ]
+                neg_edges = [(False, int(edge[0]), int(edge[1])) for edge in neg_edges]
 
-            lut = mws.cluster(neg_edges + pos_edges)
-            lut.extend([(small_frag, 0) for small_frag in small_frags])
-            np.savez(self.lut, fragment_segment_lut=np.array(lut, dtype=np.uint64).T)
+                lut = mws.cluster(neg_edges + pos_edges)
+                lut.extend([(small_frag, 0) for small_frag in small_frags])
+                np.savez(
+                    self.lut, fragment_segment_lut=np.array(lut, dtype=np.uint64).T
+                )
