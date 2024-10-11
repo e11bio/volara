@@ -22,7 +22,7 @@ dependencies = [
     "daisy >= 1.2",
     "funlib.geometry >=0.3",
     "funlib.learn.torch @ git+https://github.com/funkelab/funlib.learn.torch",
-    "funlib.persistence >= 0.5.0",
+    "funlib.persistence >= 0.5.1",
     "gunpowder >= 1.4.0",
     "mwatershed >= 0.5.2",
     "pydantic >= 2.6.3",
