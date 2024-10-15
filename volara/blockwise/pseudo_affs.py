@@ -18,6 +18,7 @@ class PseudoAffs(BlockwiseTask):
     block_size: PydanticCoordinate
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
+    normalize: bool = False
 
     @property
     def task_name(self) -> str:
@@ -113,6 +114,8 @@ class PseudoAffs(BlockwiseTask):
 
         def process_block(block):
             in_data = in_array.to_ndarray(roi=block.read_roi, fill_value=0)
+            if self.normalize:
+                in_data = in_data / np.linalg.norm(in_data, axis=0)
             affs_data = self.compute_pseudo_affs(in_data, self.affs_data.neighborhood)
             affs_array = Array(
                 affs_data,
