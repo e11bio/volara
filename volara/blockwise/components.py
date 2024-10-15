@@ -13,5 +13,7 @@ from .global_seg import GlobalMWS as GlobalMWS
 from .lut import LUT as LUT
 from .predict import Predict as Predict
 from .pseudo_affs import PseudoAffs as PseudoAffs
+from .register import ApplyShift as ApplyShift
+from .register import ComputeShift as ComputeShift
 from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags
 from .threshold import Threshold as Threshold

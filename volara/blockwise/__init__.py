@@ -5,43 +5,36 @@ from pydantic import Field, TypeAdapter
 
 from .blockwise import BlockwiseTask as BlockwiseTask
 from .components import (
-    LUT as LUT,
-)
-from .components import (
-    AffAgglom as AffAgglom,
-)
-from .components import (
-    Argmax as Argmax,
-)
-from .components import (
-    BinaryExtractFrags as BinaryExtractFrags
-)
-from .components import (
-    DistanceAgglom as DistanceAgglom,
-)
-from .components import (
-    DistanceAgglomSimple as DistanceAgglomSimple,
-)
-from .components import (
-    ExtractFrags as ExtractFrags,
-)
-from .components import (
-    GlobalMWS as GlobalMWS,
-)
-from .components import (
-    Predict as Predict,
-)
-from .components import (
-    PseudoAffs as PseudoAffs,
-)
-from .components import (
-    SeededExtractFrags as SeededExtractFrags,
-)
-from .components import (
-    Threshold as Threshold,
+    LUT,
+    AffAgglom,
+    ApplyShift,
+    Argmax,
+    ComputeShift,
+    DistanceAgglom,
+    DistanceAgglomSimple,
+    ExtractFrags,
+    GlobalMWS,
+    Predict,
+    PseudoAffs,
+    SeededExtractFrags,
+    Threshold,
 )
 
-BLOCKWISE_TASKS: list[BlockwiseTask] = []
+BLOCKWISE_TASKS = [
+    LUT,
+    AffAgglom,
+    ApplyShift,
+    Argmax,
+    ComputeShift,
+    DistanceAgglom,
+    DistanceAgglomSimple,
+    ExtractFrags,
+    GlobalMWS,
+    Predict,
+    SeededExtractFrags,
+    PseudoAffs,
+    Threshold,
+]
 
 
 def register_task(task: BlockwiseTask):
