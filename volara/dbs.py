@@ -145,6 +145,9 @@ class SQLite(DB):
     def open(self, mode="r") -> SQLiteGraphDataBase:
         node_attrs, edge_attrs = self.graph_attrs
 
+        if not self.path.parent.exists():
+            self.path.parent.mkdir(parents=True)
+
         return SQLiteGraphDataBase(
             self.path,
             position_attribute="position",
