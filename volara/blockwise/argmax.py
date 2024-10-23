@@ -40,7 +40,7 @@ class Argmax(BlockwiseTask):
 
     @property
     def task_name(self) -> str:
-        return f"{self.probs_data.name}-{self.task_type}"
+        return f"{self.sem_data.name}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:

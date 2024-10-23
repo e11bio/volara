@@ -45,7 +45,7 @@ class SeededExtractFrags(BlockwiseTask):
 
     @property
     def task_name(self) -> str:
-        return f"{self.affs_data.name}-{self.task_type}"
+        return f"{self.segs_data.name}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:

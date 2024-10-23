@@ -53,7 +53,7 @@ class ExtractFrags(BlockwiseTask):
 
     @property
     def task_name(self) -> str:
-        return f"{self.affs_data.name}-{self.task_type}"
+        return f"{self.frags_data.name}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:
