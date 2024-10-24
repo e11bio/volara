@@ -1,3 +1,4 @@
+import glob
 import logging
 import multiprocessing
 import subprocess
@@ -8,6 +9,7 @@ from shutil import rmtree
 from typing import TYPE_CHECKING
 
 import daisy
+from daisy.block import BlockStatus
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
@@ -180,14 +182,18 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
         def check_block(block):
             block_array = open_ds(self.block_ds, mode="r")
-            offset = block.write_roi.offset
-            voxel_size = block_array.voxel_size
+            coordinate = (
+                block.write_roi.offset - block_array.offset
+            ) / block_array.voxel_size
+            chunk_size = Coordinate(block_array._source_data.chunks[-coordinate.dims :])
+            chunk_index = coordinate // chunk_size
+            chunk_key = "/".join(str(i) for i in chunk_index)
+            prefix = "/".join("*" for _ in range(block_array.dims - len(chunk_index)))
 
-            block_roi = Roi(offset, voxel_size)
-
-            block_data = block_array[block_roi]
-
-            return block_data == block.block_id[1] + 1
+            glob_pattern = f"{prefix}/{chunk_key}" if len(prefix) > 0 else chunk_key
+            glob_pattern = f"{block_array._source_data.store.path}/{glob_pattern}"
+            matches = glob.glob(glob_pattern, recursive=True)
+            return len(list(matches)) > 0
 
         return check_block
 
@@ -198,14 +204,16 @@ class BlockwiseTask(ABC, StrictBaseModel):
         """
 
         def write_check_block(block):
-            block_array = open_ds(self.block_ds, mode="a")
-            write_roi = block.write_roi.intersect(block_array.roi)
-            block_array[write_roi] = np.full(
-                write_roi.shape // block_array.voxel_size,
-                fill_value=block.block_id[1] + 1,
-            )
-
-            block.status = daisy.BlockStatus.SUCCESS
+            if not block.status == BlockStatus.FAILED:
+                # Unless the block is explicitly marked as failed, we assume
+                # successful processing if there was no error
+                block_array = open_ds(self.block_ds, mode="a")
+                write_roi = block.write_roi.intersect(block_array.roi)
+                block_array[write_roi] = np.full(
+                    write_roi.shape // block_array.voxel_size,
+                    fill_value=block.block_id[1] + 1,
+                )
+                block.status = BlockStatus.SUCCESS
 
         return write_check_block
 
@@ -222,7 +230,6 @@ class BlockwiseTask(ABC, StrictBaseModel):
             logging.info("Running block with config %s..." % config_file)
 
             def run_worker():
-
                 cmd = self.worker_config.get_command(config_file, self.task_name)
                 return subprocess.run(cmd)
 
@@ -402,11 +409,11 @@ class BlockwiseTask(ABC, StrictBaseModel):
                     "Please provide a daisy.Task or a list of daisy.Task objects."
                 )
             if multiprocessing:
-                daisy.run_blockwise(tasks)
+                return daisy.run_blockwise(tasks)
             else:
                 server = daisy.SerialServer()
                 cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
-                server.run_blockwise(tasks)
+                return server.run_blockwise(tasks)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """
