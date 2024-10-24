@@ -29,6 +29,7 @@ class GlobalMWS(BlockwiseTask):
     edge_per_attr: bool = True
     store_segment_intensities: dict[str, str] | None = None
     out_db: DB | None = None
+    bounded_read: bool = True
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -86,7 +87,15 @@ class GlobalMWS(BlockwiseTask):
             starting_map = None
 
         def process_block(block):
-            graph = rag_provider.read_graph(block.write_roi)
+            read_roi = block.write_roi if self.bounded_read else None
+            node_attrs = (
+                ["size"] + list(self.store_segment_intensities.keys())
+                if self.store_segment_intensities is not None
+                else []
+            )
+            graph = rag_provider.read_graph(
+                read_roi, node_attrs=node_attrs, edge_attrs=list(self.bias.keys())
+            )
 
             edges = []
 
