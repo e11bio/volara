@@ -9,13 +9,13 @@ from shutil import rmtree
 from typing import TYPE_CHECKING
 
 import daisy
-from daisy.block import BlockStatus
 import numpy as np
+from daisy.block import BlockStatus
 from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
 from funlib.persistence import open_ds, prepare_ds
 
-from volara.logging import get_log_basedir
+from volara.logging import get_log_basedir, set_log_basedir
 
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
@@ -247,6 +247,11 @@ class BlockwiseTask(ABC, StrictBaseModel):
 
             def worker_loop():
                 client = daisy.Client()
+                # TODO: this shouldn't be necessary, daisy should be doing this for us
+                try:
+                    set_log_basedir(client.context["logdir"])
+                except KeyError as e:
+                    raise ValueError(client.context) from e
                 mark_block_done = self.mark_block_done_func()
 
                 while True:
@@ -409,11 +414,12 @@ class BlockwiseTask(ABC, StrictBaseModel):
                     "Please provide a daisy.Task or a list of daisy.Task objects."
                 )
             if multiprocessing:
-                return daisy.run_blockwise(tasks)
+                server = daisy.Server()
+                _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
             else:
                 server = daisy.SerialServer()
-                cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
-                return server.run_blockwise(tasks)
+                _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+            return server.run_blockwise(tasks)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """

@@ -1,19 +1,20 @@
-from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
 import pytest
-from funlib.geometry import Coordinate, Roi
+from funlib.geometry import Coordinate
 from funlib.persistence import Array, prepare_ds
 from scipy.ndimage import label
 from skimage import data
 from skimage.filters import gaussian
 
-from volara.blockwise import AffAgglom, BlockwiseTask, register_task
+from volara.blockwise import AffAgglom, get_task
 from volara.datasets import Affs, Labels
 from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
 from volara.workers import LocalWorker
+
+DummyTask = get_task("dummy")
 
 
 @pytest.fixture()
@@ -116,42 +117,6 @@ def affs(tmp_path, labels: tuple[Array, Path]) -> tuple[Array, Path]:
 @pytest.mark.parametrize("multiprocessing", [True, False])
 @pytest.mark.parametrize("worker", [None, LocalWorker()])
 def test_dummy_blockwise(multiprocessing, worker):
-    class DummyTask(BlockwiseTask):
-        task_type: str = "dummy"
-        fit: str = "shrink"
-        read_write_conflict: bool = False
-
-        @property
-        def task_name(self) -> str:
-            return "dummy"
-
-        @property
-        def write_roi(self):
-            return Roi((0, 0), (200, 200))
-
-        @property
-        def write_size(self) -> Coordinate:
-            return Coordinate(100, 100)
-
-        @property
-        def context_size(self) -> Coordinate:
-            return Coordinate(0, 0)
-
-        @contextmanager
-        def process_block_func(self):
-            def process_block(block):
-                pass
-
-            yield process_block
-
-        def drop_artifacts(self):
-            pass
-
-        def init(self):
-            pass
-
-    register_task(DummyTask)
-
     config = DummyTask(worker_config=worker)
     config.run_blockwise(multiprocessing=multiprocessing)
 

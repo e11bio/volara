@@ -3,6 +3,8 @@ import subprocess as sp
 from abc import ABC
 from pathlib import Path
 
+import daisy
+
 from .utils import StrictBaseModel
 
 logger = logging.getLogger(__name__)
@@ -31,23 +33,14 @@ class SlurmWorker(Worker):
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
 
-        # todo: figure out how to consolidate worker directories since
-        # we don't have access to worker ids yet here...
+        context = daisy.Context.from_env()
+        worker_id = context["worker_id"]
+        task_id = context["task_id"]
 
-        # context = daisy.Context()
-        # worker_id = context["worker_id"]
+        worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
 
-        # log_base = daisy.logging.get_worker_log_basename(
-        # worker_id, context.get("task_id", None)
-        # )
-
-        # log_file = f"{log_base}.slurm.out"
-        # log_error = f"{log_base}.slurm.err"
-
-        log_base = f"./daisy_logs/{task_name}"
-
-        log_file = f"{log_base}/slurm_worker_%j.log"
-        log_error = f"{log_base}/slurm_worker_%j.err"
+        log_file = worker_log_basename / "slurm_worker.log"
+        log_error = worker_log_basename / "slurm_worker.err"
 
         return self.get_slurm_command(
             command=" ".join(cmd),
@@ -202,4 +195,18 @@ class LSFWorker(Worker):
 
 
 class LocalWorker(Worker):
-    pass
+    def get_command(self, config_path: Path, task_name: str) -> list[str]:
+        cmd = super().get_command(config_path, task_name)
+
+        context = daisy.Context.from_env()
+        worker_id = context["worker_id"]
+        task_id = context["task_id"]
+
+        worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
+
+        _log_file = worker_log_basename / "out.log"
+        _log_error = worker_log_basename / "out.err"
+
+        # TODO: update command to use log files, test that they exist
+        # current tests only show that "worker_id" and "task_id" can be retrieved
+        return cmd

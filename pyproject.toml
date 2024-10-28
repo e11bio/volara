@@ -19,7 +19,7 @@ requires-python = ">=3.11"
 
 dependencies = [
     "click >= 8.0",
-    "daisy >= 1.2",
+    "daisy >= 1.2.2",
     "funlib.geometry >=0.3",
     "funlib.learn.torch @ git+https://github.com/funkelab/funlib.learn.torch",
     "funlib.persistence >= 0.5.2",
@@ -48,6 +48,20 @@ docs = [
 
 [project.scripts]
 volara-cli = "volara.cli:cli"
+
+[project.entry-points."volara.blockwise_tasks"]
+aff-agglom = "volara.blockwise:AffAgglom"
+argmax = "volara.blockwise:Argmax"
+create-lut = "volara.blockwise:GlobalMWS"
+distance-agglom = "volara.blockwise:DistanceAgglom"
+distance-agglom-simple = "volara.blockwise:DistanceAgglomSimple"
+dummy = "volara.blockwise.dummy:DummyTask"
+extract-frags = "volara.blockwise:ExtractFrags"
+lut = "volara.blockwise:LUT"
+predict = "volara.blockwise:Predict"
+pseudo_affs = "volara.blockwise:PseudoAffs"
+seeded-extract-frags = "volara.blockwise:SeededExtractFrags"
+threshold = "volara.blockwise:Threshold"
 
 [tool.setuptools.dynamic]
 version = { attr = "volara.__version__" }
