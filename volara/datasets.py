@@ -89,6 +89,7 @@ class Raw(Dataset):
     channels: list[int] | None = None
     ome_norm: Path | str | None = None
     scale_shift: tuple[float, float] | None = None
+    stack: Dataset | None = None
 
     @property
     def bounds(self) -> list[tuple[float, float]] | None:
@@ -121,9 +122,18 @@ class Raw(Dataset):
             return norm
 
         def ome_norm(data, bounds):
-            for c, (b_min, b_max) in enumerate(bounds):
-                data[c] = (data[c] - b_min) / (b_max - b_min)
-            return data
+            data = data.astype(np.float32)
+            c, *shape = data.shape
+            shift = np.array(
+                [b_min for (b_min, _) in bounds], dtype=np.float32
+            ).reshape(c, *((1,) * len(shape)))
+            scale = np.array(
+                [b_max - b_min for b_min, b_max in bounds], dtype=np.float32
+            ).reshape(c, *((1,) * len(shape)))
+            return (data - shift) / scale
+
+        def stack(data, other_data):
+            return np.concatenate([data, other_data], axis=0)
 
         metadata = {
             "voxel_size": self.voxel_size if self.voxel_size is not None else None,
@@ -144,6 +154,8 @@ class Raw(Dataset):
             array.lazy_op(lambda data: scale_shift(data, self.scale_shift))
         if self.channels is not None:
             array.lazy_op(np.s_[self.channels])
+        if self.stack is not None:
+            array.lazy_op(lambda data: stack(data, self.stack.array("r").data))
 
         return array
 
