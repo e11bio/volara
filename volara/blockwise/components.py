@@ -1,5 +1,6 @@
 from .aff_agglom import AffAgglom as AffAgglom
 from .argmax import Argmax as Argmax
+from .binary_extract_frags import BinaryExtractFrags as BinaryExtractFrags
 from .blockwise import BlockwiseTask as BlockwiseTask
 from .distance_agglom import (
     DistanceAgglom as DistanceAgglom,

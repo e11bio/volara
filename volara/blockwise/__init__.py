@@ -14,6 +14,9 @@ from .components import (
     Argmax as Argmax,
 )
 from .components import (
+    BinaryExtractFrags as BinaryExtractFrags
+)
+from .components import (
     DistanceAgglom as DistanceAgglom,
 )
 from .components import (
