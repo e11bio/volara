@@ -22,6 +22,7 @@ class ComputeShift(BlockwiseTask):
     shifts: Raw
     block_size: PydanticCoordinate
     context: PydanticCoordinate
+    target: Raw | None = None
     fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
 
@@ -78,15 +79,18 @@ class ComputeShift(BlockwiseTask):
         )
 
     @staticmethod
-    def compute_shift(array: np.ndarray):
+    def compute_shift(array: np.ndarray, target_data: np.ndarray) -> np.ndarray:
         C, Z, Y, X = array.shape
+        assert target_data.shape == (1, Z, Y, X) or target_data.shape == (Z, Y, X)
+        if target_data.shape == (1, Z, Y, X):
+            target_data = target_data[0]
 
         shift_data = np.zeros((C, 3, 1, 1, 1))
 
         for c in range(1, C):
             # compute shift between fixed image and moving image
             shift_xyz, error, diffphase = registration.phase_cross_correlation(
-                reference_image=array[0],
+                reference_image=target_data,
                 moving_image=array[c],
                 upsample_factor=10,
             )
@@ -99,10 +103,17 @@ class ComputeShift(BlockwiseTask):
         in_array = self.intensities.array("r")
         out_array = self.shifts.array("a")
 
+        if self.target is not None:
+            target_array = self.target.array("r")
+
         def process_block(block: Block):
             valid_read_roi = block.read_roi.intersect(in_array.roi)
             in_data = in_array.to_ndarray(roi=valid_read_roi, fill_value=0)
-            shifts = self.compute_shift(in_data)
+            if self.target is not None:
+                target_data = target_array.to_ndarray(roi=valid_read_roi, fill_value=0)
+            else:
+                target_data = in_data[0]
+            shifts = self.compute_shift(in_data, target_data)
             shift_array = Array(
                 shifts,
                 offset=block.write_roi.offset,
@@ -121,6 +132,7 @@ class ApplyShift(BlockwiseTask):
     aligned: Raw
     fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
+    interp_shifts: Raw | None = None
 
     @property
     def task_name(self) -> str:
@@ -158,16 +170,19 @@ class ApplyShift(BlockwiseTask):
         return [self.shifts]
 
     def drop_artifacts(self):
-        rmtree(self.shifts.store)
+        rmtree(self.aligned.store)
+        if self.interp_shifts is not None:
+            rmtree(self.interp_shifts.store)
 
     def init(self):
         self.init_out_array()
 
     def init_out_array(self):
+        in_array = self.intensities.array()
         self.aligned.prepare(
-            shape=self.intensities.array().shape,
+            shape=in_array.shape,
             chunk_shape=(
-                self.intensities.array().shape[0],
+                in_array.shape[0],
                 *self.block_size,
             ),
             offset=self.write_roi.offset,
@@ -177,14 +192,31 @@ class ApplyShift(BlockwiseTask):
             kwargs=self.aligned.attrs,
         )
 
+        if self.interp_shifts is not None:
+            self.interp_shifts.prepare(
+                shape=(in_array.shape[0], in_array.voxel_size.dims, *in_array.shape[1:]),
+                chunk_shape=(
+                    in_array.shape[0], in_array.voxel_size.dims,
+                    *self.block_size,
+                ),
+                offset=self.write_roi.offset,
+                voxel_size=self.voxel_size,
+                units=self.intensities.units,
+                dtype=np.float32,
+                kwargs=self.interp_shifts.attrs,
+            )
+
     @staticmethod
-    def apply_shift(intensities: np.ndarray, shifts: np.ndarray, voxel_write_roi: Roi):
+    def apply_shift(
+        intensities: np.ndarray, shifts: np.ndarray, voxel_write_roi: Roi
+    ) -> tuple[np.ndarray, np.ndarray]:
         C, Z, Y, X = intensities.shape
         DZYX = 3  # shift in Z, Y, X
         BZ, BY, BX = 3, 3, 3
         assert shifts.shape == (C, DZYX, BZ, BY, BX)
 
         aligned = np.zeros((C, *voxel_write_roi.shape), dtype=intensities.dtype)
+        interpolated_shifts = np.zeros((C, DZYX, *voxel_write_roi.shape), dtype=np.float32)
 
         for c in range(0, C):
             coordinates = np.meshgrid(
@@ -195,18 +227,13 @@ class ApplyShift(BlockwiseTask):
             coordinates = np.stack(coordinates)
 
             # Interpolate the distances to the original pixel coordinates
-            interpolated_shifts = map_coordinates(
+            interp_shifts = map_coordinates(
                 shifts[c],
                 coordinates=coordinates,
                 order=3,
             )
 
-            print(
-                "interpolated_shifts",
-                interpolated_shifts.shape,
-                interpolated_shifts[:, 32, 200, 200],
-            )
-            print("expected_shift", shifts[c, :, 1, 1, 1])
+            interpolated_shifts[c] = interp_shifts
 
             coordinates = np.meshgrid(
                 *[
@@ -217,22 +244,12 @@ class ApplyShift(BlockwiseTask):
             )
             coordinates = np.stack(coordinates)
 
-            interpolated_shifts += coordinates
+            interpolated_coords = coordinates - interp_shifts
             aligned_intensities = map_coordinates(
-                intensities[c], interpolated_shifts, order=3
+                intensities[c], interpolated_coords, order=3
             )
-            print("og_intensities", intensities[c].shape, intensities[c][96, 600, 600])
-            print(
-                "aligned_intensities",
-                aligned_intensities.shape,
-                aligned_intensities[32, 200, 200],
-            )
-            if c == 0:
-                assert np.allclose(
-                    aligned_intensities, intensities[c, 64:128, 400:800, 400:800]
-                )
             aligned[c] = aligned_intensities
-        return aligned
+        return aligned, interpolated_shifts
 
     @contextmanager
     def process_block_func(self):
@@ -240,13 +257,20 @@ class ApplyShift(BlockwiseTask):
         in_array = self.intensities.array("r")
         shift_array = self.shifts.array("r")
         out_array = self.aligned.array("a")
+        if self.interp_shifts is not None:
+            out_interp_shifts = self.interp_shifts.array("a")
 
         def process_block(block: Block):
             in_data = in_array.to_ndarray(roi=block.read_roi, fill_value=0)
             in_shift = shift_array.to_ndarray(roi=block.read_roi, fill_value=0)
-            aligned = self.apply_shift(
+            aligned, interp_shifts = self.apply_shift(
                 in_data, in_shift, block.write_roi / self.voxel_size
             )
+            aligned = np.clip(
+                aligned * 255,
+                0,
+                255,
+            ).astype(np.uint8)
             aligned_array = Array(
                 aligned,
                 offset=block.write_roi.offset,
@@ -255,5 +279,14 @@ class ApplyShift(BlockwiseTask):
             write_roi = block.write_roi.intersect(out_array.roi)
             write_data = aligned_array.to_ndarray(write_roi)
             out_array[write_roi] = write_data
+
+            if self.interp_shifts is not None:
+                interp_shifts_array = Array(
+                    interp_shifts,
+                    offset=block.write_roi.offset,
+                    voxel_size=in_array.voxel_size,
+                )
+                write_data = interp_shifts_array.to_ndarray(write_roi)
+                out_interp_shifts[write_roi] = write_data
 
         yield process_block
