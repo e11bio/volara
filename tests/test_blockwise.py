@@ -14,8 +14,6 @@ from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
 from volara.workers import LocalWorker
 
-DummyTask = get_task("dummy")
-
 
 @pytest.fixture()
 def cell(tmp_path) -> tuple[Array, Path]:
@@ -117,6 +115,7 @@ def affs(tmp_path, labels: tuple[Array, Path]) -> tuple[Array, Path]:
 @pytest.mark.parametrize("multiprocessing", [True, False])
 @pytest.mark.parametrize("worker", [None, LocalWorker()])
 def test_dummy_blockwise(multiprocessing, worker):
+    DummyTask = get_task("dummy")
     config = DummyTask(worker_config=worker)
     config.run_blockwise(multiprocessing=multiprocessing)
 

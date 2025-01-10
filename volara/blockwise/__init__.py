@@ -42,7 +42,7 @@ def register_task(task: BlockwiseTask):
 
 
 def discover_tasks():
-    if len(BLOCKWISE_TASKS) > 11:
+    if len(BLOCKWISE_TASKS) > 13:
         return
     for entry_point in pkg_resources.iter_entry_points("volara.blockwise_tasks"):
         task_class = entry_point.load()
