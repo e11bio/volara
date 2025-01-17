@@ -9,7 +9,7 @@ from scipy.ndimage import map_coordinates
 from skimage import registration
 
 from volara.blockwise import BlockwiseTask
-from volara.datasets import Dataset, Raw
+from volara.datasets import Dataset, Raw, Labels
 from volara.utils import PydanticCoordinate
 from augment.augment import apply_transformation
 
@@ -22,6 +22,8 @@ class ComputeShift(BlockwiseTask):
     shifts: Raw
     block_size: PydanticCoordinate
     context: PydanticCoordinate
+    mask: Labels | None = None
+    overlap_ratio: float | None = None
     target: Raw | None = None
     fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
@@ -79,20 +81,31 @@ class ComputeShift(BlockwiseTask):
         )
 
     @staticmethod
-    def compute_shift(array: np.ndarray, target_data: np.ndarray, voxel_size: np.ndarray) -> np.ndarray:
+    def compute_shift(
+        array: np.ndarray,
+        target_data: np.ndarray,
+        voxel_size: np.ndarray,
+        mask: np.ndarray | None = None,
+        overlap_ratio: float | None = None,
+    ) -> np.ndarray:
         C, Z, Y, X = array.shape
         assert target_data.shape == (1, Z, Y, X) or target_data.shape == (Z, Y, X)
         if target_data.shape == (1, Z, Y, X):
             target_data = target_data[0]
 
         shift_data = np.zeros((C, 3, 1, 1, 1))
+        if mask is not None and mask.max() == 0:
+            return shift_data
 
-        for c in range(1, C):
+        for c in range(0, C):
             # compute shift between fixed image and moving image
             shift_xyz, error, diffphase = registration.phase_cross_correlation(
                 reference_image=target_data,
                 moving_image=array[c],
-                upsample_factor=10,
+                upsample_factor=3,
+                moving_mask=mask if (mask is not None and use_mask) else None,
+                reference_mask=mask if (mask is not None and use_mask) else None,
+                overlap_ratio=overlap_ratio,
             )
             shift_data[c, :, 0, 0, 0] = shift_xyz * voxel_size
         return shift_data
@@ -106,6 +119,9 @@ class ComputeShift(BlockwiseTask):
         if self.target is not None:
             target_array = self.target.array("r")
 
+        if self.mask is not None:
+            mask_array = self.mask.array("r")
+
         def process_block(block: Block):
             valid_read_roi = block.read_roi.intersect(in_array.roi)
             in_data = in_array.to_ndarray(roi=valid_read_roi, fill_value=0)
@@ -113,7 +129,17 @@ class ComputeShift(BlockwiseTask):
                 target_data = target_array.to_ndarray(roi=valid_read_roi, fill_value=0)
             else:
                 target_data = in_data[0]
-            shifts = self.compute_shift(in_data, target_data, np.array(self.voxel_size))
+            if self.mask is not None:
+                mask_data = mask_array.to_ndarray(roi=valid_read_roi, fill_value=0)
+            else:
+                mask_data = None
+            shifts = self.compute_shift(
+                in_data,
+                target_data,
+                np.array(self.voxel_size),
+                mask_data,
+                self.overlap_ratio,
+            )
             shift_array = Array(
                 shifts,
                 offset=block.write_roi.offset,
@@ -133,6 +159,7 @@ class ApplyShift(BlockwiseTask):
     fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
     interp_shifts: Raw | None = None
+    shift_threshold: float | None = None
 
     @property
     def task_name(self) -> str:
@@ -181,7 +208,7 @@ class ApplyShift(BlockwiseTask):
         in_array = self.intensities.array()
 
         voxel_shape = self.write_roi.shape / self.voxel_size
-        
+
         self.aligned.prepare(
             shape=(in_array.shape[0], *voxel_shape),
             chunk_shape=(
@@ -199,7 +226,8 @@ class ApplyShift(BlockwiseTask):
             self.interp_shifts.prepare(
                 shape=(in_array.shape[0], in_array.voxel_size.dims, *voxel_shape),
                 chunk_shape=(
-                    in_array.shape[0], in_array.voxel_size.dims,
+                    in_array.shape[0],
+                    in_array.voxel_size.dims,
                     *self.block_size,
                 ),
                 offset=self.write_roi.offset,
@@ -211,7 +239,11 @@ class ApplyShift(BlockwiseTask):
 
     @staticmethod
     def apply_shift(
-        intensities: np.ndarray, shifts: np.ndarray, voxel_write_roi: Roi, voxel_size: np.ndarray
+        intensities: np.ndarray,
+        shifts: np.ndarray,
+        voxel_write_roi: Roi,
+        voxel_size: np.ndarray,
+        shift_threshold: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         C, Z, Y, X = intensities.shape
         DZYX = 3  # shift in Z, Y, X
@@ -219,7 +251,9 @@ class ApplyShift(BlockwiseTask):
         assert shifts.shape == (C, DZYX, BZ, BY, BX)
 
         aligned = np.zeros((C, *voxel_write_roi.shape), dtype=intensities.dtype)
-        interpolated_shifts = np.zeros((C, DZYX, *voxel_write_roi.shape), dtype=np.float32)
+        interpolated_shifts = np.zeros(
+            (C, DZYX, *voxel_write_roi.shape), dtype=np.float32
+        )
 
         for c in range(0, C):
             coordinates = np.meshgrid(
@@ -229,9 +263,17 @@ class ApplyShift(BlockwiseTask):
             )
             coordinates = np.stack(coordinates)
 
+            C, 3, 3, 3, 3
+            channel_shifts = shifts[c]
+            if shift_threshold is not None:
+                max_shift = np.repeat(
+                    channel_shifts.max(axis=0, keepdims=True), 3, axis=0
+                )
+                channel_shifts[max_shift > shift_threshold] = 0
+
             # Interpolate the distances to the original pixel coordinates
             interp_shifts = map_coordinates(
-                shifts[c],
+                channel_shifts,
                 coordinates=coordinates,
                 order=1,
             )
@@ -247,7 +289,9 @@ class ApplyShift(BlockwiseTask):
             )
             coordinates = np.stack(coordinates)
 
-            interpolated_coords = coordinates - (interp_shifts / voxel_size.reshape(-1, *((1,)*len(voxel_size))))
+            interpolated_coords = coordinates - (
+                interp_shifts / voxel_size.reshape(-1, *((1,) * len(voxel_size)))
+            )
             aligned_intensities = map_coordinates(
                 intensities[c], interpolated_coords, order=1
             )
@@ -267,7 +311,11 @@ class ApplyShift(BlockwiseTask):
             in_data = in_array.to_ndarray(roi=block.read_roi, fill_value=0)
             in_shift = shift_array.to_ndarray(roi=block.read_roi, fill_value=0)
             aligned, interp_shifts = self.apply_shift(
-                in_data, in_shift, block.write_roi / self.voxel_size, np.array(self.voxel_size)
+                in_data,
+                in_shift,
+                block.write_roi / self.voxel_size,
+                np.array(self.voxel_size),
+                self.shift_threshold,
             )
             aligned = np.clip(
                 aligned * 255,
