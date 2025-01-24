@@ -103,8 +103,8 @@ class ComputeShift(BlockwiseTask):
                 reference_image=target_data,
                 moving_image=array[c],
                 upsample_factor=3,
-                moving_mask=mask if (mask is not None and use_mask) else None,
-                reference_mask=mask if (mask is not None and use_mask) else None,
+                moving_mask=mask,
+                reference_mask=mask,
                 overlap_ratio=overlap_ratio,
             )
             shift_data[c, :, 0, 0, 0] = shift_xyz * voxel_size
@@ -256,20 +256,20 @@ class ApplyShift(BlockwiseTask):
         )
 
         for c in range(0, C):
+            channel_shifts = shifts[c]
+            if shift_threshold is not None:
+                max_shift = np.repeat(
+                    channel_shifts.max(axis=0, keepdims=True), 3, axis=0
+                )
+                mask = max_shift > shift_threshold
+                channel_shifts[mask] = 0
+
             coordinates = np.meshgrid(
                 np.linspace(0.0, 2.0, 3),
                 *[np.linspace(2 / 3, 4 / 3, axis_len // 3) for axis_len in [Z, Y, X]],
                 indexing="ij",
             )
             coordinates = np.stack(coordinates)
-
-            C, 3, 3, 3, 3
-            channel_shifts = shifts[c]
-            if shift_threshold is not None:
-                max_shift = np.repeat(
-                    channel_shifts.max(axis=0, keepdims=True), 3, axis=0
-                )
-                channel_shifts[max_shift > shift_threshold] = 0
 
             # Interpolate the distances to the original pixel coordinates
             interp_shifts = map_coordinates(
@@ -308,8 +308,9 @@ class ApplyShift(BlockwiseTask):
             out_interp_shifts = self.interp_shifts.array("a")
 
         def process_block(block: Block):
-            in_data = in_array.to_ndarray(roi=block.read_roi, fill_value=0)
             in_shift = shift_array.to_ndarray(roi=block.read_roi, fill_value=0)
+
+            in_data = in_array.to_ndarray(roi=block.read_roi, fill_value=0)
             aligned, interp_shifts = self.apply_shift(
                 in_data,
                 in_shift,
