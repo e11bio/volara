@@ -259,7 +259,7 @@ class ApplyShift(BlockwiseTask):
             channel_shifts = shifts[c]
             if shift_threshold is not None:
                 max_shift = np.repeat(
-                    channel_shifts.max(axis=0, keepdims=True), 3, axis=0
+                    np.abs(channel_shifts).max(axis=0, keepdims=True), 3, axis=0
                 )
                 mask = max_shift > shift_threshold
                 channel_shifts[mask] = 0
