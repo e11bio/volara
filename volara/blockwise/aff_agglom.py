@@ -4,6 +4,7 @@ from itertools import chain
 from typing import Annotated, Callable, Generator, Literal
 
 import numpy as np
+import networkx as nx
 from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
@@ -77,15 +78,8 @@ class AffAgglom(BlockwiseTask):
     """
 
     @property
-    def neighborhood(self):
-        """
-        The affinity neighborhood read from `self.affs_data`
-        """
-        return self.affs_data.neighborhood
-
-    @property
     def task_name(self) -> str:
-        return f"{self.affs_data.name}-{self.task_type}"
+        return f"{self.db.name}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:
@@ -107,9 +101,9 @@ class AffAgglom(BlockwiseTask):
         return []
 
     def drop_artifacts(self):
-        return self.db.drop_edges()
+        self.db.drop_edges()
 
-    def agglomerate(self, affs, frags, rag):
+    def agglomerate(self, affs: np.ndarray, frags: np.ndarray, rag: nx.Graph):
         fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
         num_frags = len(fragment_ids)
         frag_mapping = {
@@ -122,7 +116,9 @@ class AffAgglom(BlockwiseTask):
         if len(fragment_ids) == 0:
             return
 
-        def count_affs(fragments, affinities, offset):
+        def count_affs(
+            fragments: np.ndarray, affinities: np.ndarray, offset: list[Coordinate]
+        ) -> dict[int, tuple[float, float]]:
             base_frags = frags[tuple(slice(0, -m if m > 0 else None) for m in offset)]
             base_affinities = affinities[
                 tuple(slice(0, -m if m > 0 else None) for m in offset)
@@ -167,8 +163,8 @@ class AffAgglom(BlockwiseTask):
             }
             return mapping
 
-        neighborhood_affs = {}
-        for offset_affs, offset in zip(affs, self.neighborhood):
+        neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
+        for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
             neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
 
         for score_name, score_neighborhood in self.scores.items():
