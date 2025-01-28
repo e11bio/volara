@@ -10,18 +10,18 @@ from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
 from volara.blockwise import (
-    LUT,
     AffAgglom,
     Argmax,
     DistanceAgglom,
     ExtractFrags,
-    GlobalMWS,
+    GraphMWS,
     Predict,
     SeededExtractFrags,
 )
 from volara.datasets import Affs, Labels, Raw, Dataset
 from volara.dbs import SQLite
 from volara.models import Checkpoint
+from volara.lut import LUT
 
 BLOCK = daisy.Block(
     total_roi=Roi((0, 0), (10, 10)),
@@ -143,10 +143,6 @@ def test_argmax(tmpdir):
     assert np.isclose(labels.array("r")[:], np.ones((10, 10))).all()
 
 
-def test_create_lut(tmpdir):
-    pass
-
-
 def test_distance_agglom(tmpdir):
     pass
 
@@ -163,6 +159,36 @@ def test_extract_frags(tmpdir):
     pass
 
 
+@pytest.mark.parametrize("y_bias", [0.5, -0.5])
+def test_graph_mws(tmpdir, y_bias: float):
+    tmpdir = Path(tmpdir)
+    db_config = build_db(tmpdir)
+    config = GraphMWS(
+        roi=(BLOCK.read_roi.offset, BLOCK.read_roi.shape),
+        db=db_config,
+        lut=LUT(path=tmpdir / "fragment_segment_lut.npz"),
+        weights={"y_aff": (1, y_bias)},
+    )
+
+    db = config.db.open("r+")
+    graph = db.read_graph()
+    graph.add_node(1, position=(4, 2), size=600, raw_intensity=(0.1,))
+    graph.add_node(2, position=(4, 7), size=400, raw_intensity=(0.1,))
+    graph.add_edge(
+        1,
+        2,
+        y_aff=0,
+    )
+    db.write_graph(graph)
+
+    with config.process_block_func() as process_block:
+        process_block(BLOCK)
+
+    fragments, segments = config.lut.load()
+    assert len(np.unique(fragments)) == 2, fragments
+    assert len(np.unique(segments)) == 1 + (y_bias < 0), segments
+
+
 def test_lut(tmpdir):
     pass
 
@@ -177,4 +203,3 @@ def test_seeded_extract_frags(tmpdir):
 
 def test_threshold(tmpdir):
     pass
-

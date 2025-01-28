@@ -8,6 +8,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 
+from volara.lut import LUT
 from ..datasets import Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
@@ -30,14 +31,14 @@ class GraphMWS(BlockwiseTask):
     task_type: Literal["graph-mws"] = "graph-mws"
 
     db: DB
-    lut: Path
+    lut: LUT
     """
-    The path to the final look up table mapping fragment ids to segment ids.
+    The Look Up Table that will be saved on completion of this task.
     """
-    starting_lut: Path | None = None
+    starting_lut: LUT | None = None
     """
-    An optional look up table that provides a set of merged fragments that must
-    be preserved in the final look up table.
+    An optional Look Up Table that provides a set of merged fragments that must
+    be preserved in the final Look Up Table.
     """
     weights: dict[str, tuple[float, float]]
     """
@@ -99,8 +100,7 @@ class GraphMWS(BlockwiseTask):
         return 1
 
     def drop_artifacts(self):
-        if self.lut.exists():
-            self.lut.unlink()
+        self.lut.drop()
         if self.out_db is not None:
             self.out_db.drop()
 
@@ -112,14 +112,7 @@ class GraphMWS(BlockwiseTask):
             out_rag_provider = self.out_db.open("w")
 
         if self.starting_lut is not None:
-            starting_lut = (
-                self.starting_lut
-                if self.starting_lut.name.endswith(".npz")
-                else f"{self.starting_lut}.npz"
-            )
-            starting_frags, starting_segs = np.load(starting_lut)[
-                "fragment_segment_lut"
-            ]
+            starting_frags, starting_segs = self.starting_lut.load()
             starting_map = {
                 in_frag: out_frag
                 for in_frag, out_frag in zip(starting_frags, starting_segs)
@@ -142,9 +135,9 @@ class GraphMWS(BlockwiseTask):
 
             for u, v, edge_attrs in graph.edges(data=True):
                 scores = [
-                    edge_attrs.get(b, None) + self.weights[b]
-                    for b in self.weights
-                    if edge_attrs.get(b, None) is not None
+                    w * edge_attrs.get(attr, None) + b
+                    for attr, (w, b) in self.weights.items()
+                    if edge_attrs.get(attr, None) is not None
                 ]
                 if self.edge_per_attr:
                     for score in scores:
@@ -175,8 +168,7 @@ class GraphMWS(BlockwiseTask):
                 inputs, outputs = [], []
 
             lut = np.array([inputs, outputs])
-
-            np.savez_compressed(self.lut, fragment_segment_lut=lut, edges=edges)
+            self.lut.save(lut, edges=edges)
 
             if self.mean_attrs is not None:
                 assert self.out_db is not None, self.out_db
