@@ -40,6 +40,12 @@ class DB(ABC, StrictBaseModel):
     values in a blockwise task.
     """
 
+    ndim: int = 3
+    """
+    The dimensionality of your spatial data. This is used to define the number
+    of coordinates used to index your node locations.
+    """
+
     @property
     def default_node_attrs(self) -> AttrsDict:
         """
@@ -60,7 +66,7 @@ class DB(ABC, StrictBaseModel):
             whether or not this fragment has been filtered out
 
         """
-        return {"position": Vec(float, 3), "size": int, "filtered": bool}
+        return {"position": Vec(float, self.ndim), "size": int, "filtered": bool}
 
     @property
     def default_edge_attrs(self) -> AttrsDict:
