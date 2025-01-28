@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
+import daisy
 
 import mwatershed as mws
 import numpy as np
@@ -18,32 +19,71 @@ DB = Annotated[
 ]
 
 
-class GlobalMWS(BlockwiseTask):
-    task_type: Literal["create-lut"] = "create-lut"
-    frags_data: Labels
+class GraphMWS(BlockwiseTask):
+    """
+    Graph based execution of the MWS algorithm.
+    Currently only supports executing in memory. The full graph for the given ROI
+    is read into memory and then we run the mutex watershed algorithm on the full
+    graph to get a globally optimal look up table.
+    """
+
+    task_type: Literal["graph-mws"] = "graph-mws"
+
     db: DB
     lut: Path
+    """
+    The path to the final look up table mapping fragment ids to segment ids.
+    """
     starting_lut: Path | None = None
-    bias: dict[str, float]
-    roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
+    """
+    An optional look up table that provides a set of merged fragments that must
+    be preserved in the final look up table.
+    """
+    weights: dict[str, tuple[float, float]]
+    """
+    A dictionary of edge attributes and their weight and bias. These will be used
+    to compute the edge weights for the mutex watershed algorithm.
+    Each attribute will have a final score of `w * edge_data[attr] + b` for every
+    `attr, (w, b) in weights.items()`
+    If an attribute is not present in the edge data it will be skipped.
+    """
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    """
+    The roi to process. This is the roi of the full graph to process.
+    """
     edge_per_attr: bool = True
-    store_segment_intensities: dict[str, str] | None = None
+    """
+    Wether or not to create a separate edge for each attribute in the weights. If
+    False, the sum of all the weighted attributes will be used as the only edge weight.
+    """
+    mean_attrs: dict[str, str] | None = None
+    """
+    A dictionary of attributes to compute the mean of for each segment. Given
+    `mean_attrs = {"attr1": "out_attr1"}` and nodes `n_i` in a segment `s` we will
+    set `s.out_attr1 = sum(n_i.attr1 * n_i.size) / sum(n_i.size)`.
+    """
     out_db: DB | None = None
+    """
+    The db in which to store segment nodes and their attributes. Must not be None
+    if `mean_attrs` is not None.
+    """
     bounded_read: bool = True
+    """
+    Reading from the db can be made more efficient by not doing a spatial query
+    and assuming we want all nodes and edges. If you don't want to process a
+    sub volume of the graph setting this to false will speed up the read.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
 
     @property
     def task_name(self) -> str:
-        return f"{self.frags_data.name}-{self.task_type}"
+        return f"{self.lut.name}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:
-        if self.roi is not None:
-            return Roi(*self.roi)
-        else:
-            return self.frags_data.array("r").roi
+        Roi(*self.roi)
 
     @property
     def write_size(self) -> Coordinate:
@@ -55,6 +95,7 @@ class GlobalMWS(BlockwiseTask):
 
     @property
     def num_voxels_in_block(self) -> int:
+        # We currently can't process in blocks
         return 1
 
     def drop_artifacts(self):
@@ -86,23 +127,23 @@ class GlobalMWS(BlockwiseTask):
         else:
             starting_map = None
 
-        def process_block(block):
+        def process_block(block: daisy.Block):
             read_roi = block.write_roi if self.bounded_read else None
             node_attrs = (
-                ["size"] + list(self.store_segment_intensities.keys())
-                if self.store_segment_intensities is not None
+                ["size"] + list(self.mean_attrs.keys())
+                if self.mean_attrs is not None
                 else []
             )
             graph = rag_provider.read_graph(
-                read_roi, node_attrs=node_attrs, edge_attrs=list(self.bias.keys())
+                read_roi, node_attrs=node_attrs, edge_attrs=list(self.weights.keys())
             )
 
             edges = []
 
             for u, v, edge_attrs in graph.edges(data=True):
                 scores = [
-                    edge_attrs.get(b, None) + self.bias[b]
-                    for b in self.bias
+                    edge_attrs.get(b, None) + self.weights[b]
+                    for b in self.weights
                     if edge_attrs.get(b, None) is not None
                 ]
                 if self.edge_per_attr:
@@ -137,7 +178,7 @@ class GlobalMWS(BlockwiseTask):
 
             np.savez_compressed(self.lut, fragment_segment_lut=lut, edges=edges)
 
-            if self.store_segment_intensities is not None:
+            if self.mean_attrs is not None:
                 assert self.out_db is not None, self.out_db
                 out_graph = out_rag_provider.read_graph(block.write_roi)
                 assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
@@ -147,19 +188,21 @@ class GlobalMWS(BlockwiseTask):
                     in_group.add(in_frag)
 
                 for out_frag, in_group in mapping.items():
-                    # update size. Each fragment will
                     computed_codes = {
                         "seg_size": sum(
                             [graph.nodes[in_frag]["size"] for in_frag in in_group]
                         )
                     }
-                    for in_code, out_code in self.store_segment_intensities.items():
+                    for in_code, out_code in self.mean_attrs.items():
                         out_codes = [
                             np.array(graph.nodes[in_frag][in_code])
                             * graph.nodes[in_frag]["size"]
                             for in_frag in in_group
                         ]
-                        out_data = np.mean(np.array(out_codes), axis=0)
+                        out_data = (
+                            np.sum(np.array(out_codes), axis=0)
+                            / computed_codes["seg_size"]
+                        )
                         computed_codes[out_code] = out_data
                     for in_frag in in_group:
                         frag_attrs = graph.nodes[in_frag]

@@ -9,10 +9,9 @@ from .distance_agglom import (
     DistanceAgglomSimple as DistanceAgglomSimple,
 )
 from .extract_frags import ExtractFrags as ExtractFrags
-from .global_seg import GlobalMWS as GlobalMWS
+from .graph_mws import GraphMWS as GraphMWS
 from .lut import LUT as LUT
 from .predict import Predict as Predict
-from .pseudo_affs import PseudoAffs as PseudoAffs
 from .register import ApplyShift as ApplyShift
 from .register import ComputeShift as ComputeShift
 from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags

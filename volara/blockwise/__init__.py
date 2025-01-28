@@ -13,9 +13,8 @@ from .components import (
     DistanceAgglom,
     DistanceAgglomSimple,
     ExtractFrags,
-    GlobalMWS,
+    GraphMWS,
     Predict,
-    PseudoAffs,
     SeededExtractFrags,
     Threshold,
 )
@@ -29,10 +28,9 @@ BLOCKWISE_TASKS = [
     DistanceAgglom,
     DistanceAgglomSimple,
     ExtractFrags,
-    GlobalMWS,
+    GraphMWS,
     Predict,
     SeededExtractFrags,
-    PseudoAffs,
     Threshold,
 ]
 
@@ -42,7 +40,7 @@ def register_task(task: BlockwiseTask):
 
 
 def discover_tasks():
-    if len(BLOCKWISE_TASKS) > 13:
+    if len(BLOCKWISE_TASKS) > 12:
         return
     for entry_point in pkg_resources.iter_entry_points("volara.blockwise_tasks"):
         task_class = entry_point.load()
