@@ -1,7 +1,7 @@
 import pytest
 from daisy.task_state import TaskState
 
-from volara.blockwise.dummy import DummyTask
+from tests.dummy import DummyTask
 from volara.workers import LocalWorker
 
 
