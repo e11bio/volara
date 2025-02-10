@@ -3,17 +3,15 @@ from shutil import rmtree
 from typing import Literal
 
 import numpy as np
+from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from scipy.ndimage import map_coordinates
 from skimage import registration
 
 from volara.blockwise import BlockwiseTask
-from volara.datasets import Dataset, Raw, Labels
+from volara.datasets import Dataset, Labels, Raw
 from volara.utils import PydanticCoordinate
-from augment.augment import apply_transformation
-
-from daisy import Block
 
 
 class ComputeShift(BlockwiseTask):

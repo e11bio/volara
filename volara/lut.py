@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from .utils import StrictBaseModel
-
 import numpy as np
+
+from .utils import StrictBaseModel
 
 
 class LUT(StrictBaseModel):

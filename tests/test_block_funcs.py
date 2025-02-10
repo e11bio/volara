@@ -1,26 +1,18 @@
-import json
-import textwrap
 from pathlib import Path
 
 import daisy
 import numpy as np
 import pytest
-import torch
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
 from volara.blockwise import (
     AffAgglom,
     Argmax,
-    DistanceAgglom,
-    ExtractFrags,
     GraphMWS,
-    Predict,
-    SeededExtractFrags,
 )
-from volara.datasets import Affs, Labels, Raw, Dataset
+from volara.datasets import Affs, Dataset, Labels, Raw
 from volara.dbs import SQLite
-from volara.models import Checkpoint
 from volara.lut import LUT
 
 BLOCK = daisy.Block(

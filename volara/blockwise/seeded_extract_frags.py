@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import Annotated, Literal
+from typing import Literal
 
 import daisy
 import mwatershed as mws
@@ -11,7 +11,6 @@ import networkx as nx
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
-from pydantic import Field
 from scipy.ndimage.filters import gaussian_filter
 
 from ..datasets import Affs, Dataset, Labels
@@ -30,6 +29,7 @@ class SeededExtractFrags(BlockwiseTask):
 
     Any fragment that does not intersect with a skeleton is discarded.
     """
+
     task_type: Literal["seeded-extract-frags"] = "seeded-extract-frags"
     affs_data: Affs
     """

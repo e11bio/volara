@@ -18,6 +18,7 @@ class Relabel(BlockwiseTask):
     A task for blockwise relabelling of arrays using a lookup table from fragment
     to segment IDs.
     """
+
     task_type: Literal["relabel"] = "relabel"
     frags_data: Labels
     """

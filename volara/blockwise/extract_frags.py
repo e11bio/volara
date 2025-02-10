@@ -28,6 +28,7 @@ class ExtractFrags(BlockwiseTask):
     A task for extracting fragments from affinities.
     Internally it uses mutex watershed to agglomerate fragments.
     """
+
     task_type: Literal["extract-frags"] = "extract-frags"
     db: Annotated[
         PostgreSQL | SQLite,

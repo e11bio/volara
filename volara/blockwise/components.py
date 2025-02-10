@@ -7,9 +7,9 @@ from .distance_agglom import (
 )
 from .extract_frags import ExtractFrags as ExtractFrags
 from .graph_mws import GraphMWS as GraphMWS
-from .relabel import Relabel as Relabel
 from .predict import Predict as Predict
 from .register import ApplyShift as ApplyShift
 from .register import ComputeShift as ComputeShift
+from .relabel import Relabel as Relabel
 from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags
 from .threshold import Threshold as Threshold

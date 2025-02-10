@@ -14,6 +14,7 @@ class Threshold(BlockwiseTask):
     """
     Blockwise threshold an array
     """
+
     task_type: Literal["threshold"] = "threshold"
     in_data: Raw
     """

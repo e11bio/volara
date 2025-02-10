@@ -1,15 +1,14 @@
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Annotated, Literal
-import daisy
 
+import daisy
 import mwatershed as mws
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 
 from volara.lut import LUT
-from ..datasets import Labels
+
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask

@@ -1,22 +1,20 @@
 import logging
 from contextlib import contextmanager
-from itertools import chain, combinations, product
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from itertools import chain, combinations
 from typing import Annotated, Literal
 
-import mwatershed as mws
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 from scipy.ndimage import laplace
 from scipy.spatial import cKDTree
 
-from ..datasets import Dataset, Labels, Raw
+from volara.lut import LUT
+
+from ..datasets import Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
-from volara.lut import LUT
 
 logger = logging.getLogger(__file__)
 
@@ -34,12 +32,16 @@ class DistanceAgglom(BlockwiseTask):
     this we can set a connection radius that will limit the euclidean distance between
     connectable fragments.
     """
+
     task_type: Literal["distance-agglom"] = "distance-agglom"
 
-    storage: Annotated[
-        PostgreSQL | SQLite,
-        Field(discriminator="db_type"),
-    ] | LUT
+    storage: (
+        Annotated[
+            PostgreSQL | SQLite,
+            Field(discriminator="db_type"),
+        ]
+        | LUT
+    )
     """
     Where to store the edges and or the final Look Up Table.
     If a Database is provided, it is assumed that each fragment in the

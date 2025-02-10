@@ -8,11 +8,10 @@ from scipy.ndimage import label
 from skimage import data
 from skimage.filters import gaussian
 
-from volara.blockwise import AffAgglom, get_task
+from volara.blockwise import AffAgglom
 from volara.datasets import Affs, Labels
 from volara.dbs import SQLite
 from volara.tmp import seg_to_affgraph
-from volara.workers import LocalWorker
 
 
 @pytest.fixture()
@@ -110,7 +109,6 @@ def affs(tmp_path, labels: tuple[Array, Path]) -> tuple[Array, Path]:
         seg_to_affgraph(labels_array[:], nhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]) * 255
     )
     return affs_array, affs_path
-
 
 
 @pytest.mark.skip(reason="pytest quitting for some reason")

@@ -3,8 +3,8 @@ from contextlib import contextmanager
 from itertools import chain
 from typing import Annotated, Callable, Generator, Literal
 
-import numpy as np
 import networkx as nx
+import numpy as np
 from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number

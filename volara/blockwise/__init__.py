@@ -5,17 +5,17 @@ from pydantic import Field, TypeAdapter
 
 from .blockwise import BlockwiseTask as BlockwiseTask
 from .components import (
-    Relabel,
-    AffAgglom,
-    ApplyShift,
-    Argmax,
-    ComputeShift,
-    DistanceAgglom,
-    ExtractFrags,
-    GraphMWS,
-    Predict,
-    SeededExtractFrags,
-    Threshold,
+    AffAgglom,  # noqa
+    ApplyShift,  # noqa
+    Argmax,  # noqa
+    ComputeShift,  # noqa
+    DistanceAgglom,  # noqa
+    ExtractFrags,  # noqa
+    GraphMWS,  # noqa
+    Predict,  # noqa
+    Relabel,  # noqa
+    SeededExtractFrags,  # noqa
+    Threshold,  # noqa
 )
 
 BLOCKWISE_TASKS = []
@@ -45,6 +45,8 @@ def get_task(task_type: str) -> BlockwiseTask:
 
 
 TASKS_DISCOVERED = False
+
+
 def get_blockwise_tasks_type():
     global TASKS_DISCOVERED
     if not TASKS_DISCOVERED:
