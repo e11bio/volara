@@ -5,13 +5,12 @@ from pydantic import Field, TypeAdapter
 
 from .blockwise import BlockwiseTask as BlockwiseTask
 from .components import (
-    LUT,
+    Relabel,
     AffAgglom,
     ApplyShift,
     Argmax,
     ComputeShift,
     DistanceAgglom,
-    DistanceAgglomSimple,
     ExtractFrags,
     GraphMWS,
     Predict,
@@ -19,35 +18,18 @@ from .components import (
     Threshold,
 )
 
-BLOCKWISE_TASKS = [
-    LUT,
-    AffAgglom,
-    ApplyShift,
-    Argmax,
-    ComputeShift,
-    DistanceAgglom,
-    DistanceAgglomSimple,
-    ExtractFrags,
-    GraphMWS,
-    Predict,
-    SeededExtractFrags,
-    Threshold,
-]
+BLOCKWISE_TASKS = []
 
 
 def register_task(task: BlockwiseTask):
-    BLOCKWISE_TASKS.append(task)
+    if task not in BLOCKWISE_TASKS:
+        BLOCKWISE_TASKS.append(task)
 
 
 def discover_tasks():
-    if len(BLOCKWISE_TASKS) > 12:
-        return
     for entry_point in pkg_resources.iter_entry_points("volara.blockwise_tasks"):
         task_class = entry_point.load()
         register_task(task_class)
-
-
-discover_tasks()
 
 
 def get_task(task_type: str) -> BlockwiseTask:
@@ -62,7 +44,12 @@ def get_task(task_type: str) -> BlockwiseTask:
     raise ValueError(f"Unknown task: {task_type}, {BLOCKWISE_TASKS}")
 
 
+TASKS_DISCOVERED = False
 def get_blockwise_tasks_type():
+    global TASKS_DISCOVERED
+    if not TASKS_DISCOVERED:
+        discover_tasks()
+        TASKS_DISCOVERED = True
     return TypeAdapter(
         Annotated[
             Union[tuple(BLOCKWISE_TASKS)],

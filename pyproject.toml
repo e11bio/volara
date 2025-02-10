@@ -33,7 +33,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest >= 8.0", "pytest-cov >= 5.0", "mypy >= 1.0", "ruff >= 0.6"]
+dev = [
+    "pytest >= 8.0",
+    "pytest-cov >= 5.0",
+    "mypy >= 1.0",
+    "ruff >= 0.6",
+]
 docs = [
     "autodoc_pydantic >= 2.0",
     "sphinx-autodoc-typehints >= 2.0",
@@ -53,11 +58,9 @@ volara-cli = "volara.cli:cli"
 aff-agglom = "volara.blockwise:AffAgglom"
 argmax = "volara.blockwise:Argmax"
 distance-agglom = "volara.blockwise:DistanceAgglom"
-distance-agglom-simple = "volara.blockwise:DistanceAgglomSimple"
-dummy = "volara.blockwise.dummy:DummyTask"
 extract-frags = "volara.blockwise:ExtractFrags"
 graph-mws = "volara.blockwise:GraphMWS"
-lut = "volara.blockwise:LUT"
+lut = "volara.blockwise:Relabel"
 predict = "volara.blockwise:Predict"
 seeded-extract-frags = "volara.blockwise:SeededExtractFrags"
 threshold = "volara.blockwise:Threshold"

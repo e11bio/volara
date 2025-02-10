@@ -112,13 +112,6 @@ def affs(tmp_path, labels: tuple[Array, Path]) -> tuple[Array, Path]:
     return affs_array, affs_path
 
 
-@pytest.mark.parametrize("multiprocessing", [True, False])
-@pytest.mark.parametrize("worker", [None, LocalWorker()])
-def test_dummy_blockwise(multiprocessing, worker):
-    DummyTask = get_task("dummy")
-    config = DummyTask(worker_config=worker)
-    config.run_blockwise(multiprocessing=multiprocessing)
-
 
 @pytest.mark.skip(reason="pytest quitting for some reason")
 def test_aff_agglom(affs, labels, tmp_path):

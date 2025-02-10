@@ -5,12 +5,9 @@ from .blockwise import BlockwiseTask as BlockwiseTask
 from .distance_agglom import (
     DistanceAgglom as DistanceAgglom,
 )
-from .distance_agglom import (
-    DistanceAgglomSimple as DistanceAgglomSimple,
-)
 from .extract_frags import ExtractFrags as ExtractFrags
 from .graph_mws import GraphMWS as GraphMWS
-from .lut import LUT as LUT
+from .relabel import Relabel as Relabel
 from .predict import Predict as Predict
 from .register import ApplyShift as ApplyShift
 from .register import ComputeShift as ComputeShift
