@@ -11,10 +11,22 @@ from .blockwise import BlockwiseTask
 
 
 class Threshold(BlockwiseTask):
+    """
+    Blockwise threshold an array
+    """
     task_type: Literal["threshold"] = "threshold"
     in_data: Raw
+    """
+    The dataset to threshold.
+    """
     mask: Labels
+    """
+    The output thresholded dataset saved as a mask.
+    """
     threshold: float
+    """
+    The threshold value to apply to your dataset.
+    """
     block_size: PydanticCoordinate
 
     fit: Literal["shrink"] = "shrink"
