@@ -13,11 +13,24 @@ from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
 
-class LUT(BlockwiseTask):
-    task_type: Literal["write-segments"] = "write-segments"
+class Relabel(BlockwiseTask):
+    """
+    A task for blockwise relabelling of arrays using a lookup table from fragment
+    to segment IDs.
+    """
+    task_type: Literal["relabel"] = "relabel"
     frags_data: Labels
+    """
+    The fragments dataset from which we read the fragment IDs.
+    """
     seg_data: Labels
+    """
+    The segments dataset to which we write the relabeled segment IDs.
+    """
     lut: Path
+    """
+    The path to the lookup table (LUT) that maps fragment IDs to segment IDs.
+    """
     block_size: PydanticCoordinate
 
     fit: Literal["shrink"] = "shrink"
