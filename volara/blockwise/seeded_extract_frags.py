@@ -15,7 +15,6 @@ from pydantic import Field
 from scipy.ndimage.filters import gaussian_filter
 
 from ..datasets import Affs, Dataset, Labels
-from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -23,21 +22,42 @@ logger = logging.getLogger(__file__)
 
 
 class SeededExtractFrags(BlockwiseTask):
+    """
+    Extract fragments from affinities using a set of skeletons as a supervising signal.
+    Any voxel that intersects with a node placed on a skeleton is guaranteed to be assigned
+    the label of the skeleton it intersects with. The affinities are used to fill out
+    the rest of the segment to get a full volume representation of your skeletons.
+
+    Any fragment that does not intersect with a skeleton is discarded.
+    """
     task_type: Literal["seeded-extract-frags"] = "seeded-extract-frags"
-    db: Annotated[
-        PostgreSQL | SQLite,
-        Field(discriminator="db_type"),
-    ]
     affs_data: Affs
+    """
+    The affinities dataset that will be used to expand the skeletons to full segments.
+    """
     segs_data: Labels
+    """
+    The segmentations dataset that will contain the final segmentations.
+    """
     block_size: PydanticCoordinate
     context: PydanticCoordinate
     bias: list[float]
+    """
+    The bias terms to be used for each offset in the affinities neighborhoood.
+    """
     strides: list[PydanticCoordinate] | None = None
-    nml_file: Path = Path(
-        "/home/arlo/Desktop/Workspace/Projects/data/skeletons/full_dataset.nml"
-    )
+    """
+    The strides with which to filter each offset in the affinities neighborhood.
+    """
+    nml_file: Path
+    """
+    The nml file containing the skeletons.
+    """
     randomized_strides: bool = False
+    """
+    Whether or not to convert the strides from a grid like filter to a random probability
+    of filtering out each affinity edge.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -77,7 +97,6 @@ class SeededExtractFrags(BlockwiseTask):
 
     def init(self):
         self.init_out_array()
-        self.db.init()
 
     def init_out_array(self):
         # get data from in_array
@@ -103,7 +122,6 @@ class SeededExtractFrags(BlockwiseTask):
 
         def process_block(block: daisy.Block):
             affs = affs_array.to_ndarray(block.read_roi, fill_value=0)
-            # graph = graph_db.read_graph(block.read_roi)
             graph = nx_graph
             seeds = np.zeros(affs.shape[1:], dtype=np.uint64)
             unique_seeds = set()
