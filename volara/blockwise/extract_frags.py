@@ -24,24 +24,77 @@ logger = logging.getLogger(__file__)
 
 
 class ExtractFrags(BlockwiseTask):
+    """
+    A task for extracting fragments from affinities.
+    Internally it uses mutex watershed to agglomerate fragments.
+    """
     task_type: Literal["extract-frags"] = "extract-frags"
     db: Annotated[
         PostgreSQL | SQLite,
         Field(discriminator="db_type"),
     ]
+    """
+    The database into which we will store node centers along with statistics
+    such as fragment size, mean intensity, etc.
+    """
     affs_data: Affs
+    """
+    The affinities dataset that we will use to extract fragments.
+    """
     frags_data: Labels
+    """
+    The output dataset that will contain the extracted fragments.
+    """
     mask_data: Raw | None = None
+    """
+    An optional mask that will be used to ignore some affinities.
+    """
     block_size: PydanticCoordinate
     context: PydanticCoordinate
+
     save_intensities: dict[str, Raw] | None = None
+    """
+    Whether to save the mean intensity for a fragment from a specific dataset of intensities.
+    If the intensities array has multiple channels, the mean intensity will be computed for each channel.
+    """
     bias: list[float]
+    """
+    The merge/split bias for the affinities. This should be a vector of length equal to the
+    size of the neighborhood with one bias per offset. This allows you to have a merge preferring
+    bias for short range affinites and a split preferring bias for long range affinities.
+    """
     strides: list[PydanticCoordinate] | None = None
+    """
+    The strides to use for each affinity offset in the mutex watershed algorithm. If you have
+    long range affinities it can be heplful to ignore some percentage of them to avoid excessive
+    splits, so you may want to use only every other voxel in the z direction for example.
+    """
     sigma: PydanticCoordinate | None = None
+    """
+    The amplitude of the smoothing kernel to apply to the affinities before watershed.
+    This can help agglomerate fragments from the inside out to avoid a small merge error
+    causing a large fragment to split in half.
+    """
     noise_eps: float | None = None
+    """
+    The amplitude of the random noise to add to the affinities before watershed. This
+    also helps avoid streak like fragment artifacts from processing affinities in a fifo order.
+    """
     filter_fragments: float = 0.0
+    """
+    The minimum average affinity value for a fragment to be considered valid. If the average
+    affinity value is below this threshold the fragment will be removed.
+    """
     remove_debris: int = 0
+    """
+    The minimum size of a fragment to be considered valid. If the fragment is smaller than this
+    value it will be removed.
+    """
     randomized_strides: bool = False
+    """
+    If using strides, you may want to switch from a grided stride to a random probability of
+    filtering out an affinity. This can help avoid grid artifacts in the fragments.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
