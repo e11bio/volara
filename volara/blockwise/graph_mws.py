@@ -83,7 +83,7 @@ class GraphMWS(BlockwiseTask):
 
     @property
     def write_roi(self) -> Roi:
-        Roi(*self.roi)
+        return Roi(*self.roi)
 
     @property
     def write_size(self) -> Coordinate:
