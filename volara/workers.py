@@ -85,7 +85,7 @@ class SlurmWorker(Worker):
         log_file: str | None = None,
         error_file: str | None = None,
         flags: list[str] | None = None,
-    ) -> str | list[str] | None:
+    ) -> list[str]:
         """
         Prepares and optionally executes a command on a slurm cluster,
 
@@ -171,23 +171,7 @@ class SlurmWorker(Worker):
         # Append the command to be executed within the job
         run_command.append(f"--wrap={command}")
 
-        if not execute:
-            return " ".join(run_command) if expand else run_command
-        else:
-            run_command_str = " ".join(run_command)
-            result = sp.run(run_command_str, shell=True, capture_output=True, text=True)
-
-            if result.stderr:
-                logging.error(f"Error submitting job: {result.stderr}")
-                return None
-            else:
-                logging.info(f"Job submitted successfully: {result.stdout}")
-                job_id = (
-                    result.stdout.strip().split()[-1]
-                    if "Submitted batch job" in result.stdout
-                    else "Job ID not found"
-                )
-                return job_id
+        return run_command
 
 
 class LSFWorker(Worker):
@@ -238,7 +222,7 @@ class LSFWorker(Worker):
         queue: str = "",
         log_file: str | None = None,
         error_file: str | None = None,
-    ) -> str | list[str] | None:
+    ) -> list[str]:
         """
         Prepares and optionally executes a command on an LSF cluster,
 
@@ -271,9 +255,7 @@ class LSFWorker(Worker):
 
         run_command.append(f"'{command}'")
 
-        run_command_str = " ".join(run_command)
-
-        return run_command_str
+        return run_command
 
 
 class LocalWorker(Worker):

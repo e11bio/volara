@@ -21,7 +21,7 @@ class Model(ABC, StrictBaseModel):
     min_input_shape: PydanticCoordinate
     min_output_shape: PydanticCoordinate
     min_step_shape: PydanticCoordinate
-    out_channels: int | list[int] | None
+    out_channels: list[int | None] | int | None
     out_range: tuple[float, float]
 
     @property

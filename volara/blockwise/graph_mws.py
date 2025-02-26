@@ -148,12 +148,12 @@ class GraphMWS(BlockwiseTask):
 
             prefix_edges = []
             if starting_map is not None:
-                groups = {}
+                groups: dict[int, set[int]] = {}
                 for node in graph.nodes:
                     groups.setdefault(starting_map[node], set()).add(node)
                 for group in groups.values():
-                    group = list(group)
-                    for u, v in zip(group, group[1:]):
+                    pre_merged_ids = list(group)
+                    for u, v in zip(pre_merged_ids, pre_merged_ids[1:]):
                         prefix_edges.append((True, u, v))
 
             edges = sorted(
@@ -162,9 +162,13 @@ class GraphMWS(BlockwiseTask):
                 reverse=True,
             )
             edges = [(bool(aff > 0), u, v) for aff, u, v in edges]
-            lut = mws.cluster(prefix_edges + edges)
-            if len(lut) > 0:
-                inputs, outputs = zip(*lut)
+
+            # generate the look up table via mutex watershed clustering
+            mws_lut: list[tuple[int, int]] = mws.cluster(prefix_edges + edges)
+            inputs: list[int]
+            outputs: list[int]
+            if len(mws_lut) > 0:
+                inputs, outputs = [list(x) for x in zip(*mws_lut)]
             else:
                 inputs, outputs = [], []
 
@@ -175,7 +179,7 @@ class GraphMWS(BlockwiseTask):
                 assert self.out_db is not None, self.out_db
                 out_graph = out_rag_provider.read_graph(block.write_roi)
                 assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
-                mapping = {}
+                mapping: dict[int, set[int]] = {}
                 for in_frag, out_frag in zip(inputs, outputs):
                     in_group = mapping.setdefault(out_frag, set())
                     in_group.add(in_frag)

@@ -3,16 +3,17 @@ from pathlib import Path
 import daisy
 from funlib.geometry import Roi
 
+from volara.lut import LUT
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
-from ..models import Checkpoint
+from ..models import TorchModel
 from ..utils import PydanticCoordinate
 from ..workers import Worker
 from .components import (
-    LUT,
+    Relabel,
     AffAgglom,
     ExtractFrags,
-    GlobalMWS,
+    GraphMWS,
     Predict,
 )
 
@@ -33,11 +34,11 @@ class MWSPipeline:
     bias: list[float]
     filter_fragments: float
     remove_debris: int
-    lut: Path
+    lut: LUT
     edge_biases: dict[str, float] = {"adj_weight": -0.0, "lr_weight": -1.0}
     scores: dict[str, list[PydanticCoordinate]]
 
-    affs_model_config: Checkpoint | None = None
+    affs_model_config: TorchModel | None = None
 
     db_config: PostgreSQL | SQLite
 
@@ -105,20 +106,19 @@ class MWSPipeline:
         )
 
     @property
-    def global_segments_config(self) -> GlobalMWS:
-        return GlobalMWS(
+    def global_segments_config(self) -> GraphMWS:
+        return GraphMWS(
             db=self.db_config,
-            frags_data=self.frags_config,
             lut=self.lut,
-            bias=self.edge_biases,
+            weights={k: (1.0, v) for k, v in self.edge_biases.items()},
             num_workers=self.num_workers_per_task,
             roi=self.roi,
             worker_config=self.worker_config,
         )
 
     @property
-    def write_segments_config(self) -> LUT:
-        return LUT(
+    def write_segments_config(self) -> Relabel:
+        return Relabel(
             frags_data=self.frags_config,
             seg_data=self.segs_config,
             lut=self.lut,

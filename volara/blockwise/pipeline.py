@@ -81,15 +81,9 @@ class Pipeline:
                 nx.topological_sort(self.task_graph)
             )
 
-            print([node.task_name for node in node_ordering])
-
-            task_map = {}
+            task_map: dict[BlockwiseTask, daisy.Task] = {}
             sinks = []
             for node in node_ordering:
-                upstream_nodes = list(self.task_graph.predecessors(node))
-                print(
-                    node.task_name, [upstream.task_name for upstream in upstream_nodes]
-                )
                 upstream_tasks = [
                     task_map[upstream]
                     for upstream in self.task_graph.predecessors(node)
