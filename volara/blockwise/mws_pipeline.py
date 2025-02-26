@@ -1,20 +1,20 @@
-from pathlib import Path
 
 import daisy
 from funlib.geometry import Roi
 
 from volara.lut import LUT
+
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
 from ..models import TorchModel
 from ..utils import PydanticCoordinate
 from ..workers import Worker
 from .components import (
-    Relabel,
     AffAgglom,
     ExtractFrags,
     GraphMWS,
     Predict,
+    Relabel,
 )
 
 

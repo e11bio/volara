@@ -13,7 +13,7 @@ from gunpowder import ArrayKey, Batch, BatchProvider
 from pydantic import Field
 
 from ..datasets import LSD, Affs, Dataset, Raw
-from ..models import TorchModel, Model
+from ..models import Model, TorchModel
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
