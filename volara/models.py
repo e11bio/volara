@@ -1,4 +1,3 @@
-import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -133,4 +132,3 @@ class TorchModel(Model):
         return np.clip((out_data + out_min) / (out_max - out_min) * 255, 0, 255).astype(
             np.uint8
         )
-

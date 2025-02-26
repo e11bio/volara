@@ -218,9 +218,7 @@ class LSFWorker(Worker):
 
     def is_bsub_available(self) -> bool:
         try:
-            _result = sp.run(
-                ["bsub", "-V"], capture_output=True, text=True, check=True
-            )
+            _result = sp.run(["bsub", "-V"], capture_output=True, text=True, check=True)
             # successful, return True
             return True
         except sp.CalledProcessError as e:
