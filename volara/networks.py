@@ -11,7 +11,7 @@ from funlib.geometry import Coordinate
 from .utils import PydanticCoordinate, StrictBaseModel
 
 
-class Model(ABC, StrictBaseModel):
+class Network(ABC, StrictBaseModel):
     """
     A base class for defining the common attributes and methods for all
     model types.
@@ -83,16 +83,16 @@ class Model(ABC, StrictBaseModel):
         return data.astype(np.float32) / 255
 
 
-class TorchModel(Model):
+class TorchNet(Network):
     checkpoint_type: Literal["torch"] = "torch"
-    model_path: Path
+    save_path: Path
     checkpoint_file: Path | None = None
     pred_size_growth: PydanticCoordinate | None = None
 
     def model(self):
         import torch
 
-        model = torch.load(self.model_path, map_location="cpu")
+        model = torch.load(self.save_path, map_location="cpu")
 
         if self.checkpoint_file is not None:
             model.load_state_dict(
