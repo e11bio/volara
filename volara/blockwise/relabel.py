@@ -1,11 +1,11 @@
 from contextlib import contextmanager
-from pathlib import Path
 from shutil import rmtree
 from typing import Literal
 
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
+from volara.lut import LUT
 from volara.tmp import replace_values
 
 from ..datasets import Dataset, Labels
@@ -28,7 +28,7 @@ class Relabel(BlockwiseTask):
     """
     The segments dataset to which we write the relabeled segment IDs.
     """
-    lut: Path
+    lut: LUT
     """
     The path to the lookup table (LUT) that maps fragment IDs to segment IDs.
     """
@@ -92,8 +92,7 @@ class Relabel(BlockwiseTask):
         segs = self.seg_data.array("r+")
 
         def process_block(block):
-            lut = self.lut if self.lut.name.endswith(".npz") else f"{self.lut}.npz"
-            mapping = np.load(Path(lut))["fragment_segment_lut"].astype(np.uint64)
+            mapping = self.lut.load()
             self.map_block(block, frags, segs, mapping)
 
         yield process_block

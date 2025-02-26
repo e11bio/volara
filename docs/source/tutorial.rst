@@ -109,9 +109,9 @@ Tutorial
         fig = plt.figure(figsize=(10, 4))
         if len(data.shape) <= 3:
             if len(data.shape) == 2:
-                plt.imshow(data, cmap=cmap)
+                plt.imshow(data, cmap=cmap, interpolation="none")
             else:
-                plt.imshow(data.transpose(1, 2, 0), cmap=cmap)
+                plt.imshow(data.transpose(1, 2, 0), cmap=cmap, interpolation="none")
         plt.show()
 
 Introduction
@@ -333,14 +333,16 @@ out small fragments can help handle massive datasets.
 
 .. jupyter-execute::
 
-  from volara.blockwise import GlobalMWS
+  from volara.blockwise import GraphMWS
+  from volara.lut import LUT
 
   # Global MWS
-  global_mws = GlobalMWS(
+  roi = fragments.array("r").roi
+  global_mws = GraphMWS(
       db=db,
-      frags_data=fragments,
-      lut="cells3d.zarr/lut",
-      bias={"zyx_aff": -0.5},
+      roi=(roi.offset, roi.shape),
+      lut=LUT(path = "cells3d.zarr/lut"),
+      weights={"zyx_aff": (1.0, -0.5)},
   )
   global_mws.run_blockwise(multiprocessing=False)
 
@@ -358,18 +360,18 @@ and generate a new segmentation array. Let's do that now:
 
 .. jupyter-execute::
 
-  from volara.blockwise import LUT
+  from volara.blockwise import Relabel
 
   segments = Labels(store="cells3d.zarr/segments")
 
-  # Write LUT
-  lut = LUT(
+  # Relabel fragments to segments using lut
+  relabel = Relabel(
       frags_data=fragments,
       seg_data=segments,
-      lut="cells3d.zarr/lut",
+      lut=LUT(path="cells3d.zarr/lut"),
       block_size=(20, 100, 100),
   )
-  lut.run_blockwise(multiprocessing=False)
+  relabel.run_blockwise(multiprocessing=False)
 
 Viewing Final Segmentation
 --------------------------

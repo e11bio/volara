@@ -42,7 +42,9 @@ class GraphMWS(BlockwiseTask):
     weights: dict[str, tuple[float, float]]
     """
     A dictionary of edge attributes and their weight and bias. These will be used
-    to compute the edge weights for the mutex watershed algorithm.
+    to compute the edge weights for the mutex watershed algorithm. Positive edges
+    will result in fragments merging, negative edges will result in splitting and
+    edges will be processed in order of high to low magnitude.
     Each attribute will have a final score of `w * edge_data[attr] + b` for every
     `attr, (w, b) in weights.items()`
     If an attribute is not present in the edge data it will be skipped.
@@ -53,7 +55,7 @@ class GraphMWS(BlockwiseTask):
     """
     edge_per_attr: bool = True
     """
-    Wether or not to create a separate edge for each attribute in the weights. If
+    Whether or not to create a separate edge for each attribute in the weights. If
     False, the sum of all the weighted attributes will be used as the only edge weight.
     """
     mean_attrs: dict[str, str] | None = None

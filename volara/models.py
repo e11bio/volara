@@ -18,6 +18,13 @@ class Model(ABC, StrictBaseModel):
     model types.
     """
 
+    in_channels: int
+    min_input_shape: PydanticCoordinate
+    min_output_shape: PydanticCoordinate
+    min_step_shape: PydanticCoordinate
+    out_channels: int | list[int] | None
+    out_range: tuple[float, float]
+
     @property
     def context(self) -> Coordinate:
         """
@@ -77,54 +84,44 @@ class Model(ABC, StrictBaseModel):
         return data.astype(np.float32) / 255
 
 
-class JitModel(Model):
-    checkpoint_type: Literal["jit"] = "jit"
-    jit_path: Path
-    checkpoint_file: Path
-    meta_file: Path
+class TorchModel(Model):
+    checkpoint_type: Literal["torch"] = "torch"
+    model_path: Path
+    checkpoint_file: Path | None = None
     pred_size_growth: PydanticCoordinate | None = None
 
     def model(self):
         import torch
 
-        model = torch.jit.load(self.jit_path, map_location="cpu")
+        model = torch.load(self.model_path, map_location="cpu")
 
-        model.load_state_dict(
-            torch.load(self.checkpoint_file, map_location="cpu")["model_state_dict"]
-        )
-        model.num_in_channels = self.conf["in_channels"]
+        if self.checkpoint_file is not None:
+            model.load_state_dict(
+                torch.load(self.checkpoint_file, map_location="cpu")["model_state_dict"]
+            )
 
         return model
 
     @property
-    def conf(self) -> dict:
-        with open(self.meta_file) as f:
-            meta_data = json.load(f)
-        return meta_data
-
-    @property
     def eval_input_shape(self) -> Coordinate:
-        input_shape = Coordinate(self.conf["min_input_shape"])
+        input_shape = Coordinate(self.min_input_shape)
 
         if self.pred_size_growth is not None:
-            assert (
-                np.sum(self.pred_size_growth % Coordinate(self.conf["min_step_shape"]))
-                == 0
-            )
+            assert np.sum(self.pred_size_growth % Coordinate(self.min_step_shape)) == 0
         if self.pred_size_growth is not None:
             input_shape = input_shape + self.pred_size_growth
         return input_shape
 
     @property
     def eval_output_shape(self) -> Coordinate:
-        output_shape = Coordinate(self.conf["min_output_shape"])
+        output_shape = Coordinate(self.min_output_shape)
         if self.pred_size_growth is not None:
             output_shape = output_shape + self.pred_size_growth
         return output_shape
 
     @property
     def num_out_channels(self) -> list[int | None]:
-        num_channels = self.conf["out_channels"]
+        num_channels = self.out_channels
 
         if isinstance(num_channels, int) or num_channels is None:
             return [num_channels]
@@ -132,127 +129,8 @@ class JitModel(Model):
             return num_channels
 
     def to_uint8(self, out_data: np.ndarray) -> np.ndarray:
-        out_min, out_max = self.conf["out_range"]
+        out_min, out_max = self.out_range
         return np.clip((out_data + out_min) / (out_max - out_min) * 255, 0, 255).astype(
             np.uint8
         )
 
-
-class Checkpoint(Model):
-    checkpoint_type: Literal["checkpoint"] = "checkpoint"
-    saved_model: Path  # tmp
-    checkpoint_file: Path
-    meta_file: Path
-    pred_size_growth: PydanticCoordinate | None = None
-
-    def model(self):
-        import torch
-
-        model = torch.load(self.saved_model, map_location="cpu")
-
-        model.load_state_dict(
-            torch.load(self.checkpoint_file, map_location="cpu")["model_state_dict"]
-        )
-
-        if "loss_func" in self.conf and self.conf["loss_func"] == "classification":
-            if self.conf["num_fmaps_out"] == 1:
-                model = torch.nn.Sequential(model, torch.nn.Sigmoid())
-            else:
-                model = torch.nn.Sequential(model, torch.nn.Softmax(dim=1))
-
-        try:
-            model.num_in_channels = self.conf["num_in_channels"]
-        except KeyError:
-            model.num_in_channels = self.conf["in_channels"]
-
-        if "neighborhood" in self.conf:
-            model.neighborhood = self.conf["neighborhood"]
-
-        return model
-
-    @property
-    def conf(self) -> dict:
-        with open(self.meta_file) as f:
-            meta_data = json.load(f)
-            if isinstance(meta_data, str):
-                meta_data = json.loads(meta_data)
-            if "m_conf" in meta_data:
-                meta_data = meta_data["m_conf"]
-        return meta_data
-
-    @property
-    def eval_input_shape(self) -> Coordinate:
-        input_shape = Coordinate(self.conf["input_shape"])
-        if self.pred_size_growth is not None:
-            input_shape = input_shape + self.pred_size_growth
-        return input_shape
-
-    @property
-    def eval_output_shape(self) -> Coordinate:
-        output_shape = Coordinate(self.conf["output_shape"])
-        if self.pred_size_growth is not None:
-            output_shape = output_shape + self.pred_size_growth
-        return output_shape
-
-    @property
-    def num_out_channels(self) -> list[int | None]:
-        try:
-            num_channels = self.conf["num_out_channels"]
-        except KeyError:
-            num_channels = self.conf["num_fmaps_out"]
-        if "channel_agnostic" in self.conf and self.conf["channel_agnostic"]:
-            return [None]
-
-        if isinstance(num_channels, int) or num_channels is None:
-            return [num_channels]
-        elif isinstance(num_channels, list):
-            return num_channels
-        else:
-            raise ValueError(
-                f"Output channels ({num_channels}) must be an int or a list of ints."
-            )
-
-    def to_uint8(self, out_data: np.ndarray) -> np.ndarray:
-        if "loss_func" in self.conf and self.conf["loss_func"] == "uniform":
-            return np.clip(out_data * 128 + 128, 0, 255).astype(np.uint8)
-        return super().to_uint8(out_data)
-
-
-class DaCapo(Model):
-    checkpoint_type: Literal["dacapo"] = "dacapo"
-    name: str
-    criterion: str
-
-    def model(self):
-        from dacapo.experiments import Run
-        from dacapo.store.create_store import create_config_store, create_weights_store
-
-        config_store = create_config_store()
-        weights_store = create_weights_store()
-
-        run_config = config_store.retrieve_run_config(self.name)
-        run = Run(run_config)
-        model = run.model
-        try:
-            weights_store._load_best(run, self.criterion)
-        except FileNotFoundError:
-            iteration = int(self.criterion)
-            weights = weights_store.retrieve_weights(run, iteration)
-            model.load_state_dict(weights.model)
-
-        eval_output_shape = model.compute_output_shape(model.eval_input_shape)[1]
-        model.eval_output_shape = eval_output_shape
-
-        return model
-
-    @property
-    def eval_input_shape(self) -> Coordinate:
-        raise NotImplementedError()
-
-    @property
-    def eval_output_shape(self) -> Coordinate:
-        raise NotImplementedError()
-
-    @property
-    def num_out_channels(self) -> list[int | None]:
-        raise NotImplementedError()

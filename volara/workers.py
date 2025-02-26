@@ -191,7 +191,91 @@ class SlurmWorker(Worker):
 
 
 class LSFWorker(Worker):
-    pass
+    queue: str
+    num_gpus: int = 0
+    num_cpus: int = 1
+
+    def get_command(self, config_path: Path, task_name: str) -> list[str]:
+        cmd = super().get_command(config_path, task_name)
+
+        context = daisy.Context.from_env()
+        worker_id = context["worker_id"]
+        task_id = context["task_id"]
+
+        worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
+
+        log_file = worker_log_basename / "lsf_worker.log"
+        log_error = worker_log_basename / "lsf_worker.err"
+
+        return self.get_lsf_command(
+            command=" ".join(cmd),
+            queue=self.queue,
+            num_cpus=self.num_cpus,
+            num_gpus=self.num_gpus,
+            log_file=log_file,
+            error_file=log_error,
+        )
+
+    def is_bsub_available(self) -> bool:
+        try:
+            _result = sp.run(
+                ["bsub", "-V"], capture_output=True, text=True, check=True
+            )
+            # successful, return True
+            return True
+        except sp.CalledProcessError as e:
+            # errors in the subprocess
+            raise RuntimeError(f"bsub failed to execute: {e}") from e
+        except FileNotFoundError:
+            # bsub is not found in the system's PATH
+            raise EnvironmentError(
+                "bsub is not installed or not in PATH. Either install bsub on your cluster, or run locally."
+            )
+
+    def get_lsf_command(
+        self,
+        command: str,
+        num_cpus: int = 1,
+        num_gpus: int = 0,
+        queue: str = "",
+        log_file: str | None = None,
+        error_file: str | None = None,
+    ) -> str | list[str] | None:
+        """
+        Prepares and optionally executes a command on an LSF cluster,
+
+        Args:
+            command (str): The command to be executed within the LSF job.
+            num_cpus (int, optional): Number of CPU cores per task. Defaults to 1.
+            num_gpus (int, optional): Number of GPUs required. Defaults to 0.
+            queue (str, optional): Name of the LSF queue to submit the job.
+                Defaults to "".
+            log_file (str | None, optional): Path for standard output logging.
+                Defaults to None.
+            error_file (str | None, optional): Path for standard error logging.
+                Defaults to None.
+        """
+        self.is_bsub_available()
+
+        log = f"-o {log_file}" if log_file else ""
+        error = f"-e {error_file}" if error_file else ""
+
+        run_command = ["bsub"]
+
+        run_command.append(f"-n {num_cpus}")
+        if num_gpus > 0:
+            run_command.append(f"-num-gpus {num_gpus}")
+        if queue:
+            run_command.append(f"-q {queue}")
+
+        run_command.append(log)
+        run_command.append(error)
+
+        run_command.append(f"'{command}'")
+
+        run_command_str = " ".join(run_command)
+
+        return run_command_str
 
 
 class LocalWorker(Worker):

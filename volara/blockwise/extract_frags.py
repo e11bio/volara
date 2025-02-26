@@ -63,12 +63,23 @@ class ExtractFrags(BlockwiseTask):
     The merge/split bias for the affinities. This should be a vector of length equal to the
     size of the neighborhood with one bias per offset. This allows you to have a merge preferring
     bias for short range affinites and a split preferring bias for long range affinities.
+
+    Example:
+    Assuming you trained affs [(0, 1), (1, 0), (0, 4), (4, 0)] for a 2D dataset, you can set the bias
+    to [-0.2, -0.2, -0.8, -0.8]. This will bias you towards merging on short range affinities and splitting on
+    long range affinities which has been shown to work well.
     """
     strides: list[PydanticCoordinate] | None = None
     """
     The strides to use for each affinity offset in the mutex watershed algorithm. If you have
     long range affinities it can be heplful to ignore some percentage of them to avoid excessive
     splits, so you may want to use only every other voxel in the z direction for example.
+
+    Example:
+    Assuming you trained affs [(0, 1), (1, 0), (0, 4), (4, 0)] for a 2D dataset, you can set the strides
+    to [(1, 1), (1, 1), (2, 2), (2, 2)]. This will result in only 1 in every 4 long range affinities
+    being used in the mutex watershed algorithm resulting in fewer splits (assuming you biased long
+    range affinities towards splitting).
     """
     sigma: PydanticCoordinate | None = None
     """

@@ -132,6 +132,14 @@ class DB(ABC, StrictBaseModel):
         """
         pass
 
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """
+        A unique identifier for this databse.
+        """
+        pass
+
 
 class SQLite(DB):
     """
@@ -147,6 +155,10 @@ class SQLite(DB):
     """
     The path to the SQLite db file to use.
     """
+
+    @property
+    def name(self) -> str:
+        return self.path.stem
 
     def open(self, mode="r") -> SQLiteGraphDataBase:
         node_attrs, edge_attrs = self.graph_attrs

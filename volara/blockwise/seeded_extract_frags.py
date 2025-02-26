@@ -1,19 +1,18 @@
 import logging
-import xml.etree.ElementTree as ET
 from contextlib import contextmanager
-from pathlib import Path
 from shutil import rmtree
-from typing import Literal
+from typing import Annotated, Literal
 
 import daisy
 import mwatershed as mws
-import networkx as nx
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
+from pydantic import Field
 from scipy.ndimage.filters import gaussian_filter
 
 from ..datasets import Affs, Dataset, Labels
+from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -49,9 +48,12 @@ class SeededExtractFrags(BlockwiseTask):
     """
     The strides with which to filter each offset in the affinities neighborhood.
     """
-    nml_file: Path
+    graph_db: Annotated[
+        PostgreSQL | SQLite,
+        Field(discriminator="db_type"),
+    ]
     """
-    The nml file containing the skeletons.
+    The graph database containing the skeletons to use as a supervising signale.
     """
     randomized_strides: bool = False
     """
@@ -116,13 +118,11 @@ class SeededExtractFrags(BlockwiseTask):
         affs_array = self.affs_data.array("r")
         segs_array = self.segs_data.array("r+")
 
-        nx_graph = nml_to_networkx_graph(
-            self.nml_file, voxel_size=affs_array.voxel_size
-        )
+        graph_provider = self.graph_db.open("r")
 
         def process_block(block: daisy.Block):
             affs = affs_array.to_ndarray(block.read_roi, fill_value=0)
-            graph = nx_graph
+            graph = graph_provider.read_graph(block.read_roi)
             seeds = np.zeros(affs.shape[1:], dtype=np.uint64)
             unique_seeds = set()
             for _, node_attrs in graph.nodes(data=True):
@@ -191,41 +191,3 @@ class SeededExtractFrags(BlockwiseTask):
             logger.info(f"releasing block: {block}")
 
         yield process_block
-
-
-def nml_to_networkx_graph(
-    path_to_nml, position_attribute=["z", "y", "x"], voxel_size=[400, 150, 150]
-):
-    tree = ET.parse(path_to_nml)
-    root = tree.getroot()
-
-    G = nx.Graph()
-
-    # Loop through each 'thing' in the NML file (these are skeletons)
-    for skeleton in root.findall("thing"):
-        skeleton_id = skeleton.attrib["id"]
-
-        # Add nodes
-        nodes = skeleton.find("nodes").findall("node")
-
-        # Skip skeleton if it contains only a single node (not sure why these exist)
-        if len(nodes) <= 1:
-            continue
-
-        for node in nodes:
-            node_id = node.attrib["id"]
-
-            position = [
-                float(node.attrib[p]) * v
-                for p, v in zip(position_attribute, voxel_size)
-            ]
-
-            G.add_node(node_id, position=position, skeleton_id=skeleton_id)
-
-        # Add edges
-        for edge in skeleton.find("edges").findall("edge"):
-            source = edge.attrib["source"]
-            target = edge.attrib["target"]
-            G.add_edge(source, target)
-
-    return G

@@ -5,8 +5,6 @@
    overview
    install
    tutorial
-
-   blog
    
    cli
    api
