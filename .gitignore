@@ -164,3 +164,4 @@ cython_debug/
 .vscode
 docs/source/_build
 volara_logs
+uv.lock
