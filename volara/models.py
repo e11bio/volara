@@ -11,7 +11,7 @@ from funlib.geometry import Coordinate
 from .utils import PydanticCoordinate, StrictBaseModel
 
 
-class Network(ABC, StrictBaseModel):
+class Model(StrictBaseModel, ABC):
     """
     A base class for defining the common attributes and methods for all
     model types.
@@ -83,7 +83,7 @@ class Network(ABC, StrictBaseModel):
         return data.astype(np.float32) / 255
 
 
-class TorchNet(Network):
+class TorchModel(Model):
     checkpoint_type: Literal["torch"] = "torch"
     save_path: Path
     checkpoint_file: Path | None = None

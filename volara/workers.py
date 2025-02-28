@@ -10,7 +10,7 @@ from .utils import StrictBaseModel
 logger = logging.getLogger(__name__)
 
 
-class Worker(ABC, StrictBaseModel):
+class Worker(StrictBaseModel, ABC):
     queue: str | None = None
     num_gpus: int = 0
     num_cpus: int = 1

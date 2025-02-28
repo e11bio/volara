@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BlockwiseTask(ABC, StrictBaseModel):
+class BlockwiseTask(StrictBaseModel, ABC):
     roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     """
     An optional `roi` defining the total region to output.

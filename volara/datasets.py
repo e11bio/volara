@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class Dataset(ABC, StrictBaseModel):
+class Dataset(StrictBaseModel, ABC):
     """
     A Dataset base class that defines the common attributes and methods
     for all dataset types.

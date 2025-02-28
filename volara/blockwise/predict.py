@@ -13,7 +13,7 @@ from gunpowder import ArrayKey, Batch, BatchProvider
 from pydantic import Field
 
 from ..datasets import LSD, Affs, Dataset, Raw
-from ..networks import Network, TorchNet
+from ..models import Model, TorchModel
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -67,7 +67,7 @@ class Predict(BlockwiseTask):
     task_type: Literal["predict"] = "predict"
     roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     checkpoint: Annotated[
-        TorchNet,
+        TorchModel,
         Field(discriminator="checkpoint_type"),
     ]
     in_data: Raw
@@ -78,7 +78,7 @@ class Predict(BlockwiseTask):
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
 
     @property
-    def checkpoint_config(self) -> Network:
+    def checkpoint_config(self) -> Model:
         return self.checkpoint
 
     @property

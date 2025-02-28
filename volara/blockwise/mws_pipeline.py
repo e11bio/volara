@@ -5,7 +5,7 @@ from volara.lut import LUT
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
-from ..networks import TorchNet
+from ..models import TorchModel
 from ..utils import PydanticCoordinate
 from ..workers import Worker
 from .components import (
@@ -37,7 +37,7 @@ class MWSPipeline:
     edge_biases: dict[str, float] = {"adj_weight": -0.0, "lr_weight": -1.0}
     scores: dict[str, list[PydanticCoordinate]]
 
-    affs_model_config: TorchNet | None = None
+    affs_model_config: TorchModel | None = None
 
     db_config: PostgreSQL | SQLite
 

@@ -11,7 +11,7 @@ from .utils import StrictBaseModel
 AttrsDict = dict[str, Any]
 
 
-class DB(ABC, StrictBaseModel):
+class DB(StrictBaseModel, ABC):
     """
     A base class for defining the common attributes and methods for all
     database types.
