@@ -2,7 +2,7 @@ name: Deploy Docs to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [v1.0]
     tags: "*"
   workflow_dispatch:
 
