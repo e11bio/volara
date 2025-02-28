@@ -38,6 +38,10 @@ class SeededExtractFrags(BlockwiseTask):
     """
     The segmentations dataset that will contain the final segmentations.
     """
+    mask_data: Labels | None = None
+    """
+    An optional mask for masking out the affinities.
+    """
     block_size: PydanticCoordinate
     context: PydanticCoordinate
     bias: list[float]
@@ -117,11 +121,16 @@ class SeededExtractFrags(BlockwiseTask):
     def process_block_func(self):
         affs_array = self.affs_data.array("r")
         segs_array = self.segs_data.array("r+")
+        mask_array = self.mask_data.array("r") if self.mask_data is not None else None
 
         graph_provider = self.graph_db.open("r")
 
         def process_block(block: daisy.Block):
             affs = affs_array.to_ndarray(block.read_roi, fill_value=0)
+            if mask_array is not None:
+                affs *= mask_array.to_ndarray(block.read_roi, fill_value=0) > 0
+            if affs.max() == 0:
+                return
             graph = graph_provider.read_graph(block.read_roi)
             seeds = np.zeros(affs.shape[1:], dtype=np.uint64)
             unique_seeds = set()
