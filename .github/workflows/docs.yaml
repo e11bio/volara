@@ -2,7 +2,7 @@ name: Deploy Docs to GitHub Pages
 
 on:
   push:
-    branches: [v1.0]
+    branches: [main]
     tags: "*"
   workflow_dispatch:
 
@@ -36,7 +36,7 @@ jobs:
           retention-days: 90
 
   deploy:
-    if: github.ref == 'refs/heads/v1.0'
+    if: github.ref == 'refs/heads/main'
     needs: build
     # Deploy to the github-pages environment
     environment:
