@@ -119,11 +119,19 @@ class AffAgglom(BlockwiseTask):
         def count_affs(
             fragments: np.ndarray, affinities: np.ndarray, offset: Coordinate
         ) -> dict[int, tuple[float, float]]:
-            base_frags = frags[tuple(slice(0, -m if m > 0 else None) for m in offset)]
-            base_affinities = affinities[
-                tuple(slice(0, -m if m > 0 else None) for m in offset)
+            base_frags = frags[
+                tuple(
+                    slice(-m if m < 0 else None, -m if m > 0 else None) for m in offset
+                )
             ]
-            offset_frags = fragments[tuple(slice(m, None) for m in offset)]
+            base_affinities = affinities[
+                tuple(
+                    slice(-m if m < 0 else None, -m if m > 0 else None) for m in offset
+                )
+            ]
+            offset_frags = fragments[
+                tuple(slice(m if m > 0 else None, m if m < 0 else None) for m in offset)
+            ]
 
             mask = (offset_frags != base_frags) * (offset_frags > 0) * (base_frags > 0)
 
