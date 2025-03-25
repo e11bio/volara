@@ -104,3 +104,7 @@ class Pipeline:
                 server = daisy.SerialServer()
                 cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
                 server.run_blockwise(all_tasks)
+
+    def drop(self):
+        for task in self.task_graph.nodes():
+            task.drop()

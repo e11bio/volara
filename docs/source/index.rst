@@ -5,6 +5,7 @@
    overview
    install
    tutorial
+   cremi
    
    cli
    api

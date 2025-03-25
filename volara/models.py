@@ -92,7 +92,7 @@ class TorchModel(Model):
     def model(self):
         import torch
 
-        model = torch.load(self.save_path, map_location="cpu")
+        model = torch.load(self.save_path, map_location="cpu", weights_only=False)
 
         if self.checkpoint_file is not None:
             model.load_state_dict(

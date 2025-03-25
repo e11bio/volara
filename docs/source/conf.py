@@ -35,6 +35,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinx_click",  # auto document cli
+    "nbsphinx",
     "myst_parser",  # include md files in rst files
 ]
 

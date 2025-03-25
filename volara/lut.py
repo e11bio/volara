@@ -31,8 +31,8 @@ class LUT(StrictBaseModel):
             return self.path
 
     def drop(self):
-        if self.path.exists():
-            self.path.unlink()
+        if self.file.exists():
+            self.file.unlink()
 
     def save(self, lut, edges=None):
         np.savez_compressed(self.file, fragment_segment_lut=lut, edges=edges)

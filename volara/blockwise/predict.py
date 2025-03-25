@@ -161,11 +161,16 @@ class Predict(BlockwiseTask):
         model = self.checkpoint.model()
         model.eval()
 
-        pipeline = ArraySource(input_key, self.in_data.array("r"))
+        in_array = self.in_data.array("r")
+
+        pipeline = ArraySource(input_key, in_array)
 
         pipeline += gp.Pad(input_key, size=None)
 
-        pipeline += gp.Stack(1)
+        if in_array.channel_dims < 2:
+            pipeline += gp.Stack(1)
+        if in_array.channel_dims < 1:
+            pipeline += gp.Stack(1)
 
         pipeline += gp.torch.Predict(
             model=model,

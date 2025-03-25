@@ -30,6 +30,7 @@ dependencies = [
     "torch >= 2.0",
     "dask >= 2024.0.0",
     "numba >= 0.53.1",
+    "lsds>=0.1.3",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +50,9 @@ docs = [
     "jupyter-sphinx >= 0.5",
     "matplotlib >= 3.0",
     "pooch >= 1.8",
+    "wget>=3.2",
+    "funlib-show-neuroglancer>=0.2",
+    "nbsphinx>=0.9.7",
 ]
 
 [project.scripts]
