@@ -22,7 +22,7 @@ dependencies = [
     "daisy >= 1.2.2",
     "funlib.geometry >=0.3",
     "funlib.learn.torch @ git+https://github.com/funkelab/funlib.learn.torch",
-    "funlib.persistence >= 0.5.2",
+    "funlib.persistence >= 0.6",
     "gunpowder >= 1.4.0",
     "mwatershed >= 0.5.2",
     "pydantic >= 2.6.3",
@@ -34,12 +34,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest >= 8.0",
-    "pytest-cov >= 5.0",
-    "mypy >= 1.0",
-    "ruff >= 0.6",
-]
+dev = ["pytest >= 8.0", "pytest-cov >= 5.0", "mypy >= 1.0", "ruff >= 0.6"]
 docs = [
     "autodoc_pydantic >= 2.0",
     "sphinx-autodoc-typehints >= 2.0",
