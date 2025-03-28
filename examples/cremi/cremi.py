@@ -1,6 +1,7 @@
 # %%
-import wget
 from pathlib import Path
+
+import wget
 from funlib.geometry import Coordinate
 
 # Download some cremi data
@@ -50,8 +51,8 @@ pred_size_growth = Coordinate(0, 0, 0)
 
 # %%
 from volara.blockwise import Predict
+from volara.datasets import Affs, Raw
 from volara.models import TorchModel
-from volara.datasets import Raw, Affs
 
 raw_dataset = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0))
 affs_dataset = Affs(
@@ -114,7 +115,7 @@ if __name__ == "__main__":
 # 4) Relabel fragments - This step runs blockwise and creates the final segmentation.
 
 # %%
-from volara.blockwise import ExtractFrags, AffAgglom, GraphMWS, Relabel
+from volara.blockwise import AffAgglom, ExtractFrags, GraphMWS, Relabel
 from volara.datasets import Labels
 from volara.dbs import SQLite
 from volara.lut import LUT
