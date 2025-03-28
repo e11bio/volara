@@ -76,12 +76,17 @@ class Argmax(BlockwiseTask):
         shape = self.write_roi.shape // self.voxel_size
         chunk_shape = self.write_size // self.voxel_size
 
+        in_data = self.probs_data.array("r")
+
         self.sem_data.prepare(
             shape,
             chunk_shape,
             self.write_roi.offset,
             self.voxel_size,
-            self._out_array_dtype,
+            units=in_data.units,
+            axis_names=in_data.axis_names,
+            types=in_data.types,
+            dtype=self._out_array_dtype,
             kwargs=self.sem_data.attrs,
         )
 

@@ -1,3 +1,4 @@
+# %%
 import wget
 from pathlib import Path
 from funlib.geometry import Coordinate
@@ -187,7 +188,6 @@ relabel = Relabel(
 
 if __name__ == "__main__":
     pipeline = extract_frags + aff_agglom + graph_mws + relabel
-    # pipeline.drop()
     pipeline.run_blockwise(multiprocessing=True)
 
 # %% [markdown]
@@ -239,3 +239,39 @@ if __name__ == "__main__":
     plot_labels(ax[2], segments_dataset.array("r")[100])
     ax[2].set_title("Segments")
     plt.show()
+
+# %% [markdown]
+
+# This slice looks very nice, but we processed a 3D volume so lets visualize it with a tool a bit more
+# suited to 3D visualization. We will use neuroglancer for this.
+
+# %%
+import neuroglancer
+from funlib.show.neuroglancer import add_layer
+
+viewer = neuroglancer.Viewer()
+with viewer.txn() as s:
+    add_layer(s, raw_dataset.array("r"), "raw")
+    add_layer(
+        s,
+        affs_dataset.array("r"),
+        "affinities",
+        shader="rgb",
+        color={"rgb_channels": [0, 1, 2]},
+    )
+    add_layer(
+        s,
+        lsds_dataset.array("r"),
+        "lsds",
+        shader="rgb",
+        color={"rgb_channels": [0, 1, 2]},
+    )
+    add_layer(s, fragments_dataset.array("r"), "fragments")
+    add_layer(s, segments_dataset.array("r"), "segments")
+print(viewer)
+
+# %%
+from IPython.display import IFrame
+
+IFrame(src=f"{viewer}", width="800", height="600")
+# %%

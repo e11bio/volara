@@ -72,12 +72,16 @@ class Relabel(BlockwiseTask):
         self.init_out_array()
 
     def init_out_array(self):
+        in_data = self.frags_data.array("r")
         self.seg_data.prepare(
             self.write_roi.shape / self.voxel_size,
             self.write_size / self.voxel_size,
             self.write_roi.offset,
             self.voxel_size,
-            self._out_array_dtype,
+            units=in_data.units,
+            axis_names=in_data.axis_names,
+            types=in_data.types,
+            dtype=self._out_array_dtype,
             kwargs=self.seg_data.attrs,
         )
 

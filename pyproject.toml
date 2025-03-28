@@ -53,6 +53,7 @@ docs = [
     "wget>=3.2",
     "funlib-show-neuroglancer>=0.2",
     "nbsphinx>=0.9.7",
+    "jupytext>=1.16.7",
 ]
 
 [project.scripts]

@@ -106,14 +106,18 @@ class SeededExtractFrags(BlockwiseTask):
 
     def init_out_array(self):
         # get data from in_array
-        voxel_size = self.affs_data.array("r").voxel_size
+        in_data = self.affs_data.array("r")
+        voxel_size = in_data.voxel_size
 
         self.segs_data.prepare(
-            self.write_roi,
-            voxel_size,
-            self.write_size,
-            self._out_array_dtype,
-            None,
+            self.write_roi.shape / voxel_size,
+            self.block_write_roi.shape / voxel_size,
+            offset=self.write_roi.offset,
+            voxel_size=voxel_size,
+            units=in_data.units,
+            axis_names=in_data.axis_names[1:],
+            types=in_data.types[1:],
+            dtype=self._out_array_dtype,
             kwargs=self.segs_data.attrs,
         )
 

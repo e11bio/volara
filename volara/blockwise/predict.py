@@ -118,6 +118,10 @@ class Predict(BlockwiseTask):
         self.init_out_array()
 
     def init_out_array(self):
+        # TODO: hardcoding assuming channels first :/
+        in_data = self.in_data.array("r")
+        units = in_data.units
+        axis_names = in_data.axis_names[-in_data.voxel_size.dims :]
         for out_data, num_channels in zip(
             self.out_data, self.checkpoint_config.num_out_channels
         ):
@@ -131,6 +135,9 @@ class Predict(BlockwiseTask):
                     chunk_shape=chunk_shape,
                     offset=self.write_roi.offset,
                     voxel_size=self.voxel_size,
+                    units=units,
+                    axis_names=[f"{out_data.name}^"] + axis_names,
+                    types=[out_data.name] + in_data.types,
                     dtype=self._out_array_dtype,
                     kwargs=out_data.attrs,
                 )

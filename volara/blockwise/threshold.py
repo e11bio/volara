@@ -68,12 +68,16 @@ class Threshold(BlockwiseTask):
         self.init_out_array()
 
     def init_out_array(self):
+        in_data = self.in_data.array("r")
         self.mask.prepare(
             self.write_roi.shape / self.voxel_size,
             self.write_size / self.voxel_size,
-            self.write_roi.offset,
-            self.voxel_size,
-            self._out_array_dtype,
+            offset=self.write_roi.offset,
+            voxel_size=self.voxel_size,
+            units=in_data.units,
+            axis_names=in_data.axis_names,
+            types=in_data.types,
+            dtype=self._out_array_dtype,
             kwargs=self.mask.attrs,
         )
 

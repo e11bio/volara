@@ -60,6 +60,11 @@ class ComputeShift(BlockwiseTask):
         self.init_out_array()
 
     def init_out_array(self):
+        in_data = self.intensities.array("r")
+        # TODO: avoid hardcoding channels first :/
+        # TODO: avoid assuming channel dim exists in intensities :/
+        units = in_data.units
+        axis_names = in_data.axis_names[-in_data.voxel_size.dims :]
         self.shifts.prepare(
             shape=(
                 self.intensities.array().shape[0],
@@ -73,7 +78,9 @@ class ComputeShift(BlockwiseTask):
             ),
             offset=self.write_roi.offset,
             voxel_size=self.write_size,
-            units=self.intensities.units,
+            units=units,
+            axis_names=[in_data.axis_names[0], "axis", *axis_names],
+            types=[in_data.types[0], "axis", *in_data.types[1:]],
             dtype=np.float32,
             kwargs=self.shifts.attrs,
         )
@@ -216,9 +223,12 @@ class ApplyShift(BlockwiseTask):
             offset=self.write_roi.offset,
             voxel_size=self.voxel_size,
             units=self.intensities.units,
+            axis_names=in_array.axis_names,
             dtype=np.uint8,
             kwargs=self.aligned.attrs,
         )
+
+        # TODO: avoid hardcoding channels first and assuming channel dim exists in intensities :/
 
         if self.interp_shifts is not None:
             self.interp_shifts.prepare(
@@ -231,6 +241,7 @@ class ApplyShift(BlockwiseTask):
                 offset=self.write_roi.offset,
                 voxel_size=self.voxel_size,
                 units=self.intensities.units,
+                axis_names=[in_array.axis_names[0], "axis", *in_array.axis_names[1:]],
                 dtype=np.float32,
                 kwargs=self.interp_shifts.attrs,
             )
