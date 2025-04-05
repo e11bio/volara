@@ -163,7 +163,7 @@ class ExtractFrags(BlockwiseTask):
             self.voxel_size,
             units=in_data.units,
             axis_names=in_data.axis_names[1:],
-            types=in_data.types,
+            types=in_data.types[1:],
             dtype=self._out_array_dtype,
             kwargs=self.frags_data.attrs,
         )
