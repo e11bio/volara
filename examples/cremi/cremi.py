@@ -25,7 +25,7 @@ if not Path("sample_A+_20160601.zarr/raw").exists():
 # Now we can predict the LSDs and affinities for this dataset. We have provided a very simple
 # pretrained model for this dataset. We went for speed and efficiency over accuracy for this
 # model so that it can run in a github action. You can train a significantly better model
-# with access to a GPU and more RAM.
+# with access to a GPU and more Memmory.
 
 # %%
 # Here are some important details about the model:
@@ -45,7 +45,9 @@ min_step_shape = Coordinate(1, 1, 1)
 # The range of predicted values. We have a sigmoid activation on our model
 out_range = (0, 1)
 
-# How much to grow the input shape for prediction. This is usually adjusted to maximize GPU memory.
+# How much to grow the input shape for prediction. This is usually adjusted to maximize GPU memory,
+# but depends on how you saved your model. The model we provided does not support different
+# input shapes.
 pred_size_growth = Coordinate(0, 0, 0)
 
 
@@ -54,7 +56,14 @@ from volara.blockwise import Predict
 from volara.datasets import Affs, Raw
 from volara.models import TorchModel
 
+# %% [markdown]
+
+# First we define the datasets that we are using along with some basic information about them
+
+# %%
+# our raw data is stored in uint8, but our model expects floats in range (0, 1) so we scale it
 raw_dataset = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0))
+# The affinities neighborhood depends on the model that was trained. Here we learned long range xy affinities
 affs_dataset = Affs(
     store="sample_A+_20160601.zarr/affs",
     neighborhood=[
@@ -67,8 +76,12 @@ affs_dataset = Affs(
         Coordinate(0, 0, 18),
     ],
 )
+# We are just storing the lsds in a simple zarr dataset using the same format as the raw data
 lsds_dataset = Raw(store="sample_A+_20160601.zarr/lsds")
 
+# %% [markdown]
+# Now we can define our model with the parameters we defined above. We will use the
+# `TorchModel` class to load the model from a checkpoint and pass it to the `Predict` class.
 torch_model = TorchModel(
     save_path="checkpoint_data/model.pt",
     checkpoint_file="checkpoint_data/model_checkpoint_15000",
@@ -107,8 +120,7 @@ if __name__ == "__main__":
     plt.show()
 
 # %% [markdown]
-# Now we can convert the results to a segmentation. We will run mutex watershed on the
-# affinities in a multi step process.
+# Now we can convert the results to a segmentation. We will run mutex watershed on the affinities in a multi step process.
 # 1) Local fragment extraction - This step runs blockwise and generates fragments from the affinities. For each fragment we save a node in a graph with attributes such as its spatial position and size.
 # 2) Edge extraction - This step runs blockwise and computes mean affinities between fragments, adding edges to the fragment graph.
 # 3) Graph Mutex Watershed - This step runs on the fragment graph, and creates a lookup table from fragment id -> segment id.
@@ -120,14 +132,18 @@ from volara.datasets import Labels
 from volara.dbs import SQLite
 from volara.lut import LUT
 
-# First lets define the arrays we are going to use.
+
+# %% [markdown]
+# First lets define the graph and arrays we are going to use.
 
 # because our graph is in an sql database, we need to define a schema with column names and types
 # for node and edge attributes.
 # For nodes: The defaults such as "id", "position", and "size" are already defined
 # so we only need to define the additional attributes, in this case we have no additional node attributes.
 # For edges: The defaults such as "id", "u", "v" are already defined, so we are only adding the additional
-# attributes "neighbor_aff" and "lr_aff" for saving the mean affinities between fragments.
+# attributes "xy_aff", "z_aff", and "lr_aff" for saving the mean affinities between fragments.
+
+# %%
 fragments_graph = SQLite(
     path="sample_A+_20160601.zarr/fragments.db",
     edge_attrs={"xy_aff": "float", "z_aff": "float", "lr_aff": "float"},
@@ -135,27 +151,30 @@ fragments_graph = SQLite(
 fragments_dataset = Labels(store="sample_A+_20160601.zarr/fragments")
 segments_dataset = Labels(store="sample_A+_20160601.zarr/segments")
 
+# %% [markdown]
+# Now we define the tasks with the parameters we want to use.
+
+# %%
+
+# Generate fragments in blocks
 extract_frags = ExtractFrags(
     db=fragments_graph,
     affs_data=affs_dataset,
     frags_data=fragments_dataset,
     block_size=min_output_shape,
     context=Coordinate(3, 6, 6) * 2,  # A bit larger than the longest affinity
-    bias=[-0.6]
-    + [-0.4] * 2
-    + [-0.6] * 2
-    + [-0.8]
-    * 2,  # Mutex will only split on negative affinities, so we adjust ours from range (0, 1) with a negative bias.
+    bias=[-0.6] + [-0.4] * 2 + [-0.6] * 2 + [-0.8] * 2,
     strides=(
         [Coordinate(1, 1, 1)] * 3
         + [Coordinate(1, 3, 3)] * 2  # We use larger strides for larger affinities
         + [Coordinate(1, 6, 6)] * 2  # This is to avoid excessive splitting
     ),
-    randomized_strides=True,
+    randomized_strides=True,  # converts strides to probabilities of sampling affinities (1/prod(stride))
     remove_debris=64,  # remove excessively small fragments
     num_workers=4,
 )
 
+# Generate agglomerated edge scores between fragments via mean affinity accross all edges connecting two fragments
 aff_agglom = AffAgglom(
     db=fragments_graph,
     affs_data=affs_dataset,
@@ -163,13 +182,15 @@ aff_agglom = AffAgglom(
     block_size=min_output_shape,
     context=Coordinate(3, 6, 6) * 1,
     scores={
-        "xy_aff": affs_dataset.neighborhood[1:3],
         "z_aff": affs_dataset.neighborhood[0:1],
+        "xy_aff": affs_dataset.neighborhood[1:3],
         "lr_aff": affs_dataset.neighborhood[3:],
     },
     num_workers=4,
 )
 
+# Run mutex watershed again, this time on the fragment graph with agglomerated edges
+# instead of the voxel graph of affinities
 lut = LUT(path="sample_A+_20160601.zarr/lut.npz")
 total_roi = raw_dataset.array("r").roi
 graph_mws = GraphMWS(
@@ -179,6 +200,7 @@ graph_mws = GraphMWS(
     roi=(total_roi.offset, total_roi.shape),
 )
 
+# Relabel the fragments into segments
 relabel = Relabel(
     lut=lut,
     frags_data=fragments_dataset,
@@ -221,10 +243,6 @@ def plot_labels(ax, labels):
     # Display the labeled array with the colormap
     ax.imshow(indexed_labels, cmap=cmap, interpolation="none")
 
-    # Add a colorbar with label ticks
-    # cbar = ax.colorbar(ticks=np.arange(num_labels))
-    # cbar.ax.set_yticklabels(unique_labels)
-
 
 # %%
 if __name__ == "__main__":
@@ -246,6 +264,11 @@ if __name__ == "__main__":
 # This slice looks very nice, but we processed a 3D volume so lets visualize it with a tool a bit more
 # suited to 3D visualization. We will use neuroglancer for this.
 
+# ### Visualizing locally:
+# Neuroglancer is a web based visualization tool for large volumetric data. The following code will
+# only work if you are running this notebook locally. If you are reading this tutorial in the docs,
+# please skip to the next section.
+
 # %%
 import neuroglancer
 from funlib.show.neuroglancer import add_layer
@@ -258,14 +281,12 @@ with viewer.txn() as s:
         affs_dataset.array("r"),
         "affinities",
         shader="rgb",
-        color={"rgb_channels": [0, 1, 2]},
     )
     add_layer(
         s,
         lsds_dataset.array("r"),
         "lsds",
         shader="rgb",
-        color={"rgb_channels": [0, 1, 2]},
     )
     add_layer(s, fragments_dataset.array("r"), "fragments")
     add_layer(s, segments_dataset.array("r"), "segments")
@@ -275,4 +296,5 @@ print(viewer)
 from IPython.display import IFrame
 
 IFrame(src=f"{viewer}", width="800", height="600")
+
 # %%
