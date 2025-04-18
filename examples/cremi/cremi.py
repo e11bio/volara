@@ -1,3 +1,7 @@
+# %% [markdown]
+# # Cremi example
+# This example shows how to use volara to predict LSDs and affinities on the cremi dataset, and then run mutex watershed on the predicted affinities.
+
 # %%
 from pathlib import Path
 
@@ -30,7 +34,7 @@ if not Path("sample_A+_20160601.zarr/raw").exists():
 # %%
 # Here are some important details about the model:
 
-# The number of output channels of our model. 10 lsds, 9 affinities
+# The number of output channels of our model. 10 lsds, 7 affinities
 out_channels = [10, 7]
 
 # The input shape of our model (not including channels)
@@ -82,6 +86,8 @@ lsds_dataset = Raw(store="sample_A+_20160601.zarr/lsds")
 # %% [markdown]
 # Now we can define our model with the parameters we defined above. We will use the
 # `TorchModel` class to load the model from a checkpoint and pass it to the `Predict` class.
+
+# %%
 torch_model = TorchModel(
     save_path="checkpoint_data/model.pt",
     checkpoint_file="checkpoint_data/model_checkpoint_15000",
@@ -99,25 +105,23 @@ predict_cremi = Predict(
     out_data=[lsds_dataset, affs_dataset],
 )
 
-if __name__ == "__main__":
-    predict_cremi.run_blockwise(multiprocessing=False)
+predict_cremi.run_blockwise(multiprocessing=False)
 
 # %% [markdown]
 # Let's visualize the results
 
 # %%
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    ax[0].imshow(predict_cremi.in_data.array("r")[100])
-    ax[0].set_title("Raw")
-    ax[1].imshow(predict_cremi.out_data[0].array("r")[:3, 100].transpose(1, 2, 0))
-    ax[1].set_title("LSDs")
-    ax[2].imshow(predict_cremi.out_data[1].array("r")[3:6, 100].transpose(1, 2, 0))
-    ax[2].set_title("Affinities")
-    plt.show()
+fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+ax[0].imshow(predict_cremi.in_data.array("r")[100])
+ax[0].set_title("Raw")
+ax[1].imshow(predict_cremi.out_data[0].array("r")[:3, 100].transpose(1, 2, 0))
+ax[1].set_title("LSDs")
+ax[2].imshow(predict_cremi.out_data[1].array("r")[3:6, 100].transpose(1, 2, 0))
+ax[2].set_title("Affinities")
+plt.show()
 
 # %% [markdown]
 # Now we can convert the results to a segmentation. We will run mutex watershed on the affinities in a multi step process.
@@ -209,92 +213,98 @@ relabel = Relabel(
     num_workers=4,
 )
 
-if __name__ == "__main__":
-    pipeline = extract_frags + aff_agglom + graph_mws + relabel
-    pipeline.run_blockwise(multiprocessing=True)
+pipeline = extract_frags + aff_agglom + graph_mws + relabel
+pipeline.run_blockwise(multiprocessing=True)
 
 # %% [markdown]
 # Let's visualize
+#
+# If you are following through on your own, I highly recommend installing `funlib.show.neuroglancer`, and
+# running the command line tool via `neuroglancer -d sample_A+_20160601.zarr/*` to visualize the results in
+# neuroglancer.
+
 
 # %%
 import numpy as np
 from matplotlib.colors import ListedColormap
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+fragments = fragments_dataset.array("r")[:]
+segments = segments_dataset.array("r")[:]
+raw = raw_dataset.array("r")[:]
+
+# Get unique labels
+unique_labels = np.unique(fragments)
+num_labels = len(unique_labels)
 
 
-def plot_labels(ax, labels):
-    # Get unique labels
-    unique_labels = np.unique(labels)
-    num_labels = len(unique_labels)
-
-    def random_color(label):
-        rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(label)))
-        return np.array((rs.random(), rs.random(), rs.random()))
-
-    # Generate random colors for each label
-    random_colors = [random_color(label) for label in range(num_labels)]
-
-    # Create a colormap
-    cmap = ListedColormap(random_colors)
-
-    # Map labels to indices for the colormap
-    label_to_index = {label: i for i, label in enumerate(unique_labels)}
-    indexed_labels = np.vectorize(label_to_index.get)(labels)
-
-    # Display the labeled array with the colormap
-    ax.imshow(indexed_labels, cmap=cmap, interpolation="none")
+def random_color(label):
+    rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(label)))
+    return np.array((rs.random(), rs.random(), rs.random()))
 
 
-# %%
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
+# Generate random colors for each label
+random_fragment_colors = [random_color(label) for label in range(num_labels)]
 
-    print("PLOTTING:")
+# Create a colormap
+cmap_labels = ListedColormap(random_fragment_colors)
 
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    ax[0].imshow(raw_dataset.array("r")[100])
-    ax[0].set_title("Raw")
-    plot_labels(ax[1], fragments_dataset.array("r")[100])
-    ax[1].set_title("Fragments")
-    plot_labels(ax[2], segments_dataset.array("r")[100])
-    ax[2].set_title("Segments")
-    plt.show()
+# Map labels to indices for the colormap
+label_to_index = {label: i for i, label in enumerate(unique_labels)}
+indexed_fragments = np.vectorize(label_to_index.get)(fragments)
+indexed_segments = np.vectorize(label_to_index.get)(segments)
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 8))
+
+ims = []
+for i, (raw_slice, fragments_slice, segments_slice) in enumerate(
+    zip(raw, indexed_fragments, indexed_segments)
+):
+    # Show the raw data
+    if i == 0:
+        im_raw = axes[0].imshow(raw_slice)
+        axes[0].set_title("Raw")
+        im_fragments = axes[1].imshow(
+            fragments_slice,
+            cmap=cmap_labels,
+            vmin=0,
+            vmax=num_labels,
+            interpolation="none",
+        )
+        axes[1].set_title("Fragments")
+        im_segments = axes[2].imshow(
+            segments_slice,
+            cmap=cmap_labels,
+            vmin=0,
+            vmax=num_labels,
+            interpolation="none",
+        )
+        axes[2].set_title("Segments")
+    else:
+        im_raw = axes[0].imshow(raw_slice, animated=True)
+        im_fragments = axes[1].imshow(
+            fragments_slice,
+            cmap=cmap_labels,
+            vmin=0,
+            vmax=num_labels,
+            interpolation="none",
+            animated=True,
+        )
+        im_segments = axes[2].imshow(
+            segments_slice,
+            cmap=cmap_labels,
+            vmin=0,
+            vmax=num_labels,
+            interpolation="none",
+            animated=True,
+        )
+    ims.append([im_raw, im_fragments, im_segments])
+
+ims = ims + ims[::-1]
+ani = animation.ArtistAnimation(fig, ims, blit=True)
+ani.save("_static/cremi/segmentation.gif", writer="pillow", fps=10)
 
 # %% [markdown]
-
-# This slice looks very nice, but we processed a 3D volume so lets visualize it with a tool a bit more
-# suited to 3D visualization. We will use neuroglancer for this.
-
-# ### Visualizing locally:
-# Neuroglancer is a web based visualization tool for large volumetric data. The following code will
-# only work if you are running this notebook locally. If you are reading this tutorial in the docs,
-# please skip to the next section.
-
-# %%
-import neuroglancer
-from funlib.show.neuroglancer import add_layer
-
-viewer = neuroglancer.Viewer()
-with viewer.txn() as s:
-    add_layer(s, raw_dataset.array("r"), "raw")
-    add_layer(
-        s,
-        affs_dataset.array("r"),
-        "affinities",
-        shader="rgb",
-    )
-    add_layer(
-        s,
-        lsds_dataset.array("r"),
-        "lsds",
-        shader="rgb",
-    )
-    add_layer(s, fragments_dataset.array("r"), "fragments")
-    add_layer(s, segments_dataset.array("r"), "segments")
-print(viewer)
-
-# %%
-from IPython.display import IFrame
-
-IFrame(src=f"{viewer}", width="800", height="600")
-
-# %%
+# The final segmentation is shown below.
+# ![segmentation](_static/cremi/segmentation.gif)

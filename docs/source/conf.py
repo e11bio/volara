@@ -12,7 +12,16 @@
 #
 import os
 import sys
+from pathlib import Path
 
+# tutorial static symbolic link
+Path("_static/cremi").mkdir(parents=True, exist_ok=True)
+os.symlink(
+    str(Path("_static").absolute()),
+    "examples/cremi/_static",
+)
+
+# Set the path to the Volara package
 sys.path.insert(0, os.path.abspath("../.."))
 
 
@@ -42,7 +51,7 @@ extensions = [
 nbsphinx_custom_formats = {
     ".py": ["jupytext.reads", {"fmt", "py:percent"}],
 }
-nbsphinx_execute = 'never'  # Never execute notebooks
+nbsphinx_kernel_name = "volara_env"
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
