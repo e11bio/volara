@@ -134,7 +134,7 @@ class DB(StrictBaseModel, ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
+    def id(self) -> str:
         """
         A unique identifier for this databse.
         """
@@ -157,7 +157,7 @@ class SQLite(DB):
     """
 
     @property
-    def name(self) -> str:
+    def id(self) -> str:
         return self.path.stem
 
     def open(self, mode="r") -> SQLiteGraphDataBase:
@@ -177,7 +177,7 @@ class SQLite(DB):
     def drop(self) -> None:
         if self.path.exists():
             self.path.unlink()
-        meta_path = self.path.parent / f"{self.path.stem}-meta.json"
+        meta_path = self.path.parent / f"{self.id}-meta.json"
         if meta_path.exists():
             meta_path.unlink()
 
@@ -200,6 +200,10 @@ class PostgreSQL(DB):
     name: str = "volara"
     user: str | None = None
     password: str | None = None
+
+    @property
+    def id(self) -> str:
+        return self.name
 
     def open(self, mode="r") -> PgSQLGraphDatabase:
         node_attrs, edge_attrs = self.graph_attrs

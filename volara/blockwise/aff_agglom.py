@@ -79,7 +79,7 @@ class AffAgglom(BlockwiseTask):
 
     @property
     def task_name(self) -> str:
-        return f"{self.db.name}-{self.task_type}"
+        return f"{self.db.id}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:
