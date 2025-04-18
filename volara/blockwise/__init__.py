@@ -1,6 +1,6 @@
 from typing import Annotated, Union
 
-import pkg_resources
+from importlib.metadata import entry_points
 from pydantic import Field, TypeAdapter
 
 from .blockwise import BlockwiseTask as BlockwiseTask
@@ -27,7 +27,7 @@ def register_task(task: BlockwiseTask):
 
 
 def discover_tasks():
-    for entry_point in pkg_resources.iter_entry_points("volara.blockwise_tasks"):
+    for entry_point in entry_points("volara.blockwise_tasks"):
         task_class = entry_point.load()
         register_task(task_class)
 

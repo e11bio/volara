@@ -278,12 +278,12 @@ class ApplyShift(BlockwiseTask):
                 *[np.linspace(2 / 3, 4 / 3, axis_len // 3) for axis_len in [Z, Y, X]],
                 indexing="ij",
             )
-            coordinates = np.stack(coordinates)
+            stacked_coordinates = np.stack(coordinates)
 
             # Interpolate the distances to the original pixel coordinates
             interp_shifts = map_coordinates(
                 channel_shifts,
-                coordinates=coordinates,
+                coordinates=stacked_coordinates,
                 order=1,
             )
 
@@ -296,9 +296,9 @@ class ApplyShift(BlockwiseTask):
                 ],
                 indexing="ij",
             )
-            coordinates = np.stack(coordinates)
+            stacked_coordinates = np.stack(coordinates)
 
-            interpolated_coords = coordinates - (
+            interpolated_coords = stacked_coordinates - (
                 interp_shifts / voxel_size.reshape(-1, *((1,) * len(voxel_size)))
             )
             aligned_intensities = map_coordinates(

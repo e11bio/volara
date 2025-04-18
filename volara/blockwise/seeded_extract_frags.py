@@ -9,7 +9,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from pydantic import Field
-from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import gaussian_filter
 
 from ..datasets import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite

@@ -10,7 +10,7 @@ from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from pydantic import Field
 from scipy.ndimage import measurements
-from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import gaussian_filter
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
 

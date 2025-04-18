@@ -11,7 +11,7 @@ from funlib.math import inv_cantor_number
 from funlib.persistence.arrays import Array
 from funlib.persistence.graphs.graph_database import GraphDataBase
 from pydantic import Field
-from scipy.ndimage import measurements
+import scipy.ndimage
 
 from ..datasets import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
@@ -155,12 +155,12 @@ class AffAgglom(BlockwiseTask):
             )
             cantor_pairings = ((k1 + k2) * (k1 + k2 + 1) / 2 + k2) * mask
             cantor_ids = np.array([x for x in np.unique(cantor_pairings) if x != 0])
-            scores = measurements.mean(
+            scores = scipy.ndimage.mean(
                 base_affinities,
                 cantor_pairings,
                 cantor_ids,
             )
-            counts = measurements.sum_labels(
+            counts = scipy.ndimage.sum_labels(
                 mask,
                 cantor_pairings,
                 cantor_ids,
