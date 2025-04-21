@@ -1,6 +1,6 @@
 import pytest
 
-from volara.dbs import PostgreSQL, SQLite
+from volara.dbs import DB, PostgreSQL, SQLite
 
 
 def psql_is_available():
@@ -29,6 +29,7 @@ def psql_is_available():
     ],
 )
 def test_dbs(db_type: str, tmp_path):
+    db: DB
     if db_type == "sqlite":
         db = SQLite(
             node_attrs={"color": 3},
