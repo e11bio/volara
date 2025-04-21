@@ -18,11 +18,35 @@ class Model(StrictBaseModel, ABC):
     """
 
     in_channels: int
+    """
+    The number of input channels to the model.
+    """
     min_input_shape: PydanticCoordinate
+    """
+    The smallest possible input shape to the model. E.g. with UNets there
+    is a minimum input size that satisfies the downsampling and all convolutional
+    models have a minimum input size if using "valid" padding.
+    """
     min_output_shape: PydanticCoordinate
+    """
+    The output shape to expect when providing the minimum input shape data.
+    """
     min_step_shape: PydanticCoordinate
+    """
+    The minimum step size to increment the input shape by. This may be used
+    to determine an optimal input/output shape for the model.
+    """
     out_channels: list[int | None] | int | None
+    """
+    The number of channels in the output of the model. This can be an integer
+    or list of integers if the model has multiple outputs. If `None` it is
+    assumed that the number of output channels equals the number of input channels
+    """
     out_range: tuple[float, float]
+    """
+    The range of the output data. This is used to convert between `np.uint8` and
+    `np.float32` data types for efficient reading/writing of model outputs.
+    """
 
     @property
     def context(self) -> Coordinate:
@@ -73,20 +97,36 @@ class Model(StrictBaseModel, ABC):
         A function defining the conversion function to go from model
         outputs to `np.uint8` for writing to zarr.
         """
-        return np.clip(out_data * 255, 0, 255).astype(np.uint8)
+        return np.clip(
+            ((out_data - self.out_range[0]) / (self.out_range[1] - self.out_range[0]))
+            * 255,
+            0,
+            255,
+        ).astype(np.uint8)
 
     def from_uint8(self, data: np.ndarray) -> np.ndarray:
         """
         A function defining the conversion function to go from `np.uint8`
         back to `np.float32`
         """
-        return data.astype(np.float32) / 255
+        return (
+            data.astype(np.float32) / 255 * (self.out_range[1] - self.out_range[0])
+            + self.out_range[0]
+        )
 
 
 class TorchModel(Model):
-    checkpoint_type: Literal["torch"] = "torch"
+    model_type: Literal["torch"] = "torch"
     save_path: Path
+    """
+    The path to a model saved using `torch.jit.save` or `torch.save`.
+    """
     checkpoint_file: Path | None = None
+    """
+    An optional path to a checkpoint file containing the model weights.
+    This can be provided either as a dictionary with key/value
+    pair: "model_state_dict" and model.state_dict() or as a plain
+    model.state_dict() dictionary."""
     pred_size_growth: PydanticCoordinate | None = None
 
     def model(self):
@@ -95,9 +135,12 @@ class TorchModel(Model):
         model = torch.load(self.save_path, map_location="cpu", weights_only=False)
 
         if self.checkpoint_file is not None:
-            model.load_state_dict(
-                torch.load(self.checkpoint_file, map_location="cpu")["model_state_dict"]
-            )
+            checkpoint = torch.load(self.checkpoint_file, map_location="cpu")
+            if "model_state_dict" in checkpoint:
+                weights = checkpoint["model_state_dict"]
+            else:
+                weights = checkpoint
+            model.load_state_dict(weights)
 
         return model
 
@@ -126,9 +169,3 @@ class TorchModel(Model):
             return [num_channels]
         elif isinstance(num_channels, list):
             return num_channels
-
-    def to_uint8(self, out_data: np.ndarray) -> np.ndarray:
-        out_min, out_max = self.out_range
-        return np.clip((out_data + out_min) / (out_max - out_min) * 255, 0, 255).astype(
-            np.uint8
-        )
