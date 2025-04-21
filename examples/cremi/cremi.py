@@ -230,12 +230,12 @@ from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-fragments = fragments_dataset.array("r")[:]
-segments = segments_dataset.array("r")[:]
-raw = raw_dataset.array("r")[:]
+fragments = fragments_dataset.array("r")[:, ::2, ::2]
+segments = segments_dataset.array("r")[:, ::2, ::2]
+raw = raw_dataset.array("r")[:, ::2, ::2]
 
 # Get unique labels
-unique_labels = np.unique(fragments)
+unique_labels = set(np.unique(fragments)) | set(np.unique(segments))
 num_labels = len(unique_labels)
 
 
