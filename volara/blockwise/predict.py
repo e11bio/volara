@@ -68,7 +68,7 @@ class Predict(BlockwiseTask):
     roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
     checkpoint: Annotated[
         TorchModel,
-        Field(discriminator="checkpoint_type"),
+        Field(discriminator="model_type"),
     ]
     in_data: Raw
     out_data: list[OutDataType | None]
