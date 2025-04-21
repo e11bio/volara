@@ -5,13 +5,13 @@ from typing import Annotated, Callable, Generator, Literal
 
 import networkx as nx
 import numpy as np
+import scipy.ndimage
 from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
 from funlib.persistence.arrays import Array
 from funlib.persistence.graphs.graph_database import GraphDataBase
 from pydantic import Field
-import scipy.ndimage
 
 from ..datasets import Affs, Dataset, Labels
 from ..dbs import PostgreSQL, SQLite

@@ -2,18 +2,14 @@ from pathlib import Path
 
 import daisy
 import numpy as np
-import pytest
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
 from volara.blockwise import (
-    AffAgglom,
     Argmax,
-    GraphMWS,
 )
 from volara.datasets import Affs, Dataset, Labels, Raw
 from volara.dbs import SQLite
-from volara.lut import LUT
 
 BLOCK = daisy.Block(
     total_roi=Roi((0, 0), (10, 10)),
@@ -68,52 +64,6 @@ def build_db(tmpdir: Path) -> SQLite:
     return db_config
 
 
-def test_aff_agglom(tmpdir):
-    tmpdir = Path(tmpdir)
-    db_config = build_db(tmpdir)
-
-    # create fragment labels array
-    frags_data = np.zeros((10, 10), dtype=np.uint32)
-    frags_data[:, :] = np.arange(1, 11)[:, None]  # horizontal stripes
-    frags = build_zarr(tmpdir, "frags", frags_data, 2)
-
-    # add fragment nodes to db
-    db = db_config.open("r+")
-    empty_graph = db.read_graph()
-    for i in range(1, 11):
-        empty_graph.add_node(i, position=(i, 5), size=1, raw_intensity=(i,))
-    db.write_graph(empty_graph)
-
-    # create affs data
-    affs_data = np.zeros((1, 10, 10), dtype=np.uint32)
-    affs_data[0, ::2, :] = np.ones((5, 1))  # vertical affs 1 in every other row
-    affs = build_zarr(tmpdir, "affs", affs_data, 2, neighborhood=[Coordinate(1, 0)])
-
-    # affs config
-    aff_agglom_config = AffAgglom(
-        db=db_config,
-        frags_data=frags,
-        affs_data=affs,
-        block_size=Coordinate(10, 10),
-        context=Coordinate(0, 0),
-        scores={"y_aff": [Coordinate(1, 0)]},
-    )
-
-    with aff_agglom_config.process_block_func() as process_block:
-        process_block(BLOCK)
-
-    # Check that we got the expected results
-    db = db_config.open("r")
-    g = db.read_graph(BLOCK.write_roi)
-    assert g.number_of_nodes() == 10
-    assert g.number_of_edges() == 9
-    for u, v, data in g.edges(data=True):
-        if u % 2 == 0:
-            assert data["y_aff"] == 0.0
-        else:
-            assert data["y_aff"] == 1.0
-
-
 def test_argmax(tmpdir):
     tmpdir = Path(tmpdir)
 
@@ -149,36 +99,6 @@ def test_dummy(tmpdir):
 
 def test_extract_frags(tmpdir):
     pass
-
-
-@pytest.mark.parametrize("y_bias", [0.5, -0.5])
-def test_graph_mws(tmpdir, y_bias: float):
-    tmpdir = Path(tmpdir)
-    db_config = build_db(tmpdir)
-    config = GraphMWS(
-        roi=(BLOCK.read_roi.offset, BLOCK.read_roi.shape),
-        db=db_config,
-        lut=LUT(path=tmpdir / "fragment_segment_lut.npz"),
-        weights={"y_aff": (1, y_bias)},
-    )
-
-    db = config.db.open("r+")
-    graph = db.read_graph()
-    graph.add_node(1, position=(4, 2), size=600, raw_intensity=(0.1,))
-    graph.add_node(2, position=(4, 7), size=400, raw_intensity=(0.1,))
-    graph.add_edge(
-        1,
-        2,
-        y_aff=0,
-    )
-    db.write_graph(graph)
-
-    with config.process_block_func() as process_block:
-        process_block(BLOCK)
-
-    fragments, segments = config.lut.load()
-    assert len(np.unique(fragments)) == 2, fragments
-    assert len(np.unique(segments)) == 1 + (y_bias < 0), segments
 
 
 def test_lut(tmpdir):

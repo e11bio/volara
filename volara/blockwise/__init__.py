@@ -1,6 +1,6 @@
+from importlib.metadata import entry_points
 from typing import Annotated, Union
 
-from importlib.metadata import entry_points
 from pydantic import Field, TypeAdapter
 
 from .blockwise import BlockwiseTask as BlockwiseTask
