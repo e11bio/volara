@@ -136,7 +136,6 @@ from volara.datasets import Labels
 from volara.dbs import SQLite
 from volara.lut import LUT
 
-
 # %% [markdown]
 # First lets define the graph and arrays we are going to use.
 
@@ -225,10 +224,10 @@ pipeline.run_blockwise(multiprocessing=True)
 
 
 # %%
+import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 fragments = fragments_dataset.array("r")[:, ::2, ::2]
 segments = segments_dataset.array("r")[:, ::2, ::2]
