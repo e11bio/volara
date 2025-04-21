@@ -6,13 +6,7 @@ def psql_is_available():
     try:
         import psycopg2
 
-        psycopg2.connect(
-            dbname="postgres",
-            user="postgres",
-            password="postgres",
-            host="localhost",
-            port="5432",
-        )
+        psycopg2.connect()
         return True
     except psycopg2.OperationalError:
         return False
