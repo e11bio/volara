@@ -1,5 +1,6 @@
 import pytest
-from volara.dbs import SQLite, PostgreSQL, DB
+
+from volara.dbs import PostgreSQL, SQLite
 
 
 def psql_is_available():

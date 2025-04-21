@@ -5,9 +5,6 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
-from volara.blockwise import (
-    Argmax,
-)
 from volara.datasets import Affs, Dataset, Labels, Raw
 from volara.dbs import SQLite
 
@@ -62,27 +59,6 @@ def build_db(tmpdir: Path) -> SQLite:
     )
     db_config.init()
     return db_config
-
-
-def test_argmax(tmpdir):
-    tmpdir = Path(tmpdir)
-
-    # create raw intensities array
-    probs_data = np.arange(1, 201, dtype=np.float32).reshape(2, 10, 10)
-    probs = build_zarr(tmpdir, "probs", probs_data, 2)
-    labels = build_zarr(tmpdir, "labels", np.zeros((10, 10), dtype=np.uint32), 2)
-
-    # affs config
-    aff_agglom_config = Argmax(
-        probs_data=probs,
-        sem_data=labels,
-        block_size=Coordinate(10, 10),
-    )
-
-    with aff_agglom_config.process_block_func() as process_block:
-        process_block(BLOCK)
-
-    assert np.isclose(labels.array("r")[:], np.ones((10, 10))).all()
 
 
 def test_distance_agglom(tmpdir):

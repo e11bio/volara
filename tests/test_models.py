@@ -1,6 +1,7 @@
-import torch
-import pytest
 import numpy as np
+import pytest
+import torch
+
 from volara.models import TorchModel
 
 
