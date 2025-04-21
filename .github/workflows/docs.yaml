@@ -44,7 +44,7 @@ jobs:
           retention-days: 90
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    # if: github.ref == 'refs/heads/main'
     needs: build
     # Deploy to the github-pages environment
     environment:
