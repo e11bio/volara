@@ -129,13 +129,18 @@ class TorchModel(Model):
     model.state_dict() dictionary."""
     pred_size_growth: PydanticCoordinate | None = None
 
-    def model(self):
+    def model(self) -> torch.nn.Module:
         import torch
 
         model = torch.load(self.save_path, map_location="cpu", weights_only=False)
+        assert isinstance(model, torch.nn.Module), (
+            f"Loading from {self.save_path} did not return a torch.nn.Module"
+        )
 
         if self.checkpoint_file is not None:
-            checkpoint = torch.load(self.checkpoint_file, map_location="cpu")
+            checkpoint = torch.load(
+                self.checkpoint_file, map_location="cpu", weights_only=True
+            )
             if "model_state_dict" in checkpoint:
                 weights = checkpoint["model_state_dict"]
             else:
