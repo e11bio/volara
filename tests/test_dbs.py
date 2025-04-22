@@ -6,8 +6,10 @@ from volara.dbs import DB, PostgreSQL, SQLite
 def psql_is_available():
     try:
         import psycopg2
-
-        psycopg2.connect()
+        conn = psycopg2.connect(
+            dbname="pytest",
+        )
+        conn.close()
         return True
     except psycopg2.OperationalError:
         return False
