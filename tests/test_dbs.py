@@ -81,3 +81,16 @@ def test_dbs(db_type: str, tmp_path):
     assert g2.edges[0, 1]["y_aff"] == 0.5
     assert g2.nodes[0]["position"] == (0, 0)
     assert g2.nodes[1]["position"] == (1, 1)
+
+    db.drop_edges()
+    graph_provider = db.open("r")
+    g3 = graph_provider.read_graph()
+
+    assert g3.number_of_nodes() == 2
+    assert g3.number_of_edges() == 0
+
+    db.drop()
+    with pytest.raises(RuntimeError):
+        db.open("r")
+
+    graph_provider = db.open("w")
