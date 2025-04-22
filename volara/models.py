@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-if TYPE_CHECKING:
-    import torch
+import torch
 
 import numpy as np
 from funlib.geometry import Coordinate
@@ -57,7 +56,7 @@ class Model(StrictBaseModel, ABC):
         return (self.eval_input_shape - self.eval_output_shape) // 2
 
     @abstractmethod
-    def model(self) -> "torch.nn.Module":
+    def model(self) -> torch.nn.Module:
         """
         A getter for a plain `torch.nn.Module` that can be called to
         generate the desired predictions. This should load the appropriate

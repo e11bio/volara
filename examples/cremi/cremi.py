@@ -221,6 +221,8 @@ pipeline.run_blockwise(multiprocessing=True)
 # If you are following through on your own, I highly recommend installing `funlib.show.neuroglancer`, and
 # running the command line tool via `neuroglancer -d sample_A+_20160601.zarr/*` to visualize the results in
 # neuroglancer.
+#
+# For the purposes of visualizing here, we will make a simple gif
 
 
 # %%
@@ -305,5 +307,7 @@ ani = animation.ArtistAnimation(fig, ims, blit=True)
 ani.save("_static/cremi/segmentation.gif", writer="pillow", fps=10)
 
 # %% [markdown]
-# The final segmentation is shown below.
+# The final segmentation is shown below. Obviously this is not a great segmentation, but it is
+# reasonably good for a model small enough to process a CREMI dataset in 20 minutes on a github
+# action.
 # ![segmentation](_static/cremi/segmentation.gif)

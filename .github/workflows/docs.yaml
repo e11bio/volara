@@ -30,12 +30,12 @@ jobs:
 
       - name: Turn script into notebook
         run: |
-          uv run --extra docs --prerelease=allow python -m ipykernel install --name volara_env --user
-          uv run --extra docs --prerelease=allow jupytext --to notebook ./examples/cremi/cremi.py
+          uv run --extra docs --pre python -m ipykernel install --name volara_env --user
+          uv run --extra docs --pre jupytext --to notebook ./examples/cremi/cremi.py
           cp -r examples docs/source
 
       - name: Build documentation
-        run: uv run --extra docs --prerelease=allow sphinx-build docs/source docs/build/html -b html
+        run: uv run --extra docs --pre sphinx-build docs/source docs/build/html -b html
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3

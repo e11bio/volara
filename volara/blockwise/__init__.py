@@ -3,19 +3,19 @@ from typing import Annotated, Union
 
 from pydantic import Field, TypeAdapter
 
-from .blockwise import BlockwiseTask as BlockwiseTask
+from .blockwise import BlockwiseTask
 from .components import (
-    AffAgglom,  # noqa
-    ApplyShift,  # noqa
-    Argmax,  # noqa
-    ComputeShift,  # noqa
-    DistanceAgglom,  # noqa
-    ExtractFrags,  # noqa
-    GraphMWS,  # noqa
-    Predict,  # noqa
-    Relabel,  # noqa
-    SeededExtractFrags,  # noqa
-    Threshold,  # noqa
+    AffAgglom,
+    ApplyShift,
+    Argmax,
+    ComputeShift,
+    DistanceAgglom,
+    ExtractFrags,
+    GraphMWS,
+    Predict,
+    Relabel,
+    SeededExtractFrags,
+    Threshold,
 )
 
 BLOCKWISE_TASKS = []
@@ -34,8 +34,11 @@ def discover_tasks():
 
 def get_task(task_type: str) -> BlockwiseTask:
     """
-    If you don't know what library a task is in, you can use this function to get
-    the task class.
+    Get the task class for a given task type. This is useful for dynamically fetching
+    tasks from the base `volara.blockwise` module, despite some tasks potentially
+    being defined in other modules as plugins via entry points. This allows `volara`
+    to serialize and execute external tasks in isolated environments such as on
+    cluster workers.
     """
     for task in BLOCKWISE_TASKS:
         parsed_task_type = task.model_fields["task_type"].default
@@ -58,3 +61,19 @@ def get_blockwise_tasks_type():
             Field(discriminator="task_type"),
         ]
     )
+
+
+__all__ = [
+    BlockwiseTask,
+    AffAgglom,
+    ApplyShift,
+    Argmax,
+    ComputeShift,
+    DistanceAgglom,
+    ExtractFrags,
+    GraphMWS,
+    Predict,
+    Relabel,
+    SeededExtractFrags,
+    Threshold,
+]

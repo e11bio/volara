@@ -118,8 +118,9 @@ Introduction
 ------------
 
 In this tutorial, we will demonstrate the usefulness of this library for processing 
-large image data in the context of instance segmentation. Since training a model 
-is out of scope for this tutorial, we will be using some fairly simple data.
+large image data in the context of instance segmentation. We will use some very simple
+toy data to dive into more detail of how to use `volara` and what you get when running
+some basic operations.
 
 Viewing Data
 ------------
@@ -249,7 +250,7 @@ Now let's take a look at the fragments we generated:
 
   imshow(fragments.array("r")[30])
 
-As you can see, we get a fragments of full segmentations, which is expected given 
+As you can see, we get a fragments array of full segmentations, which is expected given 
 that we are working blockwise. Note that you can clearly see the block boundaries.
 
 Fragment Graph
