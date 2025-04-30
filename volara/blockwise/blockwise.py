@@ -321,15 +321,29 @@ class BlockwiseTask(StrictBaseModel, ABC):
             self.write_roi.offset, self.write_size, self.write_roi.shape
         )
 
-        prepare_ds(
-            self.block_ds,
-            shape=self.write_roi.shape / block_voxel_size,
-            offset=self.write_roi.offset,
-            voxel_size=block_voxel_size,
-            chunk_shape=self.write_size / block_voxel_size,
-            dtype=get_dtype(self.write_roi, self.write_size),
-            mode="a",
-        )
+        try:
+            prepare_ds(
+                self.block_ds,
+                shape=self.write_roi.shape / block_voxel_size,
+                offset=self.write_roi.offset,
+                voxel_size=block_voxel_size,
+                chunk_shape=self.write_size / block_voxel_size,
+                dtype=get_dtype(self.write_roi, self.write_size),
+                mode="a",
+            )
+        except PermissionError as e:
+            # The dataset already exists but with different parameters.
+            existing_block_ds = open_ds(self.block_ds, mode="r")
+            error_msg = (
+                f"Dataset {self.block_ds} already exists with different parameters.\n"
+                f"Existing vs New:\n"
+                f"Shape: {existing_block_ds.shape} vs {self.write_roi.shape / block_voxel_size}\n"
+                f"Offset: {existing_block_ds.offset} vs {self.write_roi.offset}\n"
+                f"Voxel Size: {existing_block_ds.voxel_size} vs {block_voxel_size}\n"
+                f"Chunk Shape: {existing_block_ds._source_data.chunks} vs {self.write_size / block_voxel_size}\n"
+                f"Data Type: {existing_block_ds.dtype} vs {get_dtype(self.write_roi, self.write_size)}\n"
+            )
+            raise ValueError(error_msg) from e
 
     @contextmanager
     def task(
