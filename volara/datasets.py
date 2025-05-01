@@ -6,8 +6,9 @@ from typing import Any, Literal, Sequence
 
 import numpy as np
 import zarr
-from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
+from funlib.geometry import Roi, Coordinate
+from cloudvolume import CloudVolume
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -200,6 +201,34 @@ class Labels(Dataset):
 
     dataset_type: Literal["labels"] = "labels"
 
+    @property
+    def attrs(self):
+        return {}
+
+class Volume(Dataset):
+    """
+    Represents a volumetric dataset through Cloud Volume.
+    """
+    dataset_type: Literal["volume"] = "volume"
+    mip: int = 0
+    agglomerate: bool = True
+
+    @property
+    def data(self) -> CloudVolume:
+        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate)
+        return vol
+    
+    @property
+    def name(self) -> str:
+        return self.data.cloudpath
+    
+    @property
+    def roi(self) -> Roi:
+        shape = np.array(self.data.shape)[:-1].tolist()
+        offset = np.zeros_like(shape)
+        self.voxel_size = Coordinate(np.array(self.data.resolution))
+        return Roi(offset, shape)
+    
     @property
     def attrs(self):
         return {}
