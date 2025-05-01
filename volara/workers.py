@@ -194,7 +194,7 @@ class LSFWorker(Worker):
         log_error = worker_log_basename / "lsf_worker.err"
 
         return self.get_lsf_command(
-            command=" ".join(cmd),
+            command=cmd,
             queue=self.queue,
             num_cpus=self.num_cpus,
             num_gpus=self.num_gpus,
