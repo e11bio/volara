@@ -13,3 +13,4 @@ from .register import ComputeShift as ComputeShift
 from .relabel import Relabel as Relabel
 from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags
 from .threshold import Threshold as Threshold
+from .sample_blockwise_volara import SamplePointCloud as SamplePointCloud

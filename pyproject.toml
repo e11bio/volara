@@ -63,6 +63,7 @@ lut = "volara.blockwise:Relabel"
 predict = "volara.blockwise:Predict"
 seeded-extract-frags = "volara.blockwise:SeededExtractFrags"
 threshold = "volara.blockwise:Threshold"
+sample-pc = "volara.blockwise:SamplePointCloud"
 
 [tool.setuptools.dynamic]
 version = { attr = "volara.__version__" }

@@ -16,6 +16,7 @@ from .components import (
     Relabel,
     SeededExtractFrags,
     Threshold,
+    SamplePointCloud,
 )
 
 BLOCKWISE_TASKS = []
@@ -76,4 +77,5 @@ __all__ = [
     Relabel,
     SeededExtractFrags,
     Threshold,
+    SamplePointCloud,
 ]
