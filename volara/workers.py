@@ -252,8 +252,8 @@ class LSFWorker(Worker):
         if queue:
             run_command.extend(["-q", str(queue)])
 
-        run_command.append(log)
-        run_command.append(error)
+        run_command.extend(log)
+        run_command.extend(error)
 
         run_command += command
 
