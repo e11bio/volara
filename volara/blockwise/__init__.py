@@ -27,7 +27,7 @@ def register_task(task: BlockwiseTask):
 
 
 def discover_tasks():
-    for entry_point in entry_points("volara.blockwise_tasks"):
+    for entry_point in entry_points().select(group="volara.blockwise_tasks"):
         task_class = entry_point.load()
         register_task(task_class)
 
