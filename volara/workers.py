@@ -187,6 +187,8 @@ class LSFWorker(Worker):
         task_id = context["task_id"]
 
         worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
+        if not worker_log_basename.exists():
+            worker_log_basename.mkdir(parents=True, exist_ok=True)
 
         log_file = worker_log_basename / "lsf_worker.log"
         log_error = worker_log_basename / "lsf_worker.err"
@@ -239,21 +241,21 @@ class LSFWorker(Worker):
         """
         self.is_bsub_available()
 
-        log = f"-o {log_file}" if log_file else ""
-        error = f"-e {error_file}" if error_file else ""
+        log = ["-o", str(log_file)] if log_file is not None else []
+        error = ["-e", str(error_file)] if error_file is not None else []
 
         run_command = ["bsub"]
 
-        run_command.append(f"-n {num_cpus}")
+        run_command.extend(["-n", str(num_cpus)])
         if num_gpus > 0:
-            run_command.append(f"-num-gpus {num_gpus}")
+            run_command.extend(["-num-gpus", str(num_gpus)])
         if queue:
-            run_command.append(f"-q {queue}")
+            run_command.extend(["-q", str(queue)])
 
         run_command.append(log)
         run_command.append(error)
 
-        run_command.append(f"'{command}'")
+        run_command += command
 
         return run_command
 
