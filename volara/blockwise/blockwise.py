@@ -335,13 +335,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
             # The dataset already exists but with different parameters.
             existing_block_ds = open_ds(self.block_ds, mode="r")
             error_msg = (
-                f"Dataset {self.block_ds} already exists with different parameters.\n"
-                f"Existing vs New:\n"
-                f"Shape: {existing_block_ds.shape} vs {self.write_roi.shape / block_voxel_size}\n"
-                f"Offset: {existing_block_ds.offset} vs {self.write_roi.offset}\n"
-                f"Voxel Size: {existing_block_ds.voxel_size} vs {block_voxel_size}\n"
-                f"Chunk Shape: {existing_block_ds._source_data.chunks} vs {self.write_size / block_voxel_size}\n"
-                f"Data Type: {existing_block_ds.dtype} vs {get_dtype(self.write_roi, self.write_size)}\n"
+                f"Trying to overwrite existing {self.block_ds} array with incompatible data:\n"
+                f"Shape (existing): {existing_block_ds.shape} vs (new) {self.write_roi.shape / block_voxel_size}\n"
+                f"Chunk Shape (existing): {existing_block_ds._source_data.chunks} vs (new) {self.write_size / block_voxel_size}\n"
+                f"Data Type (existing): {existing_block_ds.dtype} vs (new) {get_dtype(self.write_roi, self.write_size)}\n"
             )
             raise ValueError(error_msg) from e
 
