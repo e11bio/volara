@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
 from typing import Any, Literal, Sequence
-
+import time
 import numpy as np
 import zarr
 from funlib.persistence import Array, open_ds, prepare_ds
@@ -205,22 +205,24 @@ class Labels(Dataset):
     def attrs(self):
         return {}
 
-class Volume(Dataset):
+class CloudVolumeWrapper(Dataset):
     """
     Represents a volumetric dataset through Cloud Volume.
     """
+    data_name: str
     dataset_type: Literal["volume"] = "volume"
     mip: int = 0
     agglomerate: bool = True
+    timestamp: int = int(time.time()) # default to current time
 
     @property
     def data(self) -> CloudVolume:
-        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate)
+        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate, timestamp=self.timestamp)
         return vol
     
     @property
     def name(self) -> str:
-        return self.data.cloudpath
+        return self.data_name
     
     @property
     def roi(self) -> Roi:

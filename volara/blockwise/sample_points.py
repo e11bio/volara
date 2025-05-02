@@ -8,7 +8,7 @@ import logging
 
 from funlib.geometry import Coordinate, Roi
 from volara.blockwise import BlockwiseTask
-from volara.datasets import Dataset, Volume
+from volara.datasets import Dataset, CloudVolumeWrapper
 from volara.utils import PydanticCoordinate
 from daisy import Block
 
@@ -16,7 +16,7 @@ from daisy import Block
 class SamplePointCloud(BlockwiseTask):
     task_type: Literal["sample_pc"] = "sample_pc"
     out_dir: str
-    labels: Volume
+    labels: CloudVolumeWrapper
     block_size: PydanticCoordinate
     fraction: float
     fit: Literal["shrink"] = "shrink"
@@ -54,7 +54,7 @@ class SamplePointCloud(BlockwiseTask):
     def output_datasets(self) -> list[Dataset]:
         return []
     
-    def sample_pc_in_block(self, block: Block, labels: Volume):
+    def sample_pc_in_block(self, block: Block, labels: CloudVolumeWrapper):
         block_id = block.block_id[1]
         labels_data = labels.data[block.write_roi.to_slices()] # TODO: check if XYZ vs ZYX is correct
         
