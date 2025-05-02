@@ -61,11 +61,11 @@ class SamplePointCloud(BlockwiseTask):
         # make labels data a numpy array
         labels_data = np.array(labels_data).squeeze()
 
-        voxel_offset = block.write_roi.get_begin() / labels.voxel_size
+        offset = block.write_roi.get_begin()
 
         logging.info(f"got {len(np.unique(labels_data))} in {block_id}")
 
-        sampled_points = self.sample_segment_points(labels_data, self.fraction, voxel_offset)
+        sampled_points = self.sample_segment_points(labels_data, self.fraction, offset)
 
         # if writing all labels to blocks rather than per label
         # out_f = os.path.join(out_dir, f"block_{block_id}.npz")
