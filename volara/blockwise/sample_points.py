@@ -21,6 +21,7 @@ class SamplePointCloud(BlockwiseTask):
     fraction: float
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
+    sample_svids: bool = True
     
 
     @property
@@ -56,16 +57,32 @@ class SamplePointCloud(BlockwiseTask):
     
     def sample_pc_in_block(self, block: Block, labels: CloudVolumeWrapper):
         block_id = block.block_id[1]
-        labels_data = labels.data[block.write_roi.to_slices()] # TODO: check if XYZ vs ZYX is correct
+        data = labels.data
+
+        labels_data = data[block.write_roi.to_slices()] # TODO: check if XYZ vs ZYX is correct
         
         # make labels data a numpy array
         labels_data = np.array(labels_data).squeeze()
 
-        offset = block.write_roi.get_begin()
-
         logging.info(f"got {len(np.unique(labels_data))} in {block_id}")
 
-        sampled_points = self.sample_segment_points(labels_data, self.fraction, offset)
+        sampled_points = self.sample_segment_points(labels_data, self.fraction)
+
+        if self.sample_svids:
+            data.agglomerate = False
+            svid_data = data[block.write_roi.to_slices()]
+            svid_data = np.array(svid_data).squeeze()
+            data.agglomerate = True
+
+        # add block offset to points
+        offset = block.write_roi.get_begin()
+        for seg, pts in sampled_points.items():
+            packed_pts = pts + offset
+            if self.sample_svids:
+                x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+                svids = svid_data[x, y, z].reshape(-1, 1)
+                packed_pts = np.hstack((packed_pts, svids)).astype(np.int64)
+            sampled_points[seg] = packed_pts
 
         # if writing all labels to blocks rather than per label
         # out_f = os.path.join(out_dir, f"block_{block_id}.npz")
@@ -89,7 +106,7 @@ class SamplePointCloud(BlockwiseTask):
         yield process_block
 
 
-    def sample_segment_points(self, labels, fraction, voxel_offset, background=0, replace=False):
+    def sample_segment_points(self, labels, fraction, background=0, replace=False):
         segment_ids = np.unique(labels)
         if background is not None:
             segment_ids = segment_ids[segment_ids != background]
@@ -108,6 +125,6 @@ class SamplePointCloud(BlockwiseTask):
             else:
                 sampled = coords
 
-            segment_points[str(seg)] = sampled + np.array(voxel_offset)
+            segment_points[str(seg)] = sampled
 
         return segment_points
