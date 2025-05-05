@@ -227,7 +227,7 @@ class CloudVolumeWrapper(Dataset):
     @property
     def roi(self) -> Roi:
         shape = np.array(self.data.shape)[:-1].tolist()
-        offset = np.zeros_like(shape)
+        offset = self.data.voxel_offset
         self.voxel_size = Coordinate(np.array(self.data.resolution))
         return Roi(offset, shape)
     
