@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from typing import Literal
 from pathlib import Path
 
+import time
 import numpy as np
 import os
 import logging
@@ -58,6 +59,9 @@ class SamplePointCloud(BlockwiseTask):
     def sample_pc_in_block(self, block: Block, labels: CloudVolumeWrapper):
         block_id = block.block_id[1]
         data = labels.data
+
+        # sleep for a random amount of time to avoid throttling
+        time.sleep(np.random.rand() * 2)
 
         labels_data = data[block.write_roi.to_slices()] # TODO: check if XYZ vs ZYX is correct
         
