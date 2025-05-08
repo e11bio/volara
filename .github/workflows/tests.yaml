@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        resolution: ["highest", "lowest-direct"]
+
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+       PGUSER: postgres
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up uv
+      # Install a specific uv version using the installer
+      run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
+
+    - name: Test with pytest
+      run: uv run --extra dev --resolution ${{ matrix.resolution }} --prerelease=allow --python ${{ matrix.python-version}} pytest --cov=volara tests
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v2
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false

@@ -1,0 +1,59 @@
+name: Deploy Docs to GitHub Pages
+
+on:
+  push:
+    # branches: [main]
+    # tags: "*"
+  workflow_dispatch:
+
+# Allow this job to clone the repo and create a page deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up uv
+        # Install a specific uv version using the installer
+        run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
+
+      - name: Install pandoc
+        uses: pandoc/actions/setup@v1
+
+      - name: Turn script into notebook
+        run: |
+          uv run --extra docs --pre python -m ipykernel install --name volara_env --user
+          uv run --extra docs --pre jupytext --to notebook ./examples/cremi/cremi.py
+          cp -r examples docs/source
+
+      - name: Build documentation
+        run: uv run --extra docs --pre sphinx-build docs/source docs/build/html -b html
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build/html
+          retention-days: 90
+
+  deploy:
+    # if: github.ref == 'refs/heads/main'
+    needs: build
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

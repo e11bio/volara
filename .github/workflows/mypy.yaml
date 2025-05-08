@@ -1,0 +1,18 @@
+name: Python mypy
+
+on: [push, pull_request]
+
+jobs:
+  static-analysis:
+    name: Python mypy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup checkout
+        uses: actions/checkout@v2
+
+      - name: Set up uv
+        # Install a specific uv version using the installer
+        run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
+
+      - name: mypy
+        run: uv run --extra dev --prerelease=allow mypy volara tests
