@@ -15,4 +15,4 @@ jobs:
         run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
 
       - name: mypy
-        run: uv run --extra dev --prerelease=allow mypy volara tests
+        run: uv run --extra dev mypy volara tests
