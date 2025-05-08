@@ -12,14 +12,6 @@
 #
 import os
 import sys
-from pathlib import Path
-
-# tutorial static symbolic link
-Path("_static/cremi").mkdir(parents=True, exist_ok=True)
-os.symlink(
-    str(Path("_static").absolute()),
-    "examples/cremi/_static",
-)
 
 # Set the path to the Volara package
 sys.path.insert(0, os.path.abspath("../.."))
