@@ -1,7 +1,7 @@
-[![tests](https://github.com/pattonw/volara/actions/workflows/tests.yaml/badge.svg)](https://github.com/pattonw/volara/actions/workflows/tests.yaml)
-[![codecov](https://codecov.io/gh/pattonw/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/pattonw/volara)
-[![ruff](https://github.com/pattonw/volara/actions/workflows/ruff.yaml/badge.svg)](https://github.com/pattonw/volara/actions/workflows/ruff.yaml)
-[![mypy](https://github.com/pattonw/volara/actions/workflows/mypy.yaml/badge.svg)](https://github.com/pattonw/volara/actions/workflows/mypy.yaml)
+[![tests](https://github.com/e11bio/volara/actions/workflows/tests.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/tests.yaml)
+[![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara)
+[![ruff](https://github.com/e11bio/volara/actions/workflows/ruff.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/ruff.yaml)
+[![mypy](https://github.com/e11bio/volara/actions/workflows/mypy.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/mypy.yaml)
 
 # volara
 Easy application of common blockwise operations for image processing of arbitrarily large volumetric microscopy.
