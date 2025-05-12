@@ -33,6 +33,7 @@
 # about the BlockwiseTask class.
 #
 # If you subclass `BlockwiseTask`, you must provide at minimum the following fields, abstract methods and properties:
+#
 # ### fields:
 # - task_type: A string that identifies the type of task. This is used to deserialize a yaml file
 #   into a task. This is only necessary to override if you want to run a worker on a separate process
@@ -41,6 +42,7 @@
 #   field.
 # - read_write_conflict: See [daisy docs](https://funkelab.github.io/daisy/api.html#daisy.Task) for info
 #   on the "read_write_conflict" field.
+#
 # ### properties:
 # - task_name: A string that uniquely identifies specific instances of your task. This is used
 #   in the file path to write logs, keep track of progress, and for communication between the
@@ -52,6 +54,7 @@
 # - context_size: The amount of context needed to process each block for a task. It can be provided
 #   as a single tuple of context that is added above and below every block, or as a pair of lower and
 #   upper context.
+#
 # ### methods:
 # - drop_artifacts: A helper function to reset anything produced by a task to a clean state equivalent
 #   to not having run the task at all
