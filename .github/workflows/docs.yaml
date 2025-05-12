@@ -31,8 +31,8 @@ jobs:
 
       - name: Build documentation
         run: |
-          uv run --no-sync python -m ipykernel install --name volara_env --user
-          uv run --no-sync jupytext --set-kernel volara_env --to notebook basics.py
+          uv run python -m ipykernel install --name volara_env --user
+          uv run jupytext --set-kernel volara_env --to notebook examples/getting_started/basics.py
           cp -r examples docs/source
           uv run --extra docs sphinx-build docs/source docs/build/html -b html
 
