@@ -32,8 +32,9 @@ jobs:
       - name: Build documentation
         run: |
           uv run python -m ipykernel install --name volara_env --user
-          uv run jupytext --set-kernel volara_env --to notebook examples/getting_started/basics.py
+          uv run jupytext --to notebook examples/getting_started/basics.py
           cp -r examples docs/source
+          rm docs/source/examples/getting_started/basics.py
           uv run --extra docs sphinx-build docs/source docs/build/html -b html
 
       - name: Upload Pages Artifact
