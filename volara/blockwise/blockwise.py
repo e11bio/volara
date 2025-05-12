@@ -49,6 +49,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
     or AWS EC2.
     """
     _out_array_dtype: np.dtype = np.dtype(np.uint8)
+    """
+    The output array data type
+    """
 
     fit: str
     """
@@ -86,7 +89,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
     @abstractmethod
     def write_size(self) -> Coordinate:
         """
-        The write size of each block processed bas part of a task.
+        The write size of each block processed as part of a task.
         """
         pass
 
@@ -425,12 +428,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     "Please provide a daisy.Task or a list of daisy.Task objects."
                 )
             if multiprocessing:
-                server = daisy.Server()
-                _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                result = daisy.run_blockwise(tasks)  # noqa
             else:
                 server = daisy.SerialServer()
                 _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
-            return server.run_blockwise(tasks)
+                result = server.run_blockwise(tasks)
+            return result
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """

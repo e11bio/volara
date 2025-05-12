@@ -5,7 +5,7 @@
    overview
    install
    tutorial
-   examples/cremi/cremi
+   examples/getting_started/basics
    
    cli
    api

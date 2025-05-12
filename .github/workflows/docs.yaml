@@ -30,7 +30,11 @@ jobs:
         uses: pandoc/actions/setup@v1
 
       - name: Build documentation
-        run: uv run --extra docs sphinx-build docs/source docs/build/html -b html
+        run: |
+          uv run --no-sync python -m ipykernel install --name volara_env --user
+          uv run --no-sync jupytext --set-kernel volara_env --to notebook basics.py
+          cp -r examples docs/source
+          uv run --extra docs sphinx-build docs/source docs/build/html -b html
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
