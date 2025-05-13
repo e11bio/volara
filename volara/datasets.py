@@ -191,7 +191,7 @@ class Affs(Dataset):
         if "neighborhood" in in_array.attrs:
             neighborhood = in_array.attrs["neighborhood"]
             if self.neighborhood is None:
-                self.neighborhood = neighborhood
+                self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
                 assert np.isclose(neighborhood, self.neighborhood).all(), (
                     f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
