@@ -70,7 +70,7 @@ ani.save("_static/cremi/inputs.gif", writer="pillow", fps=10)
 plt.close()
 
 # %% [markdown]
-# ![segmentation](_static/cremi/inputs.gif)
+# ![inputs](_static/cremi/inputs.gif)
 
 # %% [markdown]
 # Now we can convert the results to a segmentation. We will run mutex watershed on the affinities in a multi step process.
