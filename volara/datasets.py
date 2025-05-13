@@ -197,11 +197,12 @@ class Affs(Dataset):
                     f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
                 )
         else:
-            raise ValueError(
-                "Affs(..., neighborhood=?)\n"
-                "neighborhood must be provided when referencing an affs array that does not have "
-                "a neighborhood key in the `.zattrs`"
-            )
+            if self.neighborhood is None:
+                raise ValueError(
+                    "Affs(..., neighborhood=?)\n"
+                    "neighborhood must be provided when referencing an affs array that does not have "
+                    "a neighborhood key in the `.zattrs`"
+                )
         return super().model_post_init(context)
 
 
