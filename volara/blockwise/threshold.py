@@ -78,7 +78,6 @@ class Threshold(BlockwiseTask):
             axis_names=in_data.axis_names,
             types=in_data.types,
             dtype=self._out_array_dtype,
-            kwargs=self.mask.attrs,
         )
 
     @contextmanager

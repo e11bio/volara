@@ -118,7 +118,6 @@ class SeededExtractFrags(BlockwiseTask):
             axis_names=in_data.axis_names[1:],
             types=in_data.types[1:],
             dtype=self._out_array_dtype,
-            kwargs=self.segs_data.attrs,
         )
 
     @contextmanager

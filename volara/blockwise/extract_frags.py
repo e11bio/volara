@@ -164,7 +164,6 @@ class ExtractFrags(BlockwiseTask):
             axis_names=in_data.axis_names[1:],
             types=in_data.types[1:],
             dtype=self._out_array_dtype,
-            kwargs=self.frags_data.attrs,
         )
 
     def filter_avg_fragments(self, affs, fragments_data, filter_value):

@@ -87,7 +87,6 @@ class Argmax(BlockwiseTask):
             axis_names=in_data.axis_names[1:],
             types=in_data.types[1:],
             dtype=self._out_array_dtype,
-            kwargs=self.sem_data.attrs,
         )
 
     def argmax_block(self, block, probabilities, semantic):

@@ -8,6 +8,7 @@ import numpy as np
 import zarr
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
+from funlib.persistence.arrays.datasets import ArrayNotFoundError
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -57,7 +58,6 @@ class Dataset(StrictBaseModel, ABC):
         axis_names: list[str],
         types: list[str],
         dtype,
-        **ds_kwargs: dict[str, Any],
     ) -> None:
         # prepare ds
         array = prepare_ds(
@@ -72,7 +72,7 @@ class Dataset(StrictBaseModel, ABC):
             dtype=dtype,
             mode="a",
         )
-        array._source_data.attrs.update(ds_kwargs)
+        array._source_data.attrs.update(self.attrs)
 
     def array(self, mode: str = "r") -> Array:
         return open_ds(self.store, mode=mode)
@@ -174,11 +174,35 @@ class Affs(Dataset):
     """
 
     dataset_type: Literal["affs"] = "affs"
-    neighborhood: list[PydanticCoordinate]
+    neighborhood: list[PydanticCoordinate] | None = None
 
     @property
     def attrs(self):
         return {"neighborhood": self.neighborhood}
+
+    def model_post_init(self, context):
+        try:
+            in_array = self.array("r")
+        except ArrayNotFoundError as e:
+            raise ValueError(
+                "Affs(..., neighborhood=?)\n"
+                "neighborhood must be provided when referencing an array that does not yet exist\n"
+            ) from e
+        if "neighborhood" in in_array.attrs:
+            neighborhood = in_array.attrs["neighborhood"]
+            if self.neighborhood is None:
+                self.neighborhood = neighborhood
+            else:
+                assert np.isclose(neighborhood, self.neighborhood).all(), (
+                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
+                )
+        else:
+            raise ValueError(
+                "Affs(..., neighborhood=?)\n"
+                "neighborhood must be provided when referencing an affs array that does not have "
+                "a neighborhood key in the `.zattrs`"
+            )
+        return super().model_post_init(context)
 
 
 class LSD(Dataset):
