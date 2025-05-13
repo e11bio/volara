@@ -65,8 +65,11 @@ for i, (raw_slice, affs_slice) in enumerate(
 
 ims = ims + ims[::-1]
 ani = animation.ArtistAnimation(fig, ims, blit=True)
-ani.save("_static/cremi/segmentation.gif", writer="pillow", fps=10)
+ani.save("_static/cremi/inputs.gif", writer="pillow", fps=10)
 plt.close()
+
+# %% [markdown]
+# ![segmentation](_static/cremi/inputs.gif)
 
 # %% [markdown]
 # Now we can convert the results to a segmentation. We will run mutex watershed on the affinities in a multi step process.
