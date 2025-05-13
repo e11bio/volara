@@ -16,7 +16,8 @@ Path("_static/cremi").mkdir(parents=True, exist_ok=True)
 # %%
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
-from volara.datasets import Raw, Affs
+
+from volara.datasets import Affs, Raw
 
 raw = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0))
 affs = Affs(store="sample_A+_20160601.zarr/affs")

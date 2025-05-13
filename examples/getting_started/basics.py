@@ -72,9 +72,11 @@
 
 # %%
 import multiprocessing as mp
+
 mp.set_start_method("fork", force=True)
 
 import dask
+
 dask.config.set(scheduler="single-threaded")
 
 # %% [markdown]
@@ -83,14 +85,7 @@ dask.config.set(scheduler="single-threaded")
 
 # %%
 # `BlockwiseTask` base class is necessary to use the `volara` framework
-from volara.blockwise import BlockwiseTask
-
-# `Coordinate` and `Roi` are used to define points and regions in 3D space
-from funlib.geometry import Coordinate, Roi
-
-# `prepare_ds` and `open_ds` are helper methods to interface with zarr arrays
-# with offsets, voxel_sizes, units, and axis types such as "channel", "time", and "space"
-from funlib.persistence import prepare_ds, open_ds
+import logging
 
 # `shutil` is used to remove the artifacts of a task
 import shutil
@@ -98,14 +93,22 @@ import shutil
 # contextmanager decorator for the process_block_func method
 from contextlib import contextmanager
 
+# `numpy` for generating data
+import numpy as np
+
 # `daisy` splits the task into blocks for processing and passes the blocks to the workers
 # Note that blocks only contain read_roi, write_roi, and a unique identifier
 from daisy import Block
 
-# `numpy` for generating data
-import numpy as np
+# `Coordinate` and `Roi` are used to define points and regions in 3D space
+from funlib.geometry import Coordinate, Roi
 
-import logging
+# `prepare_ds` and `open_ds` are helper methods to interface with zarr arrays
+# with offsets, voxel_sizes, units, and axis types such as "channel", "time", and "space"
+from funlib.persistence import open_ds, prepare_ds
+
+from volara.blockwise import BlockwiseTask
+
 logging.basicConfig(level=logging.INFO)
 
 

@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
-from typing import Any, Literal, Sequence
+from typing import Literal, Sequence
 
 import numpy as np
 import zarr
