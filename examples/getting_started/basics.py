@@ -116,7 +116,7 @@ class Argmax(BlockwiseTask):
 
     # task_type is used to identify the task type. This is only needed if you are
     # running the task on a remote machine.
-    task_name: str = "argmax"
+    task_type: str = "argmax"
 
     # simple task settings
     fit: str = "shrink"
