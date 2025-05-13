@@ -1,6 +1,6 @@
 # %% [markdown]
-# # Getting Started with Volara (for developers)
-# This notebook provides a more in-depth look at the Volara framework, how it works, and how you
+# # Building a custom task
+# This notebook provides a behind the scenes look at the Volara framework, how it works, and how you
 # can build upon it to process your own data in whatever way you would like. This is also a good
 # place to start if you are trying to debug a job going wrong.
 
@@ -114,6 +114,10 @@ class Argmax(BlockwiseTask):
     A super simple argmax task
     """
 
+    # task_type is used to identify the task type. This is only needed if you are
+    # running the task on a remote machine.
+    task_name: str = "argmax"
+
     # simple task settings
     fit: str = "shrink"
     read_write_conflict: bool = False
@@ -226,4 +230,24 @@ argmax_task.drop()
 argmax_task = Argmax(num_workers=2)
 argmax_task.run_blockwise(multiprocessing=True)
 
-# %%
+# %% [markdown]
+# #### Running on a remote machine
+#
+# This task is not quite ready to be run on a remote machine, but it is very close.
+# To run on a remote machine, you need to register the task with `volara` so that we can
+# deserialize the config files that are passed to the worker, and execute the correct code.
+# This has to be done automatically based on the environment, so you need put your task in a
+# pip installable python package. The basic structure of the package is:
+# ```
+# package-root/
+# ├── volara-argmax-plugin/
+# │   ├── __init__.py
+# │   └── argmax.py
+# └── pyproject.toml
+# ```
+# The `pyproject.toml` must include the following lines:
+# ```toml
+# [project.entry-points."volara.blockwise_tasks"]
+# argmax = "volara_argmax_plugin.argmax:Argmax"
+# ```
+# This will register the task with `volara` so that it can be deserialized and run on a remote machine.
