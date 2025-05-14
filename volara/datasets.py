@@ -184,11 +184,13 @@ class Affs(Dataset):
         try:
             in_array = self.array("r")
         except ArrayNotFoundError as e:
-            raise ValueError(
-                "Affs(..., neighborhood=?)\n"
-                "neighborhood must be provided when referencing an array that does not yet exist\n"
-            ) from e
-        if "neighborhood" in in_array.attrs:
+            in_array = None
+            if self.neighborhood is None:
+                raise ValueError(
+                    "Affs(..., neighborhood=?)\n"
+                    "neighborhood must be provided when referencing an array that does not yet exist\n"
+                ) from e
+        if in_array is not None and "neighborhood" in in_array.attrs:
             neighborhood = in_array.attrs["neighborhood"]
             if self.neighborhood is None:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
