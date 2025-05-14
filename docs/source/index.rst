@@ -5,7 +5,8 @@
    overview
    install
    tutorial
-   examples/getting_started/basics
+   examples/cremi/cremi.ipynb
+   examples/getting_started/basics.ipynb
    
    cli
    api
