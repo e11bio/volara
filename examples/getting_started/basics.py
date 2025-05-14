@@ -75,10 +75,6 @@ import multiprocessing as mp
 
 mp.set_start_method("fork", force=True)
 
-import dask
-
-dask.config.set(scheduler="single-threaded")
-
 # %% [markdown]
 # ## Example: Argmax
 # Lets build the simplest possible argmax task using volara.
