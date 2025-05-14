@@ -8,7 +8,6 @@ import numpy as np
 import zarr
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
-from funlib.persistence.arrays.datasets import ArrayNotFoundError
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -183,7 +182,7 @@ class Affs(Dataset):
     def model_post_init(self, context):
         try:
             in_array = self.array("r")
-        except ArrayNotFoundError as e:
+        except FileNotFoundError as e:
             in_array = None
             if self.neighborhood is None:
                 raise ValueError(

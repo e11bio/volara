@@ -21,7 +21,7 @@ dependencies = [
     "click>=8.0",
     "daisy>=1.2.2",
     "funlib.geometry>=0.3",
-    "funlib.persistence>=0.6",
+    "funlib-persistence>=0.6",
     "gunpowder>=1.4.0",
     "mwatershed>=0.5.2",
     "pydantic>=2.6.3",
@@ -88,3 +88,6 @@ module = [
     "psycopg2.*",
 ]
 ignore_missing_imports = true
+
+[tool.uv.sources]
+funlib-persistence = { git = "https://github.com/funkelab/funlib.persistence", rev = "zarr3" }
