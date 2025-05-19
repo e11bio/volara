@@ -2,21 +2,17 @@ from contextlib import contextmanager
 from typing import Literal
 from pathlib import Path
 
-import time
 import numpy as np
 import os
 import logging
+import daisy
 
 from funlib.geometry import Coordinate, Roi
 from volara.blockwise import BlockwiseTask
 from volara.datasets import Dataset, CloudVolumeWrapper
 from volara.utils import PydanticCoordinate
 from daisy import Block
-import daisy
-
 from pocaduck import StorageConfig, Ingestor
-
-
 
 
 class SamplePointCloud(BlockwiseTask):
@@ -70,7 +66,6 @@ class SamplePointCloud(BlockwiseTask):
 
         context = daisy.Context.from_env()
         worker_id = context["worker_id"]
-        # worker_id = 0
 
         labels_data = data[block.write_roi.to_slices()] # TODO: check if XYZ vs ZYX is correct
         labels_data = np.array(labels_data).squeeze()
@@ -93,7 +88,6 @@ class SamplePointCloud(BlockwiseTask):
                 x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
                 sampled_svids = svids_data[x, y, z].reshape(-1, 1)
                 packed_pts = np.concatenate((packed_pts, sampled_svids), axis=1)
-                # packed_pts = np.hstack((packed_pts, sampled_svids)).astype(np.int64)
             ingestor.write(label=seg, block_id=block_id, points=packed_pts)
         ingestor.finalize()
 
