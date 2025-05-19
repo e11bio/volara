@@ -12,6 +12,11 @@ from volara.blockwise import BlockwiseTask
 from volara.datasets import Dataset, CloudVolumeWrapper
 from volara.utils import PydanticCoordinate
 from daisy import Block
+import daisy
+
+from pocaduck import StorageConfig, Ingestor
+
+
 
 
 class SamplePointCloud(BlockwiseTask):
@@ -57,46 +62,40 @@ class SamplePointCloud(BlockwiseTask):
         return []
     
     def sample_pc_in_block(self, block: Block, labels: CloudVolumeWrapper):
+        
+        storage_config = StorageConfig(base_path=self.out_dir)
         block_id = block.block_id[1]
         data = labels.data
+        svids = labels.svid_data
 
-        # sleep for a random amount of time to avoid throttling
-        time.sleep(np.random.rand() * 2)
+        context = daisy.Context.from_env()
+        worker_id = context["worker_id"]
+        # worker_id = 0
 
         labels_data = data[block.write_roi.to_slices()] # TODO: check if XYZ vs ZYX is correct
-        
-        # make labels data a numpy array
         labels_data = np.array(labels_data).squeeze()
+
+        svids_data = svids[block.write_roi.to_slices()]
+        svids_data = np.array(svids_data).squeeze()
 
         logging.info(f"got {len(np.unique(labels_data))} in {block_id}")
 
         sampled_points = self.sample_segment_points(labels_data, self.fraction)
 
-        if self.sample_svids:
-            data.agglomerate = False
-            svid_data = data[block.write_roi.to_slices()]
-            svid_data = np.array(svid_data).squeeze()
-            data.agglomerate = True
-
+        ingestor = Ingestor(storage_config, worker_id=worker_id)
+        
         # add block offset to points
         offset = block.write_roi.get_begin()
         for seg, pts in sampled_points.items():
             packed_pts = pts + offset
+            packed_pts = packed_pts.astype(np.uint64)
             if self.sample_svids:
                 x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
-                svids = svid_data[x, y, z].reshape(-1, 1)
-                packed_pts = np.hstack((packed_pts, svids)).astype(np.int64)
-            sampled_points[seg] = packed_pts
-
-        # if writing all labels to blocks rather than per label
-        # out_f = os.path.join(out_dir, f"block_{block_id}.npz")
-        # np.savez_compressed(out_f, **sampled_points)
-
-        root = Path(self.out_dir)
-        for seg, pts in sampled_points.items():
-            label_dir = root / f"label_{seg}"
-            label_dir.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(label_dir / f"block_{block_id}.npz", points=pts)
+                sampled_svids = svids_data[x, y, z].reshape(-1, 1)
+                packed_pts = np.concatenate((packed_pts, sampled_svids), axis=1)
+                # packed_pts = np.hstack((packed_pts, sampled_svids)).astype(np.int64)
+            ingestor.write(label=seg, block_id=block_id, points=packed_pts)
+        ingestor.finalize()
 
     def init(self):
         os.makedirs(self.out_dir, exist_ok=True)
