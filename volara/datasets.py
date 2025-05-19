@@ -212,13 +212,23 @@ class CloudVolumeWrapper(Dataset):
     data_name: str
     dataset_type: Literal["volume"] = "volume"
     mip: int = 0
-    agglomerate: bool = True
     timestamp: int = int(time.time()) # default to current time
+    voxel_size: PydanticCoordinate = Coordinate((1, 1, 1))
 
     @property
     def data(self) -> CloudVolume:
-        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate, timestamp=self.timestamp)
+        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=True, timestamp=self.timestamp)
         return vol
+    
+    @property
+    def svid_data(self) -> CloudVolume:
+        # returns CloudVolume as super voxel data, if exists
+        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=False, timestamp=self.timestamp)
+        return vol
+    
+    @property
+    def data_shape(self) -> list[int]:
+        return self.data.shape
     
     @property
     def name(self) -> str:
@@ -228,7 +238,6 @@ class CloudVolumeWrapper(Dataset):
     def roi(self) -> Roi:
         shape = np.array(self.data.shape)[:-1].tolist()
         offset = self.data.voxel_offset
-        self.voxel_size = Coordinate(np.array(self.data.resolution))
         return Roi(offset, shape)
     
     @property
