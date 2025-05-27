@@ -51,12 +51,6 @@ class ExtractFrags(BlockwiseTask):
     """
     block_size: PydanticCoordinate
     context: PydanticCoordinate
-
-    save_intensities: dict[str, Raw] | None = None
-    """
-    Whether to save the mean intensity for a fragment from a specific dataset of intensities.
-    If the intensities array has multiple channels, the mean intensity will be computed for each channel.
-    """
     bias: list[float]
     """
     The merge/split bias for the affinities. This should be a vector of length equal to the
@@ -320,36 +314,14 @@ class ExtractFrags(BlockwiseTask):
             np.ones_like(fragments_data), fragments_data, fragment_ids
         )
 
-        save_intensities = (
-            self.save_intensities if self.save_intensities is not None else {}
-        )
-        intensities = []
-        for data_config in save_intensities.values():
-            embedding_data = data_config.array("r").to_ndarray(block.write_roi)
-
-            mean_intensities = np.stack(
-                [
-                    measurements.mean(embedding_data[ch], fragments_data, fragment_ids)
-                    for ch in range(embedding_data.shape[0])
-                ],
-                axis=1,
-            )
-            intensities.append(mean_intensities)
-
         fragment_centers = {
             fragment_id: {
-                **{
-                    "center": block.write_roi.get_offset()
-                    + affs.voxel_size * Coordinate(center),
-                    "size": count,
-                },
-                **{
-                    bar_name: bar
-                    for bar_name, bar in zip(save_intensities.keys(), bars)
-                },
+                "center": block.write_roi.get_offset()
+                + affs.voxel_size * Coordinate(center),
+                "size": count,
             }
-            for fragment_id, center, count, *bars in zip(
-                fragment_ids, centers_of_masses, counts, *intensities
+            for fragment_id, center, count in zip(
+                fragment_ids, centers_of_masses, counts
             )
             if fragment_id > 0
         }
@@ -362,9 +334,6 @@ class ExtractFrags(BlockwiseTask):
             node_attrs = {
                 "position": data["center"],
             }
-
-            for bar_name in save_intensities.keys():
-                node_attrs[bar_name] = data[bar_name]
 
             node_attrs["size"] = int(data["size"])
 
