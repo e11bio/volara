@@ -19,6 +19,11 @@ Some things we wanted to support:
  * Syntactically nice task chaining
  * Plugin system for custom tasks
 
+# Getting started
+
+* Volara is available on PyPi and can be installed with `pip install volara`
+* For running inference with pre-trained pytorch models, you can also install [volara-torch](https://github.com/e11bio/volara-torch) with `pip install volara-torch`
+
 # Useful links
 - [Blog post](https://e11.bio/blog/volara)
 - [API Reference](https://e11bio.github.io/volara/api.html)
