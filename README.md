@@ -41,3 +41,90 @@ This diagram visualizes the lifetime of a block in volara. On the left we are re
 - `ComputeShift`: Compute shift between moving and fixed image using phase cross correlation
 - `ApplyShift`: Apply computed shift to register moving image to fixed image
 - `Threshold`: Intensity threshold an array
+
+# Example pipeline
+
+Below is a simple example pipeline showing how to compute a segmentation from affinties
+
+```py
+from funlib.geometry import Coordinate
+from funlib.persistence import open_ds
+from pathlib import Path
+from volara.blockwise import ExtractFrags, AffAgglom, GraphMWS, Relabel
+from volara.datasets import Affs, Labels
+from volara.dbs import SQLite
+from volara.lut import LUT
+
+file = Path("test.zarr")
+
+block_size = Coordinate(15, 40, 40) * 3
+context = Coordinate(15, 40, 40)
+bias = [-0.4, -0.7]
+
+affs = Affs(
+    store=file / "affinities",
+    neighborhood=[
+        Coordinate(1, 0, 0),
+        Coordinate(0, 1, 0),
+        Coordinate(0, 0, 1),
+        Coordinate(4, 0, 0),
+        Coordinate(0, 8, 0),
+        Coordinate(0, 0, 8),
+        Coordinate(8, 0, 0),
+        Coordinate(0, 16, 0),
+        Coordinate(0, 0, 16),
+    ],
+)
+
+db = SQLite(
+    path=file / "db.sqlite",
+    edge_attrs={
+        "adj_weight": "float",
+        "lr_weight": "float",
+    },
+)
+
+fragments = Labels(store=file / "fragments")
+
+extract_frags = ExtractFrags(
+    db=db,
+    affs_data=affs,
+    frags_data=fragments,
+    block_size=block_size,
+    context=context,
+    bias=[bias[0]] * 3 + [bias[1]] * 6,
+    num_workers=10,
+)
+
+aff_agglom = AffAgglom(
+    db=db,
+    affs_data=affs,
+    frags_data=fragments,
+    block_size=block_size,
+    context=context,
+    scores={"adj_weight": affs.neighborhood[0:3], "lr_weight": affs.neighborhood[3:]},
+    num_workers=10,
+)
+
+lut = LUT(path=file / "lut.npz")
+roi = open_ds(file / "affinities").roi
+
+global_mws = GraphMWS(
+    db=db,
+    lut=lut,
+    weights={"adj_weight": (1.0, bias[0]), "lr_weight": (1.0, bias[1])},
+    roi=[roi.get_begin(), roi.get_shape()],
+)
+
+relabel = Relabel(
+    frags_data=fragments,
+    seg_data=Labels(store=file / "segments"),
+    lut=lut,
+    block_size=block_size,
+    num_workers=5,
+)
+
+pipeline = extract_frags + aff_agglom + global_mws + relabel
+
+pipeline.run_blockwise()
+```
