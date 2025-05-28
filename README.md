@@ -20,6 +20,7 @@ Some things we wanted to support:
  * Plugin system for custom tasks
 
 # Useful links
+- [Blog post](https://e11.bio/blog/volara)
 - [API Reference](https://e11bio.github.io/volara/api.html)
 - [Basic tutorial](https://e11bio.github.io/volara/tutorial.html)
 - [Cremi inference tutorial](https://e11bio.github.io/volara-torch/examples/cremi/cremi.html)
@@ -35,9 +36,9 @@ This diagram visualizes the lifetime of a block in volara. On the left we are re
 - `AffAgglom`: Supervoxel affinity score edge creation
 - `GraphMWS`: Global creation of look up tables for fragment -> segment agglomeration
 - `Relabel`: Remapping and saving fragments as segments
-- `SeededExtractFrags`: Fragment extraction via mutex watershed that accepts skeletonized seed points for constrained fragment extraction
+- `SeededExtractFrags`: Constrained fragment extraction via mutex watershed that accepts skeletonized seed points
 - `ArgMax`: Argmax accross predicted probabilities
-- `DistanceAgglom`: Supervoxel distance score edge creation. Computed between stored supervoxel embeddings. 
+- `DistanceAgglom`: Supervoxel distance score edge creation, computed between stored supervoxel embeddings. 
 - `ComputeShift`: Compute shift between moving and fixed image using phase cross correlation
 - `ApplyShift`: Apply computed shift to register moving image to fixed image
 - `Threshold`: Intensity threshold an array
