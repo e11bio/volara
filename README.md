@@ -4,7 +4,11 @@
 <!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg">
+  <picture>
+    <source srcset="https://github.com/e11bio/volara/blob/main/docs/source/_static/Volara%20Logo.svg" media="(prefers-color-scheme: light)">
+    <source srcset="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara%20Logo-white.svg" media="(prefers-color-scheme: dark)">
+    <img src="http://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg" alt="Volara Logo">
+  </picture>
 </p>
 
 # Volara
