@@ -31,9 +31,10 @@ Some things we wanted to support:
 - [Cremi inference tutorial](https://e11bio.github.io/volara-torch/examples/cremi/cremi.html)
 - [Cremi affinity agglomeration tutorial](https://e11bio.github.io/volara/examples/cremi/cremi.html)
 - [Building a custom task](https://e11bio.github.io/volara/examples/getting_started/basics.html)
+- [Daisy Tutorial](https://funkelab.github.io/daisy/tutorial.html#In-Depth-Tutorial)
 
 # Architecture
-![](https://github.com/e11bio/volara/blob/main/docs/source/_static/Diagram-transparent%20bg2.png)
+![](https://github.com/e11bio/volara/blob/main/docs/source/_static/Diagram-transparent%20bg3.png)
 This diagram visualizes the lifetime of a block in volara. On the left we are reading array and/or graph data with optional padding for a specific block. This data is then processed, and written to the output on the right. For every block processed we also mark it done in a separate Zarr. Once each worker completes a block, it will fetch the next. This process continues until the full input dataset has been processed.
 
 # Available blockwise operations:
@@ -50,7 +51,7 @@ This diagram visualizes the lifetime of a block in volara. On the left we are re
 
 # Example pipeline
 
-Below is a simple example pipeline showing how to compute a segmentation from affinties
+Below is a simple example pipeline showing how to compute a segmentation from affinities.
 
 ```py
 from funlib.geometry import Coordinate
