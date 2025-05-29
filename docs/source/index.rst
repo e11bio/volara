@@ -3,10 +3,6 @@
    :hidden:
 
    overview
-   install
-   tutorial
-   examples/cremi/cremi.ipynb
-   examples/getting_started/basics.ipynb
    
    cli
    api
