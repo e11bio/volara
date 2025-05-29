@@ -3,6 +3,10 @@
 [![mypy](https://github.com/e11bio/volara/actions/workflows/mypy.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/mypy.yaml)
 <!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
 
+<p align="center">
+  <img src="https://github.com/e11bio/volara/blob/main/docs/source/_static/Volara%20Logo-white.svg">
+</p>
+
 # Volara
 Easy application of common blockwise operations for image processing of arbitrarily large volumetric microscopy.
 
