@@ -4,7 +4,7 @@
 <!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
 
 <p align="center">
-  <img src="https://github.com/e11bio/volara/blob/main/docs/source/_static/Volara%20Logo-white.svg">
+  <img src="https://github.com/e11bio/volara/blob/main/docs/source/_static/Volara_Logo-white_with_bcg.svg">
 </p>
 
 # Volara
@@ -38,7 +38,7 @@ Some things we wanted to support:
 - [Daisy Tutorial](https://funkelab.github.io/daisy/tutorial.html#In-Depth-Tutorial)
 
 # Architecture
-![](https://github.com/e11bio/volara/blob/main/docs/source/_static/Diagram-transparent%20bg3.png)
+![](https://github.com/e11bio/volara/blob/main/docs/source/_static/Diagram-dark%20bg3.png)
 This diagram visualizes the lifetime of a block in volara. On the left we are reading array and/or graph data with optional padding for a specific block. This data is then processed, and written to the output on the right. For every block processed we also mark it done in a separate Zarr. Once each worker completes a block, it will fetch the next. This process continues until the full input dataset has been processed.
 
 # Available blockwise operations:
