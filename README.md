@@ -4,7 +4,7 @@
 <!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
 
 <p align="center">
-  <img src="https://github.com/e11bio/volara/blob/main/docs/source/_static/Volara_Logo-white_with_bcg.svg">
+  <img src="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg">
 </p>
 
 # Volara
