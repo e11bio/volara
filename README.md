@@ -47,7 +47,7 @@ Some things we wanted to support:
 This diagram visualizes the lifetime of a block in volara. On the left we are reading array and/or graph data with optional padding for a specific block. This data is then processed, and written to the output on the right. For every block processed we also mark it done in a separate Zarr. Once each worker completes a block, it will fetch the next. This process continues until the full input dataset has been processed.
 
 # Available blockwise operations:
-- `ExtractFrags`: Fragment extraction via mutex watershed
+- `ExtractFrags`: Fragment extraction via mutex watershed (using [mwatershed](https://github.com/pattonw/mwatershed))
 - `AffAgglom`: Supervoxel affinity score edge creation
 - `GraphMWS`: Global creation of look up tables for fragment -> segment agglomeration
 - `Relabel`: Remapping and saving fragments as segments
@@ -143,4 +143,164 @@ relabel = Relabel(
 pipeline = extract_frags + aff_agglom + global_mws + relabel
 
 pipeline.run_blockwise()
+```
+
+output:
+
+```
+Task add
+fragments-extract-frags ✔: 100%|█| 75/75 [00:26<00:00,  2.82blocks/s, ⧗=0, ▶=0, ✔=75, ✗=0, ∅=
+db-aff-agglom ✔: 100%|█████████| 75/75 [00:35<00:00,  2.14blocks/s, ⧗=0, ▶=0, ✔=75, ✗=0, ∅=0]
+lut-graph-mws ✔: 100%|████████████| 1/1 [00:00<00:00,  9.18blocks/s, ⧗=0, ▶=0, ✔=1, ✗=0, ∅=0]
+segments-relabel ✔: 100%|██████| 75/75 [00:02<00:00, 32.66blocks/s, ⧗=0, ▶=0, ✔=75, ✗=0, ∅=0]
+
+Execution Summary
+-----------------
+
+  Task fragments-extract-frags:
+
+    num blocks : 75
+    completed ✔: 75 (skipped 0)
+    failed    ✗: 0
+    orphaned  ∅: 0
+
+    all blocks processed successfully
+
+  Task db-aff-agglom:
+
+    num blocks : 75
+    completed ✔: 75 (skipped 0)
+    failed    ✗: 0
+    orphaned  ∅: 0
+
+    all blocks processed successfully
+
+  Task lut-graph-mws:
+
+    num blocks : 1
+    completed ✔: 1 (skipped 0)
+    failed    ✗: 0
+    orphaned  ∅: 0
+
+    all blocks processed successfully
+
+  Task segments-relabel:
+
+    num blocks : 75
+    completed ✔: 75 (skipped 0)
+    failed    ✗: 0
+    orphaned  ∅: 0
+
+    all blocks processed successfully
+```
+
+# Example custom task
+
+Simple example argmax task. See [here](https://e11bio.github.io/volara/examples/getting_started/basics.html) for more info
+
+```py
+from contextlib import contextmanager
+from daisy import Block
+from funlib.geometry import Coordinate, Roi
+from funlib.persistence import open_ds, prepare_ds
+from volara.blockwise import BlockwiseTask
+import logging
+import numpy as np
+import shutil
+import zarr
+
+
+logging.basicConfig(level=logging.INFO)
+
+
+class Argmax(BlockwiseTask):
+    task_type: str = "argmax"
+    fit: str = "shrink"
+    read_write_conflict: bool = False
+
+    @property
+    def task_name(self) -> str:
+        return "simple-argmax"
+
+    @property
+    def write_roi(self) -> Roi:
+        return Roi((0, 0, 0), (10, 10, 10))
+
+    @property
+    def write_size(self) -> Coordinate:
+        return Coordinate((5, 5, 5))
+
+    @property
+    def context_size(self) -> Coordinate:
+        return Coordinate((0, 0, 0))
+
+    def init(self):
+        in_array = prepare_ds(
+            f"{self.task_name}/data.zarr/in_array",
+            shape=(3, 10, 10, 10),
+            chunk_shape=(3, 5, 5, 5),
+            offset=(0, 0, 0),
+        )
+        np.random.seed(0)
+        in_array[:] = np.random.randint(0, 10, size=in_array.shape)
+
+        prepare_ds(
+            f"{self.task_name}/data.zarr/out_array",
+            shape=(10, 10, 10),
+            chunk_shape=(5, 5, 5),
+            offset=(0, 0, 0),
+        )
+
+    def drop_artifacts(self):
+        shutil.rmtree(f"{self.task_name}/data.zarr/in_array")
+        shutil.rmtree(f"{self.task_name}/data.zarr/out_array")
+
+    @contextmanager
+    def process_block_func(self):
+        in_array = open_ds(
+            f"{self.task_name}/data.zarr/in_array",
+            mode="r+",
+        )
+        out_array = open_ds(
+            f"{self.task_name}/data.zarr/out_array",
+            mode="r+",
+        )
+
+        def process_block(block: Block) -> None:
+            in_data = in_array[block.read_roi]
+            out_data = in_data.argmax(axis=0)
+            out_array[block.write_roi] = out_data
+
+        yield process_block
+
+
+if __name__ == "__main__":
+
+    argmax_task = Argmax()
+    argmax_task.run_blockwise(multiprocessing=False)
+
+    print(zarr.open(f"{argmax_task.task_name}/data.zarr/in_array")[:, :, 0, 0])
+    print(zarr.open(f"{argmax_task.task_name}/data.zarr/out_array")[:, 0, 0])
+```
+
+output:
+
+```
+simple-argmax ✔: 100%|███████████| 8/8 [00:00<00:00, 265.34blocks/s, ⧗=0, ▶=0, ✔=8, ✗=0, ∅=0]
+
+Execution Summary
+-----------------
+
+  Task simple-argmax:
+
+    num blocks : 8
+    completed ✔: 8 (skipped 0)
+    failed    ✗: 0
+    orphaned  ∅: 0
+
+    all blocks processed successfully
+[[5. 0. 9. 0. 8. 9. 2. 4. 3. 4.]
+ [9. 0. 0. 4. 9. 9. 4. 0. 5. 3.]
+ [3. 6. 8. 9. 8. 0. 6. 5. 4. 7.]]
+[1. 2. 0. 2. 1. 0. 2. 2. 1. 2.]
 ```
