@@ -8,9 +8,11 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from pydantic import Field
-from scipy.ndimage import gaussian_filter, measurements
+from scipy.ndimage import gaussian_filter, maximum_filter, measurements
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
+from scipy.ndimage.morphology import distance_transform_edt
+from scipy.ndimage import label
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
@@ -98,6 +100,11 @@ class ExtractFrags(BlockwiseTask):
     """
     If using strides, you may want to switch from a grided stride to a random probability of
     filtering out an affinity. This can help avoid grid artifacts in the fragments.
+    """
+    min_seed_distance: int | None = 10
+    """
+    Determines whether to use seeds for mutex or not (default). Controls the
+    size of the maximum filter footprint computed on the boundary distances
     """
 
     fit: Literal["shrink"] = "shrink"
@@ -196,6 +203,22 @@ class ExtractFrags(BlockwiseTask):
 
         return fragments_data
 
+    def get_seeds(
+        self,
+        boundary_distances,
+        min_seed_distance=10,
+    ):
+
+        max_filtered = maximum_filter(boundary_distances, min_seed_distance)
+        maxima = max_filtered == boundary_distances
+
+        seeds, n = label(maxima)
+
+        if n == 0:
+            return np.zeros(boundary_distances.shape, dtype=np.uint64)
+
+        return seeds
+
     def compute_fragments(self, affs_data):
         if self.sigma is not None:
             # add 0 for channel dim
@@ -208,8 +231,6 @@ class ExtractFrags(BlockwiseTask):
         # If you have many affinities of the exact same value the order they are processed
         # in may be fifo, so you can get annoying streaks.
 
-        ### tmp comment out ###
-
         shift = np.zeros_like(affs_data)
 
         if self.noise_eps is not None:
@@ -220,8 +241,6 @@ class ExtractFrags(BlockwiseTask):
         # add smoothed affs, to solve a similar issue to the random noise. We want to bias
         # towards processing the central regions of objects first.
 
-        ### tmp comment out ###
-
         if sigma is not None:
             shift += gaussian_filter(affs_data, sigma=sigma) - affs_data
 
@@ -230,10 +249,24 @@ class ExtractFrags(BlockwiseTask):
             (-1, *((1,) * (len(affs_data.shape) - 1)))
         )
 
+        if self.min_seed_distance is not None:
+            boundary_mask = np.mean(affs_data, axis=0) > 0.5
+            boundary_distances = distance_transform_edt(boundary_mask)
+
+            seeds = self.get_seeds(
+                boundary_distances,
+                min_seed_distance=self.min_seed_distance,
+            ).astype(np.uint64)
+
+            seeds[~boundary_mask] = 0
+        else:
+            seeds = None
+
         fragments_data = mws.agglom(
             (affs_data + shift).astype(np.float64),
             offsets=self.neighborhood,
             strides=self.strides,
+            seeds=seeds,
             randomized_strides=self.randomized_strides,
         )
 
