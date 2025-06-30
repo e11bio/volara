@@ -166,3 +166,6 @@ docs/source/_build
 volara_logs
 uv.lock
 *.zarr
+*.sqlite
+*.json
+*.npz
