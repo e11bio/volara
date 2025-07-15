@@ -1,4 +1,5 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
@@ -6,7 +7,8 @@ from typing import Literal, Sequence
 
 import numpy as np
 import zarr
-from funlib.geometry import Coordinate
+from cloudvolume import CloudVolume
+from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
 
@@ -226,6 +228,40 @@ class Labels(Dataset):
     """
 
     dataset_type: Literal["labels"] = "labels"
+
+    @property
+    def attrs(self):
+        return {}
+
+class CloudVolumeWrapper(Dataset):
+    """
+    Represents a volumetric dataset through Cloud Volume.
+    """
+    data_name: str
+    dataset_type: Literal["volume"] = "volume"
+    mip: int = 0
+    timestamp: int = int(time.time()) # default to current time
+    voxel_size: PydanticCoordinate = Coordinate((1, 1, 1))
+    agglomerate: bool = True
+
+    @property
+    def data(self) -> CloudVolume:
+        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate, timestamp=self.timestamp)
+        return vol
+
+    @property
+    def data_shape(self) -> list[int]:
+        return self.data.shape
+
+    @property
+    def name(self) -> str:
+        return self.data_name
+
+    @property
+    def roi(self) -> Roi:
+        shape = np.array(self.data.shape)[:-1].tolist()
+        offset = self.data.voxel_offset
+        return Roi(offset, shape)
 
     @property
     def attrs(self):
