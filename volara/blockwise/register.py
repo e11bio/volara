@@ -82,7 +82,6 @@ class ComputeShift(BlockwiseTask):
             axis_names=[in_data.axis_names[0], "axis", *axis_names],
             types=[in_data.types[0], "axis", *in_data.types[1:]],
             dtype=np.float32,
-            kwargs=self.shifts.attrs,
         )
 
     @staticmethod
@@ -225,7 +224,6 @@ class ApplyShift(BlockwiseTask):
             units=self.intensities.units,
             axis_names=in_array.axis_names,
             dtype=np.uint8,
-            kwargs=self.aligned.attrs,
         )
 
         # TODO: avoid hardcoding channels first and assuming channel dim exists in intensities :/
@@ -243,7 +241,6 @@ class ApplyShift(BlockwiseTask):
                 units=self.intensities.units,
                 axis_names=[in_array.axis_names[0], "axis", *in_array.axis_names[1:]],
                 dtype=np.float32,
-                kwargs=self.interp_shifts.attrs,
             )
 
     @staticmethod

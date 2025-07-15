@@ -82,7 +82,6 @@ class Relabel(BlockwiseTask):
             axis_names=in_data.axis_names,
             types=in_data.types,
             dtype=self._out_array_dtype,
-            kwargs=self.seg_data.attrs,
         )
 
     def map_block(self, block, frags, segs, mapping):

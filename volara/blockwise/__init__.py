@@ -3,21 +3,19 @@ from typing import Annotated, Union
 
 from pydantic import Field, TypeAdapter
 
+from .aff_agglom import AffAgglom as AffAgglom
+from .argmax import Argmax as Argmax
 from .blockwise import BlockwiseTask
-from .components import (
-    AffAgglom,
-    ApplyShift,
-    Argmax,
-    ComputeShift,
-    DistanceAgglom,
-    ExtractFrags,
-    GraphMWS,
-    Predict,
-    Relabel,
-    SeededExtractFrags,
-    Threshold,
-    SamplePointCloud,
+from .distance_agglom import (
+    DistanceAgglom as DistanceAgglom,
 )
+from .extract_frags import ExtractFrags as ExtractFrags
+from .graph_mws import GraphMWS as GraphMWS
+from .register import ApplyShift as ApplyShift
+from .register import ComputeShift as ComputeShift
+from .relabel import Relabel as Relabel
+from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags
+from .threshold import Threshold as Threshold
 
 BLOCKWISE_TASKS = []
 
@@ -65,17 +63,15 @@ def get_blockwise_tasks_type():
 
 
 __all__ = [
-    BlockwiseTask,
-    AffAgglom,
-    ApplyShift,
-    Argmax,
-    ComputeShift,
-    DistanceAgglom,
-    ExtractFrags,
-    GraphMWS,
-    Predict,
-    Relabel,
-    SeededExtractFrags,
-    Threshold,
-    SamplePointCloud,
+    "BlockwiseTask",
+    "AffAgglom",
+    "ApplyShift",
+    "Argmax",
+    "ComputeShift",
+    "DistanceAgglom",
+    "ExtractFrags",
+    "GraphMWS",
+    "Relabel",
+    "SeededExtractFrags",
+    "Threshold",
 ]

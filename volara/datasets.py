@@ -2,13 +2,13 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
-from typing import Any, Literal, Sequence
-import time
+from typing import Literal, Sequence
+
 import numpy as np
 import zarr
+from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
-from funlib.geometry import Roi, Coordinate
-from cloudvolume import CloudVolume
+from funlib.persistence.arrays.datasets import ArrayNotFoundError
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -58,7 +58,6 @@ class Dataset(StrictBaseModel, ABC):
         axis_names: list[str],
         types: list[str],
         dtype,
-        **ds_kwargs: dict[str, Any],
     ) -> None:
         # prepare ds
         array = prepare_ds(
@@ -73,7 +72,7 @@ class Dataset(StrictBaseModel, ABC):
             dtype=dtype,
             mode="a",
         )
-        array._source_data.attrs.update(ds_kwargs)
+        array._source_data.attrs.update(self.attrs)
 
     def array(self, mode: str = "r") -> Array:
         return open_ds(self.store, mode=mode)
@@ -175,11 +174,38 @@ class Affs(Dataset):
     """
 
     dataset_type: Literal["affs"] = "affs"
-    neighborhood: list[PydanticCoordinate]
+    neighborhood: list[PydanticCoordinate] | None = None
 
     @property
     def attrs(self):
         return {"neighborhood": self.neighborhood}
+
+    def model_post_init(self, context):
+        try:
+            in_array = self.array("r")
+        except ArrayNotFoundError as e:
+            in_array = None
+            if self.neighborhood is None:
+                raise ValueError(
+                    "Affs(..., neighborhood=?)\n"
+                    "neighborhood must be provided when referencing an array that does not yet exist\n"
+                ) from e
+        if in_array is not None and "neighborhood" in in_array.attrs:
+            neighborhood = in_array.attrs["neighborhood"]
+            if self.neighborhood is None:
+                self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
+            else:
+                assert np.isclose(neighborhood, self.neighborhood).all(), (
+                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
+                )
+        else:
+            if self.neighborhood is None:
+                raise ValueError(
+                    "Affs(..., neighborhood=?)\n"
+                    "neighborhood must be provided when referencing an affs array that does not have "
+                    "a neighborhood key in the `.zattrs`"
+                )
+        return super().model_post_init(context)
 
 
 class LSD(Dataset):
@@ -201,40 +227,6 @@ class Labels(Dataset):
 
     dataset_type: Literal["labels"] = "labels"
 
-    @property
-    def attrs(self):
-        return {}
-
-class CloudVolumeWrapper(Dataset):
-    """
-    Represents a volumetric dataset through Cloud Volume.
-    """
-    data_name: str
-    dataset_type: Literal["volume"] = "volume"
-    mip: int = 0
-    timestamp: int = int(time.time()) # default to current time
-    voxel_size: PydanticCoordinate = Coordinate((1, 1, 1))
-    agglomerate: bool = True
-
-    @property
-    def data(self) -> CloudVolume:
-        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate, timestamp=self.timestamp)
-        return vol
-    
-    @property
-    def data_shape(self) -> list[int]:
-        return self.data.shape
-    
-    @property
-    def name(self) -> str:
-        return self.data_name
-    
-    @property
-    def roi(self) -> Roi:
-        shape = np.array(self.data.shape)[:-1].tolist()
-        offset = self.data.voxel_offset
-        return Roi(offset, shape)
-    
     @property
     def attrs(self):
         return {}

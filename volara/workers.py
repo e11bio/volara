@@ -218,7 +218,7 @@ class LSFWorker(Worker):
 
     def get_lsf_command(
         self,
-        command: str,
+        command: list[str],
         num_cpus: int = 1,
         num_gpus: int = 0,
         queue: str = "",

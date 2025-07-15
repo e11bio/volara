@@ -172,6 +172,10 @@ class AffAgglom(BlockwiseTask):
             return mapping
 
         neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
+
+        # affs_data.neighborhood cannot be None, assert called to make mypy happy
+        assert self.affs_data.neighborhood is not None
+
         for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
             neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
 

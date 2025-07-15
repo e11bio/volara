@@ -118,7 +118,6 @@ class SeededExtractFrags(BlockwiseTask):
             axis_names=in_data.axis_names[1:],
             types=in_data.types[1:],
             dtype=self._out_array_dtype,
-            kwargs=self.segs_data.attrs,
         )
 
     @contextmanager
@@ -139,6 +138,8 @@ class SeededExtractFrags(BlockwiseTask):
             seeds = np.zeros(affs.shape[1:], dtype=np.uint64)
             unique_seeds = set()
             for _, node_attrs in graph.nodes(data=True):
+                if "position" not in node_attrs:
+                    continue
                 pos = Coordinate(node_attrs["position"])
                 if block.read_roi.contains(pos):
                     pos -= block.read_roi.offset

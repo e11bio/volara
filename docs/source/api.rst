@@ -12,12 +12,6 @@ Databases
 .. automodule:: volara.dbs
     :members:
 
-Models
-------
-
-.. automodule:: volara.models
-    :members:
-
 Datasets
 --------
 
@@ -53,9 +47,6 @@ Blockwise Tasks
     :members:
 
 .. autopydantic_model:: GraphMWS
-    :members:
-
-.. autopydantic_model:: Predict
     :members:
 
 .. autopydantic_model:: Relabel
