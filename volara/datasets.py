@@ -214,16 +214,11 @@ class CloudVolumeWrapper(Dataset):
     mip: int = 0
     timestamp: int = int(time.time()) # default to current time
     voxel_size: PydanticCoordinate = Coordinate((1, 1, 1))
+    agglomerate: bool = True
 
     @property
     def data(self) -> CloudVolume:
-        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=True, timestamp=self.timestamp)
-        return vol
-    
-    @property
-    def svid_data(self) -> CloudVolume:
-        # returns CloudVolume as super voxel data, if exists
-        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=False, timestamp=self.timestamp)
+        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate, timestamp=self.timestamp)
         return vol
     
     @property
