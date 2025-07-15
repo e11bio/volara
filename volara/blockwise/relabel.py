@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Literal
 
 import numpy as np
@@ -66,7 +65,7 @@ class Relabel(BlockwiseTask):
         return [self.seg_data]
 
     def drop_artifacts(self):
-        rmtree(self.seg_data.store, ignore_errors=True)
+        self.seg_data.drop()
 
     def init(self):
         self.init_out_array()

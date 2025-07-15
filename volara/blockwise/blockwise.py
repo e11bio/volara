@@ -3,10 +3,11 @@ import logging
 import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from shutil import rmtree
 from typing import TYPE_CHECKING
+import sys
 
 import daisy
 import numpy as np
@@ -17,6 +18,7 @@ from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import get_log_basedir, set_log_basedir
 
+from .benchmark import BenchmarkLogger
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
 
@@ -246,9 +248,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Start our workers and run through every block until a task
         is complete.
         """
-        with self.process_block_func() as process_block:
+        benchmark_logger = self.get_benchmark_logger()
+        with ExitStack() as stack:
+            with benchmark_logger.trace("Process Block Setup"):
+                process_block = stack.enter_context(self.process_block_func())
 
             def worker_loop():
+                worker_benchmark_logger = self.get_benchmark_logger()
                 client = daisy.Client()
                 # TODO: this shouldn't be necessary, daisy should be doing this for us
                 try:
@@ -259,14 +265,18 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
                 while True:
                     logger.info("getting block")
-                    with client.acquire_block() as block:
+                    with ExitStack() as worker_stack:
+                        with worker_benchmark_logger.trace("Acquire Block"):
+                            block = worker_stack.enter_context(client.acquire_block())
                         logger.info(f"got block {block}")
 
                         if block is None:
                             break
 
-                        process_block(block)
-                        mark_block_done(block)
+                        with benchmark_logger.trace("Process Block"):
+                            process_block(block)
+                        with benchmark_logger.trace("Mark Block Done"):
+                            mark_block_done(block)
 
             if self.num_cache_workers is not None:
                 workers = [
@@ -355,78 +365,133 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.
         """
+        benchmark_logger = self.get_benchmark_logger()
 
-        # initialize the arrays the task operates on
-        self.init_block_array()
-        self.init()
+        with benchmark_logger.trace("init"):
+            self.init_block_array()
+            self.init()
 
-        # create task
-        context = self.context_size
-        if not isinstance(context, Coordinate):
-            assert isinstance(context, tuple)
-            context_low, context_high = context[0], context[1]
+            context = self.context_size
+            if not isinstance(context, Coordinate):
+                assert isinstance(context, tuple)
+                context_low, context_high = context[0], context[1]
+            else:
+                context_low, context_high = context, context
+
+        with ExitStack() as stack:
+            if multiprocessing:
+                process_func = self.worker_func()
+            else:
+                process_block_func = self.process_block_func()
+                with benchmark_logger.trace("Process Block Setup"):
+                    process_block = stack.enter_context(process_block_func)
+
+                mark_block = self.mark_block_done_func()
+
+                def process_func(block):
+                    with benchmark_logger.trace("Process Block"):
+                        process_block(block)
+                    with benchmark_logger.trace("Mark Block Done"):
+                        mark_block(block)
+
+            task = daisy.Task(
+                self.task_name,
+                total_roi=self.write_roi.grow(context_low, context_high),
+                read_roi=self.block_write_roi.grow(context_low, context_high),
+                write_roi=self.block_write_roi,
+                process_function=process_func,
+                read_write_conflict=self.read_write_conflict,
+                fit=self.fit,
+                num_workers=self.num_workers,
+                check_function=self.check_block_func(),
+                max_retries=2,
+                timeout=None,
+                upstream_tasks=(
+                    (
+                        upstream_tasks
+                        if isinstance(upstream_tasks, list)
+                        else [upstream_tasks]
+                    )
+                    if upstream_tasks is not None
+                    else None
+                ),
+            )
+
+            yield task
+
+    def get_benchmark_logger(self) -> BenchmarkLogger | None:
+        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        if benchmark_db_path.exists():
+            return BenchmarkLogger(benchmark_db_path, task=self.task_name)
         else:
-            context_low, context_high = context, context
+            return None
 
-        if multiprocessing:
-            process_func = self.worker_func()
-        else:
-            process_block_func = self.process_block_func()
-            process_block = process_block_func.__enter__()
-            mark_block = self.mark_block_done_func()
+    def spoof(self, spoof_dir: Path):
+        """
+        Whether or not to spoof the data inputs to this task.
+        """
+        data = {}
+        for name, field in self.__class__.model_fields.items():
+            value = getattr(self, name)
+            if hasattr(value, "spoof"):
+                # If the value has a spoof method, call it to get a mock value
+                data[name] = value.spoof(spoof_dir)
+            else:
+                data[name] = value
+        return self.__class__(**data)
 
-            def process_func(block):
-                process_block(block)
-                mark_block(block)
+    def benchmark(self, multiprocessing: bool = True):
+        """
+        A helper function for benchmarking and debugging a blockwise task or pipeline.
 
-        task = daisy.Task(
-            self.task_name,
-            total_roi=self.write_roi.grow(context_low, context_high),
-            read_roi=self.block_write_roi.grow(context_low, context_high),
-            write_roi=self.block_write_roi,
-            process_function=process_func,
-            read_write_conflict=self.read_write_conflict,
-            fit=self.fit,
-            num_workers=self.num_workers,
-            check_function=self.check_block_func(),
-            max_retries=2,
-            timeout=None,
-            upstream_tasks=(
-                (
-                    upstream_tasks
-                    if isinstance(upstream_tasks, list)
-                    else [upstream_tasks]
-                )
-                if upstream_tasks is not None
-                else None
-            ),
-        )
+        Used as a "dry run" of `run_blockwise` without saving any outputs.
+        - Will not skip blocks that have already been processed. You can benchmark a task
+          that has already been run.
+        - Will not save any run artifacts such as block done datasets, output datasets,
+          graph nodes or edges, or look up tables. The only thing that will be saved are the
+          worker logs and a timing report.
+        """
+        from volara.logging import set_log_basedir
 
-        yield task
+        log_basedir = get_log_basedir()
+        set_log_basedir("volara_benchmark_logs")
+        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        if benchmark_db_path.exists():
+            benchmark_db_path.unlink()
+        benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
+        benchmark_logger._init_db()
 
-        if not multiprocessing:
-            process_block_func.__exit__(None, None, None)
+        spoof_dir = Path("volara_benchmark_logs/spoof")
+        debug_self = self.spoof(spoof_dir)
+
+        try:
+            with debug_self.task(multiprocessing=multiprocessing) as task:
+                tasks = [task]
+                if multiprocessing:
+                    result = daisy.run_blockwise(tasks)  # noqa
+                else:
+                    server = daisy.SerialServer()
+                    _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                    result = server.run_blockwise(tasks)
+            return result
+        except Exception as e:
+            logger.exception(e)
+
+        finally:
+            debug_self.drop()
+            benchmark_logger.print_report()
+            set_log_basedir(log_basedir)
+            sys.exit(0)
 
     def run_blockwise(
         self,
-        upstream_tasks: list[daisy.Task] | None = None,
         multiprocessing: bool = True,
     ):
         """
         Execute this task blockwise.
         """
-        with self.task(upstream_tasks, multiprocessing) as task:
-            if upstream_tasks is None:
-                tasks = [task]
-            elif isinstance(upstream_tasks, list):
-                tasks = upstream_tasks + [task]
-            elif isinstance(upstream_tasks, daisy.Task):
-                tasks = [upstream_tasks, task]
-            else:
-                raise NotImplementedError(
-                    f"upstream tasks {upstream_tasks} with type {type(upstream_tasks)} not supported. "
-                    "Please provide a daisy.Task or a list of daisy.Task objects."
-                )
+        with self.task(multiprocessing=multiprocessing) as task:
+            tasks = [task]
             if multiprocessing:
                 result = daisy.run_blockwise(tasks)  # noqa
             else:
@@ -444,8 +509,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         from .pipeline import Pipeline
 
-        print("Task add")
-
         if isinstance(other, Pipeline):
             return Pipeline(self) + other
         elif isinstance(other, BlockwiseTask):
@@ -462,8 +525,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Task graphs are merged, but no edges are added.
         """
         from .pipeline import Pipeline
-
-        print("Task or")
 
         if isinstance(other, Pipeline):
             return Pipeline(self) | other

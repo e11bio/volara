@@ -9,6 +9,7 @@ import zarr
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
+from pydantic import model_validator
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -29,6 +30,12 @@ class Dataset(StrictBaseModel, ABC):
     offset: PydanticCoordinate | None = None
     axis_names: list[str] | None = None
     units: list[str] | None = None
+    writable: bool = True
+
+    @model_validator(mode="after")
+    def cast_store(self):
+        self.store = Path(self.store)
+        return self
 
     @property
     def name(self) -> str:
@@ -46,7 +53,28 @@ class Dataset(StrictBaseModel, ABC):
         """
         Delete this dataset
         """
-        rmtree(self.store)
+        if self.store.exists():
+            rmtree(self.store)
+
+    def spoof(self, spoof_dir: Path):
+        spoof_path = spoof_dir / f"spoof_{self.name}"
+        if not spoof_path.parent.exists():
+            spoof_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.store.exists() and not self.writable:
+            """
+            If the store is not writable, it is an input to some task and we can
+            safely read from it.
+            """
+            print("Symlinking", self.store)
+            if not spoof_path.exists():
+                spoof_path.symlink_to(self.store.absolute(), target_is_directory=True)
+        else:
+            print("Spoofing", self.store)
+
+        return self.__class__(
+            store=spoof_dir / f"spoof_{self.name}",
+            **self.model_dump(exclude={"store"}),
+        )
 
     def prepare(
         self,
@@ -75,6 +103,10 @@ class Dataset(StrictBaseModel, ABC):
         array._source_data.attrs.update(self.attrs)
 
     def array(self, mode: str = "r") -> Array:
+        if not self.writable and mode != "r":
+            raise ValueError(
+                f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
+            )
         return open_ds(self.store, mode=mode)
 
     @property
@@ -121,6 +153,10 @@ class Raw(Dataset):
         return attrs
 
     def array(self, mode="r"):
+        if not self.writable and mode != "r":
+            raise ValueError(
+                f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
+            )
         def scale_shift(data, scale_shift):
             data = data.astype(np.float32)
             scale, shift = scale_shift

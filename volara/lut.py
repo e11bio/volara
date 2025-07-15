@@ -34,6 +34,9 @@ class LUT(StrictBaseModel):
         if self.file.exists():
             self.file.unlink()
 
+    def spoof(self, spoof_dir: Path):
+        return self.__class__(path=spoof_dir / self.file.name)
+
     def save(self, lut, edges=None):
         np.savez_compressed(self.file, fragment_segment_lut=lut, edges=edges)
 

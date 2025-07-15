@@ -166,3 +166,4 @@ docs/source/_build
 volara_logs
 uv.lock
 *.zarr
+volara_benchmark_logs
