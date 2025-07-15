@@ -1,6 +1,5 @@
 import logging
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Annotated, Literal
 
 import daisy
@@ -137,10 +136,7 @@ class ExtractFrags(BlockwiseTask):
         return self.affs_data.array("r").voxel_size
 
     def drop_artifacts(self):
-        try:
-            rmtree(self.frags_data.store)
-        except FileNotFoundError:
-            pass
+        self.frags_data.drop()
         self.db.drop()
 
     def init(self):

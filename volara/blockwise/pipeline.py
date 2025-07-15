@@ -1,12 +1,19 @@
 from contextlib import ExitStack
 from itertools import product
 from typing import TYPE_CHECKING
+from pathlib import Path
+import logging
+import sys
 
 import daisy
 import networkx as nx
 
+from .benchmark import BenchmarkLogger
+
 if TYPE_CHECKING:
     from .blockwise import BlockwiseTask
+
+logger = logging.getLogger(__name__)
 
 
 class Pipeline:
@@ -74,6 +81,64 @@ class Pipeline:
         combined_graph.add_edges_from(other.task_graph.edges())
 
         return combined_pipeline
+
+    def benchmark(self, multiprocessing: bool = True):
+        """
+        Run the pipeline in a benchmark mode, which will run each task
+        in the pipeline and log the time taken for each task.
+        """
+        from volara.logging import set_log_basedir, get_log_basedir
+
+        log_basedir = get_log_basedir()
+        set_log_basedir("volara_benchmark_logs")
+        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        if benchmark_db_path.exists():
+            benchmark_db_path.unlink()
+        benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
+        benchmark_logger._init_db()
+
+        tmp_path = Path("volara_benchmark_logs/spoof")
+        spoof_graph = nx.relabel_nodes(
+            self.task_graph,
+            lambda x: x.spoof(tmp_path),
+        )
+        node_ordering = list(nx.topological_sort(spoof_graph))
+
+        try:
+            with ExitStack() as stack:
+                task_map: dict[BlockwiseTask, daisy.Task] = {}
+                sinks = []
+                for node in node_ordering:
+                    upstream_tasks = [
+                        task_map[upstream]
+                        for upstream in spoof_graph.predecessors(node)
+                    ]
+                    task = node.task(
+                        upstream_tasks=upstream_tasks, multiprocessing=multiprocessing
+                    )
+                    task = stack.enter_context(task)
+                    task_map[node] = task
+                    if spoof_graph.out_degree(node) == 0:
+                        sinks.append(task)
+
+                all_tasks = list(task_map.values())
+
+                if multiprocessing:
+                    daisy.run_blockwise(all_tasks)
+                else:
+                    server = daisy.SerialServer()
+                    cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                    server.run_blockwise(all_tasks)
+
+        except Exception as e:
+            logger.exception(e)
+
+        finally:
+            for node in node_ordering:
+                node.drop()
+            benchmark_logger.print_report()
+            set_log_basedir(log_basedir)
+            sys.exit(0)
 
     def run_blockwise(self, multiprocessing: bool = True):
         with ExitStack() as stack:

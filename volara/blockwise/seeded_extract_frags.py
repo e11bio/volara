@@ -1,6 +1,5 @@
 import logging
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Annotated, Literal
 
 import daisy
@@ -99,7 +98,7 @@ class SeededExtractFrags(BlockwiseTask):
         return [self.segs_data]
 
     def drop_artifacts(self):
-        rmtree(self.segs_data.store)
+        self.segs_data.drop()
 
     def init(self):
         self.init_out_array()

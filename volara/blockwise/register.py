@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Literal
 
 import numpy as np
@@ -54,7 +53,7 @@ class ComputeShift(BlockwiseTask):
         return [self.shifts]
 
     def drop_artifacts(self):
-        rmtree(self.shifts.store)
+        self.shifts.drop()
 
     def init(self):
         self.init_out_array()
@@ -201,9 +200,8 @@ class ApplyShift(BlockwiseTask):
         return [self.shifts]
 
     def drop_artifacts(self):
-        rmtree(self.aligned.store)
-        if self.interp_shifts is not None:
-            rmtree(self.interp_shifts.store)
+        self.aligned.drop()
+        self.interp_shifts.drop()
 
     def init(self):
         self.init_out_array()
