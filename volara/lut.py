@@ -16,7 +16,7 @@ class LUT(StrictBaseModel):
     The path at which we will read/write the look up table
     """
 
-    @field_validator("store", mode="after")
+    @field_validator("path", mode="after")
     @classmethod
     def path_path(cls, v) -> Path:
         try:
