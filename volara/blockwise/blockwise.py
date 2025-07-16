@@ -18,7 +18,7 @@ from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import get_log_basedir, set_log_basedir
 
-from ..utils import PydanticCoordinate, StrictBaseModel
+from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class BlockwiseTask(StrictBaseModel, ABC):
-    roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
+    roi: PydanticRoi | None = None
     """
     An optional `roi` defining the total region to output.
     """

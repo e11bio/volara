@@ -68,7 +68,7 @@ graph_mws = GraphMWS(
     db=fragments_graph,
     lut=lut,
     weights={"xy_aff": (1, -0.4), "z_aff": (1, -0.6), "lr_aff": (1, -0.6)},
-    roi=(total_roi.offset, total_roi.shape),
+    roi=total_roi,
 )
 
 # Relabel the fragments into segments

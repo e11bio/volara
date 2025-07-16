@@ -49,10 +49,6 @@ class GraphMWS(BlockwiseTask):
     `attr, (w, b) in weights.items()`
     If an attribute is not present in the edge data it will be skipped.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
-    """
-    The roi to process. This is the roi of the full graph to process.
-    """
     edge_per_attr: bool = True
     """
     Whether or not to create a separate edge for each attribute in the weights. If
@@ -85,7 +81,7 @@ class GraphMWS(BlockwiseTask):
 
     @property
     def write_roi(self) -> Roi:
-        return Roi(*self.roi)
+        return self.roi
 
     @property
     def write_size(self) -> Coordinate:
