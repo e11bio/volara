@@ -15,15 +15,15 @@ from volara.lut import LUT
 os.chdir(Path(__file__).parent)
 print(Path.cwd())
 
-raw = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0), writable=False)
-affs = Affs(store="sample_A+_20160601.zarr/affs", writable=False)
+raw = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0), writable=False)  # type: ignore[arg-type]
+affs = Affs(store="sample_A+_20160601.zarr/affs", writable=False)  # type: ignore[arg-type]
 
 fragments_graph = SQLite(
-    path="sample_A+_20160601.zarr/fragments.db",
+    path="sample_A+_20160601.zarr/fragments.db",  # type: ignore[arg-type]
     edge_attrs={"xy_aff": "float", "z_aff": "float", "lr_aff": "float"},
 )
-fragments_dataset = Labels(store="sample_A+_20160601.zarr/fragments")
-segments_dataset = Labels(store="sample_A+_20160601.zarr/segments")
+fragments_dataset = Labels(store="sample_A+_20160601.zarr/fragments")  # type: ignore[arg-type]
+segments_dataset = Labels(store="sample_A+_20160601.zarr/segments")  # type: ignore[arg-type]
 
 block_size = raw.array("r")._source_data.chunks
 
@@ -62,7 +62,7 @@ aff_agglom = AffAgglom(
 
 # Run mutex watershed again, this time on the fragment graph with agglomerated edges
 # instead of the voxel graph of affinities
-lut = LUT(path="sample_A+_20160601.zarr/lut.npz")
+lut = LUT(path="sample_A+_20160601.zarr/lut.npz")  # type: ignore[arg-type]
 total_roi = raw.array("r").roi
 graph_mws = GraphMWS(
     db=fragments_graph,

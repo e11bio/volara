@@ -7,13 +7,14 @@ LOG_BASEDIR = Path("./volara_logs")
 daisy.logging.set_log_basedir(LOG_BASEDIR)
 
 
-def set_log_basedir(path: Path):
+def set_log_basedir(path: Path | str):
     """Set the base directory for logging (indivudal worker logs and detailed
     task summaries). If set to ``None``, all logging will be shown on the
     command line (which can get very messy).
 
     Default is ``./volara_logs``.
     """
+    path = Path(path)
 
     global LOG_BASEDIR
 

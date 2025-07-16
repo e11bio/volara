@@ -419,12 +419,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             yield task
 
-    def get_benchmark_logger(self) -> BenchmarkLogger | None:
+    def get_benchmark_logger(self) -> BenchmarkLogger:
         benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
-        if benchmark_db_path.exists():
-            return BenchmarkLogger(benchmark_db_path, task=self.task_name)
-        else:
-            return None
+        return BenchmarkLogger(
+            benchmark_db_path if benchmark_db_path.exists() else None,
+            task=self.task_name,
+        )
 
     def spoof(self, spoof_dir: Path):
         """
