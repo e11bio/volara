@@ -6,6 +6,48 @@ from pathlib import Path
 import os
 import polars as pl
 import psutil
+from collections import defaultdict, Counter
+from collections import deque
+
+
+def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
+    # Generate all local constraints
+    precedence = defaultdict(set)
+    pair_counts = Counter()
+    for task_ops in task_orders.values():
+        for i in range(len(task_ops)):
+            for j in range(i + 1, len(task_ops)):
+                x, y = task_ops[i], task_ops[j]
+                precedence[x].add(y)
+                pair_counts[(x, y)] += 1
+
+    # All nodes
+    all_ops = set()
+    for ops in task_orders.values():
+        all_ops.update(ops)
+
+    # Compute in-degrees
+    in_degree = {op: 0 for op in all_ops}
+    for x in precedence:
+        for y in precedence[x]:
+            in_degree[y] += 1
+
+    # Use a queue of nodes with in-degree 0
+    queue = deque(sorted([op for op in all_ops if in_degree[op] == 0]))
+
+    ops_list = []
+    while queue:
+        # Tie-break: pick op that has most total forward constraints
+        current = min(
+            queue, key=lambda op: -sum(pair_counts[(op, y)] for y in precedence[op])
+        )
+        queue.remove(current)
+        ops_list.append(current)
+        for y in precedence[current]:
+            in_degree[y] -= 1
+            if in_degree[y] == 0:
+                queue.append(y)
+    return ops_list
 
 
 class BenchmarkLogger:
@@ -111,6 +153,19 @@ class BenchmarkLogger:
             rows = list(cursor.fetchall())
             cursor.close()
 
+            # Extract orderings from `rows`
+            task_orders = {}
+            seen = set()
+
+            for row in rows:
+                task, _, op, *_ = row
+                if (task, op) not in seen:
+                    task_orders.setdefault(task, []).append(op)
+                    seen.add((task, op))
+
+            ops_order = partial_order(task_orders)
+            task_order = list(task_orders.keys())
+
             # Convert to Polars DataFrame
             df = pl.DataFrame(
                 rows,
@@ -125,17 +180,28 @@ class BenchmarkLogger:
                     "io_write",
                 ],
             )
+            task_rank = {task: i for i, task in enumerate(task_order)}
 
             # Group by task and operation, compute mean and std
-            agg_df = df.group_by(["task", "operation"]).agg(
-                [
-                    pl.col("duration").mean().alias("wall_mean"),
-                    pl.col("duration").std().alias("wall_std"),
-                    pl.col("cpu_usage").mean().alias("cpu_mean"),
-                    pl.col("mem_usage").max().alias("max_mem"),
-                    pl.col("io_read").mean().alias("read_mean"),
-                    pl.col("io_write").mean().alias("write_mean"),
-                ]
+            agg_df = (
+                df.group_by(["task", "operation"])
+                .agg(
+                    [
+                        pl.col("duration").mean().alias("wall_mean"),
+                        pl.col("duration").std().alias("wall_std"),
+                        pl.col("cpu_usage").mean().alias("cpu_mean"),
+                        pl.col("mem_usage").max().alias("max_mem"),
+                        pl.col("io_read").mean().alias("read_mean"),
+                        pl.col("io_write").mean().alias("write_mean"),
+                    ]
+                )
+                .with_columns(
+                    pl.col("task")
+                    .map_elements(lambda x: task_rank.get(x, float("inf")))
+                    .alias("_rank")
+                )
+                .sort(by="_rank")
+                .drop("_rank")
             )
 
             # Combine mean ± std into a formatted string
@@ -170,15 +236,22 @@ class BenchmarkLogger:
             )
 
             # Pivot to wide table: rows = task, columns = operation, values = duration_str
-            time_df = time_df.pivot(
-                values="time_profile", index="task", columns="operation"
-            ).sort("task")
-            mem_df = mem_df.pivot(
-                values="mem_profile", index="task", columns="operation"
-            ).sort("task")
-            io_df = io_df.pivot(
-                values="io_profile", index="task", columns="operation"
-            ).sort("task")
+            time_df = (
+                (
+                    time_df.pivot(
+                        values="time_profile", index="task", columns="operation"
+                    )
+                )
+                .select(["task"] + ops_order)
+            )
+            mem_df = (
+                mem_df.pivot(values="mem_profile", index="task", columns="operation")
+                .select(["task"] + ops_order)
+            )
+            io_df = (
+                io_df.pivot(values="io_profile", index="task", columns="operation")
+                .select(["task"] + ops_order)
+            )
 
             time_df.write_csv("benchmark_time.csv")
             mem_df.write_csv("benchmark_memory.csv")
