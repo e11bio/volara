@@ -8,7 +8,7 @@
   <picture>
     <source srcset="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara%20Logo.svg" media="(prefers-color-scheme: light)">
     <source srcset="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara%20Logo-white.svg" media="(prefers-color-scheme: dark)">
-    <img src="http://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg" alt="Volara Logo">
+    <img class="dark-light" src="http://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg" alt="Volara Logo">
   </picture>
 </p>
 
