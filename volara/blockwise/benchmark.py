@@ -1,13 +1,13 @@
+import os
 import sqlite3
 import time
+from collections import Counter, defaultdict, deque
 from contextlib import contextmanager
-import daisy
 from pathlib import Path
-import os
+
+import daisy
 import polars as pl
 import psutil
-from collections import defaultdict, Counter
-from collections import deque
 
 
 def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
@@ -237,21 +237,14 @@ class BenchmarkLogger:
 
             # Pivot to wide table: rows = task, columns = operation, values = duration_str
             time_df = (
-                (
-                    time_df.pivot(
-                        values="time_profile", index="task", columns="operation"
-                    )
-                )
-                .select(["task"] + ops_order)
-            )
-            mem_df = (
-                mem_df.pivot(values="mem_profile", index="task", columns="operation")
-                .select(["task"] + ops_order)
-            )
-            io_df = (
-                io_df.pivot(values="io_profile", index="task", columns="operation")
-                .select(["task"] + ops_order)
-            )
+                time_df.pivot(values="time_profile", index="task", columns="operation")
+            ).select(["task"] + ops_order)
+            mem_df = mem_df.pivot(
+                values="mem_profile", index="task", columns="operation"
+            ).select(["task"] + ops_order)
+            io_df = io_df.pivot(
+                values="io_profile", index="task", columns="operation"
+            ).select(["task"] + ops_order)
 
             time_df.write_csv("benchmark_time.csv")
             mem_df.write_csv("benchmark_memory.csv")

@@ -157,6 +157,7 @@ class Raw(Dataset):
             raise ValueError(
                 f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
             )
+
         def scale_shift(data, scale_shift):
             data = data.astype(np.float32)
             scale, shift = scale_shift

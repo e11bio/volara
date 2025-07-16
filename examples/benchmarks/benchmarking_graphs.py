@@ -9,17 +9,18 @@
 # [tool.uv.sources]
 # volara = { git = "https://github.com/e11bio/volara" }
 # ///
-from volara.dbs import SQLite
-import networkx as nx
+import itertools
+import pickle
 import random
 import time
-import itertools
 from pathlib import Path
-import pickle
+
 import matplotlib.pyplot as plt
+import networkx as nx
+from funlib.geometry import Coordinate, Roi
 from pympler import asizeof
 
-from funlib.geometry import Coordinate, Roi
+from volara.dbs import SQLite
 
 if not Path("benchmark_volara_graphs.pickle").exists():
     NODE_COUNTS = [

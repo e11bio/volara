@@ -2,12 +2,12 @@ import glob
 import logging
 import multiprocessing
 import subprocess
+import sys
 from abc import ABC, abstractmethod
-from contextlib import contextmanager, ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from shutil import rmtree
 from typing import TYPE_CHECKING
-import sys
 
 import daisy
 import numpy as np
@@ -18,9 +18,9 @@ from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import get_log_basedir, set_log_basedir
 
-from .benchmark import BenchmarkLogger
 from ..utils import PydanticCoordinate, StrictBaseModel
 from ..workers import Worker
+from .benchmark import BenchmarkLogger
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline

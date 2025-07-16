@@ -2,16 +2,15 @@ import multiprocessing as mp
 
 mp.set_start_method("fork", force=True)
 
+import os
 from pathlib import Path
 
 from funlib.geometry import Coordinate
 
 from volara.blockwise import AffAgglom, ExtractFrags, GraphMWS, Relabel
-from volara.datasets import Labels, Raw, Affs
+from volara.datasets import Affs, Labels, Raw
 from volara.dbs import SQLite
 from volara.lut import LUT
-
-import os
 
 os.chdir(Path(__file__).parent)
 print(Path.cwd())
