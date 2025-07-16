@@ -248,8 +248,8 @@ class BenchmarkLogger:
                 values="io_profile", index="task", columns="operation"
             ).select(["task"] + ops_order)
 
-            time_df.write_csv("benchmark_time.csv")
-            mem_df.write_csv("benchmark_memory.csv")
-            io_df.write_csv("benchmark_io.csv")
+            time_df.write_csv("time.csv")
+            mem_df.write_csv("memory.csv")
+            io_df.write_csv("io.csv")
         else:
             print("No benchmark data available.")
