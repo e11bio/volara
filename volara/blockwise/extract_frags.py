@@ -101,7 +101,7 @@ class ExtractFrags(BlockwiseTask):
     If using strides, you may want to switch from a grided stride to a random probability of
     filtering out an affinity. This can help avoid grid artifacts in the fragments.
     """
-    min_seed_distance: int | None = 10
+    min_seed_distance: int | None = None
     """
     Determines whether to use seeds for mutex or not (default). Controls the
     size of the maximum filter footprint computed on the boundary distances
