@@ -32,7 +32,7 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
-    @field_validator("store", mode="after")
+    @field_validator("store", mode="before")
     @classmethod
     def cast_store(cls, v) -> Path:
         try:
