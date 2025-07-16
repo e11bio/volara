@@ -89,5 +89,8 @@ module = [
     "dacapo.*",
     "numba.*",
     "psycopg2.*",
+    "matplotlib.*",
+    "psutil",
+
 ]
 ignore_missing_imports = true

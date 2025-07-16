@@ -13,7 +13,7 @@ import psutil
 def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
     # Generate all local constraints
     precedence = defaultdict(set)
-    pair_counts = Counter()
+    pair_counts: Counter[tuple[str, str]] = Counter()
     for task_ops in task_orders.values():
         for i in range(len(task_ops)):
             for j in range(i + 1, len(task_ops)):
@@ -51,11 +51,13 @@ def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
 
 
 class BenchmarkLogger:
-    def __init__(self, db_path: str | None, task: str | None):
+    def __init__(self, db_path: Path | str | None, task: str | None):
+        db_path = Path(db_path) if db_path is not None else None
         self.task = task
+        self.conn: None | sqlite3.Connection = None
         if db_path is not None:
-            if not Path(db_path).parent.exists():
-                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            if not db_path.parent.exists():
+                db_path.parent.mkdir(parents=True, exist_ok=True)
             self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
         else:
             self.conn = None

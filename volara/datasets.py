@@ -9,7 +9,7 @@ import zarr
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
-from pydantic import model_validator
+from pydantic import Field, field_validator
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -24,7 +24,7 @@ class Dataset(StrictBaseModel, ABC):
     for all dataset types.
     """
 
-    store: str | Path
+    store: Path
 
     voxel_size: PydanticCoordinate | None = None
     offset: PydanticCoordinate | None = None
@@ -32,10 +32,13 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
-    @model_validator(mode="after")
-    def cast_store(self):
-        self.store = Path(self.store)
-        return self
+    @field_validator("store", mode="after")
+    @classmethod
+    def cast_store(cls, v) -> Path:
+        try:
+            return Path(v)
+        except TypeError:
+            raise ValueError(f"Invalid store path: {v}. Must be a path-like object.")
 
     @property
     def name(self) -> str:
@@ -211,32 +214,33 @@ class Affs(Dataset):
     """
 
     dataset_type: Literal["affs"] = "affs"
-    neighborhood: list[PydanticCoordinate] | None = None
+    neighborhood: list[PydanticCoordinate] = Field(default_factory=list)
 
     @property
     def attrs(self):
         return {"neighborhood": self.neighborhood}
 
     def model_post_init(self, context):
+        provided = len(self.neighborhood) > 0
         try:
             in_array = self.array("r")
         except ArrayNotFoundError as e:
             in_array = None
-            if self.neighborhood is None:
+            if not provided:
                 raise ValueError(
                     "Affs(..., neighborhood=?)\n"
                     "neighborhood must be provided when referencing an array that does not yet exist\n"
                 ) from e
         if in_array is not None and "neighborhood" in in_array.attrs:
             neighborhood = in_array.attrs["neighborhood"]
-            if self.neighborhood is None:
+            if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
                 assert np.isclose(neighborhood, self.neighborhood).all(), (
                     f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
                 )
         else:
-            if self.neighborhood is None:
+            if not provided:
                 raise ValueError(
                     "Affs(..., neighborhood=?)\n"
                     "neighborhood must be provided when referencing an affs array that does not have "
