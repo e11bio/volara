@@ -1,9 +1,9 @@
-from contextlib import ExitStack
-from itertools import product
-from typing import TYPE_CHECKING
-from pathlib import Path
 import logging
 import sys
+from contextlib import ExitStack
+from itertools import product
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import daisy
 import networkx as nx
@@ -87,7 +87,7 @@ class Pipeline:
         Run the pipeline in a benchmark mode, which will run each task
         in the pipeline and log the time taken for each task.
         """
-        from volara.logging import set_log_basedir, get_log_basedir
+        from volara.logging import get_log_basedir, set_log_basedir
 
         log_basedir = get_log_basedir()
         set_log_basedir("volara_benchmark_logs")
