@@ -85,7 +85,7 @@ class AffAgglom(BlockwiseTask):
     def write_roi(self) -> Roi:
         total_roi = self.frags_data.array("r").roi
         if self.roi is not None:
-            total_roi = total_roi.intersect(Roi(self.roi[0], self.roi[1]))
+            total_roi = total_roi.intersect(self.roi)
         return total_roi
 
     @property

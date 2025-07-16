@@ -80,6 +80,7 @@ class GraphMWS(BlockwiseTask):
 
     @property
     def write_roi(self) -> Roi:
+        assert self.roi is not None, "ROI must be set for GraphMWS task"
         return self.roi
 
     @property

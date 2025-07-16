@@ -36,7 +36,7 @@ def test_graph_mws(tmpdir, y_bias: float):
     db_config.init()
 
     config = GraphMWS(
-        roi=(block.read_roi.offset, block.read_roi.shape),
+        roi=block.read_roi,
         db=db_config,
         lut=LUT(path=tmpdir / "fragment_segment_lut.npz"),
         weights={"y_aff": (1, y_bias)},
