@@ -10,7 +10,6 @@ from pydantic import Field
 from volara.lut import LUT
 
 from ..dbs import PostgreSQL, SQLite
-from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
 DB = Annotated[
