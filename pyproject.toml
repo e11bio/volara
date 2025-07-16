@@ -90,7 +90,7 @@ module = [
     "numba.*",
     "psycopg2.*",
     "matplotlib.*",
-    "psutil",
+    "psutil.*",
 
 ]
 ignore_missing_imports = true
