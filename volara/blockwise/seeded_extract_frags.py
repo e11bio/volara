@@ -75,9 +75,7 @@ class SeededExtractFrags(BlockwiseTask):
     @property
     def write_roi(self) -> Roi:
         if self.roi is not None:
-            return self.affs_data.array("r").roi.intersect(
-                Roi(self.roi[0], self.roi[1])
-            )
+            return self.affs_data.array("r").roi.intersect(self.roi)
         else:
             return self.affs_data.array("r").roi
 
