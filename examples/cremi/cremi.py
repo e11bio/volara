@@ -5,6 +5,10 @@
 # blockwise, see the [volara-torch plugin example](https://e11bio.github.io/volara-torch/examples/cremi/cremi.html)
 
 # %%
+import multiprocessing as mp
+
+mp.set_start_method("fork", force=True)  # type: ignore[call-arg]
+# %%
 from pathlib import Path
 
 from funlib.geometry import Coordinate
