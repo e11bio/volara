@@ -8,11 +8,10 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from pydantic import Field
-from scipy.ndimage import gaussian_filter, maximum_filter, measurements
+from scipy.ndimage import gaussian_filter, label, maximum_filter, measurements
+from scipy.ndimage.morphology import distance_transform_edt
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
-from scipy.ndimage.morphology import distance_transform_edt
-from scipy.ndimage import label
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
@@ -208,7 +207,6 @@ class ExtractFrags(BlockwiseTask):
         boundary_distances,
         min_seed_distance=10,
     ):
-
         max_filtered = maximum_filter(boundary_distances, min_seed_distance)
         maxima = max_filtered == boundary_distances
 
