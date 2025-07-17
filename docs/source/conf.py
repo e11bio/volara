@@ -59,6 +59,14 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # a list of builtin themes.
 #
 html_theme = "pydata_sphinx_theme"
+html_theme_options = {
+    "show_nav_level": 3,  # controls how many levels deep navigation is shown
+    "navigation_depth": 3, # alternative option for some versions
+    "collapse_navigation": True,  # Keep navigation expanded
+}
+html_sidebars = {
+    "**": [],
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

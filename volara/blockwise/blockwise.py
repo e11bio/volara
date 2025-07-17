@@ -440,16 +440,17 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 data[name] = value
         return self.__class__(**data)
 
-    def benchmark(self, multiprocessing: bool = True):
+    def benchmark(self, multiprocessing: bool = True) -> None:
         """
         A helper function for benchmarking and debugging a blockwise task or pipeline.
 
         Used as a "dry run" of `run_blockwise` without saving any outputs.
+
         - Will not skip blocks that have already been processed. You can benchmark a task
-          that has already been run.
+            that has already been run.
         - Will not save any run artifacts such as block done datasets, output datasets,
-          graph nodes or edges, or look up tables. The only thing that will be saved are the
-          worker logs and a timing report.
+            graph nodes or edges, or look up tables. The only thing that will be saved are the
+            worker logs and a timing report.
         """
         from volara.logging import set_log_basedir
 
