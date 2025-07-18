@@ -28,6 +28,20 @@ Some things we wanted to support:
  * Syntactically nice task chaining
  * Plugin system for custom tasks
 
+# Citing Volara
+
+To cite this repository please use the following bibtex entry:
+
+```
+@software{volara2025github,
+  author = {Will Patton and Arlo Sheridan},
+  title = {Volara: Block-wise operations for large volumetric datasets},
+  url = {https://github.com/e11bio/volara},
+  version = {1.0},
+  year = {2025},
+}
+```
+
 # Getting started
 
 * Volara is available on PyPi and can be installed with `pip install volara`
