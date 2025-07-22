@@ -5,6 +5,7 @@ import itertools
 import functools
 from pathlib import Path
 import time
+from pprint import pprint
 
 import daisy
 import mwatershed as mws
@@ -14,6 +15,7 @@ from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 
 from volara.lut import LUT, LUTS
+from volara.tmp import replace_values
 
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
@@ -66,7 +68,7 @@ class IterativeGraphMWS(BlockwiseTask):
     False, the sum of all the weighted attributes will be used as the only edge weight.
     """
 
-    fit: Literal["shrink"] = "shrink"
+    fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
 
     @property
@@ -83,7 +85,7 @@ class IterativeGraphMWS(BlockwiseTask):
 
     @property
     def context_size(self) -> Coordinate:
-        return Coordinate((0,) * self.write_size.dims)
+        return self.write_size
 
     @property
     def num_voxels_in_block(self) -> int:
@@ -105,40 +107,90 @@ class IterativeGraphMWS(BlockwiseTask):
             def process_block(block: daisy.Block):
                 # mutex watershed inside write roi only to get super fragments
                 graph = rag_provider.read_graph(
-                    block.write_roi,
+                    block.read_roi,
                     node_attrs=["size", "position"],
-                    edge_attrs=list(self.weights.keys()),
+                    edge_attrs=list(self.weights.keys())
+                    + [f"{attr}__size" for attr in self.weights.keys()],
                     both_sides=True,
                 )
 
                 t1 = time.time()
                 edges = []
+                inputs = set(
+                    node
+                    for node, attrs in graph.nodes(data=True)
+                    if attrs.get("position") is not None
+                    and block.write_roi.contains(attrs["position"])
+                )
                 for u, v, edge_attrs in graph.edges(data=True):
+                    u_pos = graph.nodes[u].get("position", None)
+                    v_pos = graph.nodes[v].get("position", None)
                     if (
-                        graph.nodes[u].get("size", None) is None
-                        or graph.nodes[v].get("size", None) is None
+                        u_pos is not None and v_pos is not None
+                        # and block.write_roi.contains(u_pos)  # run on full read roi graph
+                        # and block.write_roi.contains(v_pos)  # relabel and ignore out of bounds nodes
                     ):
-                        # out of bounds nodes
-                        continue
-                    scores = [
-                        w * edge_attrs[attr] + b
-                        for attr, (w, b) in self.weights.items()
-                        if edge_attrs.get(attr, None) is not None
-                    ]
-                    if self.edge_per_attr:
-                        for score in scores:
-                            edges.append((score, u, v))
-                    else:
-                        edges.append((sum(scores), u, v))
+                        assert graph.nodes[u].get("size", None) is not None
+                        assert graph.nodes[v].get("size", None) is not None
+                        scores = [
+                            w * edge_attrs[attr] + b
+                            for attr, (w, b) in self.weights.items()
+                            if edge_attrs.get(attr, None) is not None
+                        ]
+                        if self.edge_per_attr:
+                            for score in scores:
+                                edges.append((score, u, v))
+                        else:
+                            edges.append((sum(scores), u, v))
+
+                contained_nodes = set(
+                    node
+                    for node, attrs in graph.nodes(data=True)
+                    if "position" in attrs
+                    and block.write_roi.contains(attrs["position"])
+                )
+
+                relabeled_nodes = {}
+
+                edges = sorted(
+                    edges,
+                    key=lambda edge: abs(edge[0]),
+                    reverse=True,
+                )
+                edges = [(bool(aff > 0), u, v) for aff, u, v in edges]
 
                 # generate the look up table via mutex watershed clustering
-                mws_lut: list[tuple[int, int]] = mws.cluster_edges(edges)
-                inputs: list[int]
-                outputs: list[int]
+                mws_lut: list[tuple[int, int]] = mws.cluster(edges)
+                mws_lut_relabelled = []
+                for in_frag, out_frag in mws_lut:
+                    if in_frag in contained_nodes:
+                        if out_frag in contained_nodes:
+                            mws_lut_relabelled.append((in_frag, out_frag))
+                        else:
+                            out_frag = relabeled_nodes.get(out_frag, in_frag)
+                            relabeled_nodes[out_frag] = in_frag
+                            mws_lut_relabelled.append((in_frag, out_frag))
+
+                mws_mapping = [list(x) for x in zip(*mws_lut)]
+                inputs = np.array(list(inputs), dtype=int)
                 if len(mws_lut) > 0:
-                    inputs, outputs = [list(x) for x in zip(*mws_lut)]
+                    outputs = replace_values(
+                        inputs,
+                        np.array(mws_mapping[0], dtype=int),
+                        np.array(mws_mapping[1], dtype=int),
+                    )
                 else:
-                    inputs, outputs = [], []
+                    outputs = inputs
+
+                new_frag_to_seg_mapping = {
+                    int(in_frag): int(out_frag)
+                    for in_frag, out_frag in zip(inputs, outputs)
+                    if out_frag is not None
+                }
+                new_seg_to_frag_mapping = {}
+                for in_frag, out_frag in new_frag_to_seg_mapping.items():
+                    in_group = new_seg_to_frag_mapping.setdefault(int(out_frag), set())
+                    in_group.add(int(in_frag))
 
                 t1 = time.time()
                 # save the lut to a temporary file for this block
@@ -180,39 +232,39 @@ class IterativeGraphMWS(BlockwiseTask):
 
                 t1 = time.time()
                 out_graph = out_rag_provider.read_graph(block.read_roi)
-                assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
 
                 t1 = time.time()
-                for out_frag in np.unique(outputs):
-                    if out_frag is not None and out_frag not in out_graph.nodes:
-                        in_group = seg_frag_mapping[out_frag]
-
-                        agglomeraged_attrs = {
-                            "size": sum(
-                                [graph.nodes[in_frag]["size"] for in_frag in in_group]
-                            )
-                        }
-                        agglomeraged_attrs["position"] = (
-                            sum(
-                                [
-                                    np.array(
-                                        graph.nodes[in_frag]["position"], dtype=float
-                                    )
-                                    * graph.nodes[in_frag]["size"]
-                                    for in_frag in in_group
-                                    if in_frag in graph.nodes
-                                ],
-                                start=np.array((0,) * block.read_roi.dims, dtype=float),
-                            )
-                            / agglomeraged_attrs["size"]
+                for out_seg, in_frags in new_seg_to_frag_mapping.items():
+                    agglomerated_attrs = {
+                        "size": sum(
+                            [graph.nodes[in_frag]["size"] for in_frag in in_frags]
                         )
+                    }
+                    agglomerated_attrs["position"] = (
+                        sum(
+                            [
+                                np.array(graph.nodes[in_frag]["position"], dtype=float)
+                                * graph.nodes[in_frag]["size"]
+                                for in_frag in in_frags
+                                if in_frag in graph.nodes
+                            ],
+                            start=np.array((0,) * block.read_roi.dims, dtype=float),
+                        )
+                        / agglomerated_attrs["size"]
+                    )
 
-                        out_graph.add_node(int(out_frag), **agglomeraged_attrs)
+                    out_graph.add_node(int(out_seg), **agglomerated_attrs)
 
                 t1 = time.time()
                 edges_to_agglomerate = {}
                 for u, v in graph.edges():
-                    if u in frag_seg_mapping and v in frag_seg_mapping:
+                    if (
+                        (u in new_frag_to_seg_mapping or v in new_frag_to_seg_mapping)
+                        and u in frag_seg_mapping
+                        and v in frag_seg_mapping
+                    ):
+                        assert graph.nodes[u].get("size", None) is not None
+                        assert graph.nodes[v].get("size", None) is not None
                         # all edges between super fragments associated with u and v
                         seg_u, seg_v = (
                             frag_seg_mapping[u],
@@ -222,20 +274,43 @@ class IterativeGraphMWS(BlockwiseTask):
                             edges_to_agglomerate.setdefault((seg_u, seg_v), []).append(
                                 (u, v)
                             )
+
                 for (seg_u, seg_v), edges in edges_to_agglomerate.items():
+                    agglomerated_edge_attrs = {}
+                    for weight_attr in self.weights.keys():
+                        # switch to edge size
+                        magnitudes = [
+                            graph.edges[edge][f"{weight_attr}__size"]
+                            for edge in edges
+                            if weight_attr in graph.edges[edge]
+                        ]
+                        weights = [
+                            graph.edges[edge][weight_attr]
+                            for edge in edges
+                            if weight_attr in graph.edges[edge]
+                        ]
+                        magnitudes_and_weights = [
+                            (magnitude, weight * magnitude)
+                            for weight, magnitude in zip(weights, magnitudes)
+                            if weight is not None
+                        ]
+                        if len(magnitudes_and_weights) > 0:
+                            magnitudes, weights = zip(*magnitudes_and_weights)
+                            agglomerated_edge_attrs[weight_attr] = sum(weights) / sum(
+                                magnitudes
+                            )
+                            agglomerated_edge_attrs[weight_attr + "__size"] = sum(
+                                magnitudes
+                            )
                     out_graph.add_edge(
                         seg_u,
                         seg_v,
-                        **{
-                            weight_attr: sum(
-                                graph.edges[edge].get(weight_attr, 0) for edge in edges
-                            )
-                            / len(edges)
-                            for weight_attr in self.weights.keys()
-                        },
+                        **agglomerated_edge_attrs,
                     )
 
-                out_rag_provider.write_graph(out_graph, block.write_roi, both_sides=True)
+                out_rag_provider.write_graph(
+                    out_graph, block.write_roi, both_sides=True
+                )
 
             yield process_block
 
@@ -403,12 +478,12 @@ class GraphMWSExtractFragments(BlockwiseTask):
                     if out_frag is not None and out_frag not in out_graph.nodes:
                         in_group = seg_frag_mapping[out_frag]
 
-                        agglomeraged_attrs = {
+                        agglomerated_attrs = {
                             "size": sum(
                                 [graph.nodes[in_frag]["size"] for in_frag in in_group]
                             )
                         }
-                        agglomeraged_attrs["position"] = (
+                        agglomerated_attrs["position"] = (
                             sum(
                                 [
                                     np.array(
@@ -420,10 +495,10 @@ class GraphMWSExtractFragments(BlockwiseTask):
                                 ],
                                 start=np.array((0,) * block.read_roi.dims, dtype=float),
                             )
-                            / agglomeraged_attrs["size"]
+                            / agglomerated_attrs["size"]
                         )
 
-                        out_graph.add_node(int(out_frag), **agglomeraged_attrs)
+                        out_graph.add_node(int(out_frag), **agglomerated_attrs)
 
                 t1 = time.time()
                 edges_to_agglomerate = {}
@@ -463,6 +538,7 @@ class GraphMWSExtractFragments(BlockwiseTask):
 
             block_luts = [LUT(path=block_lut) for block_lut in tmp_path.iterdir()]
             self.lut.save(LUTS(luts=block_luts).load())
+
 
 class FragSegEdgeAgglom(BlockwiseTask):
     """
@@ -566,31 +642,72 @@ class FragSegEdgeAgglom(BlockwiseTask):
 
 
 class GraphMWS(BlockwiseTask):
-    task_type: Literal["create-lut"] = "create-lut"
-    frags_data: Labels
+    """
+    Graph based execution of the MWS algorithm.
+    Currently only supports executing in memory. The full graph for the given ROI
+    is read into memory and then we run the mutex watershed algorithm on the full
+    graph to get a globally optimal look up table.
+    """
+
+    task_type: Literal["graph-mws"] = "graph-mws"
+
     db: DB
-    lut: Path
-    starting_lut: Path | None = None
-    bias: dict[str, float]
-    roi: tuple[PydanticCoordinate, PydanticCoordinate] | None = None
+    lut: LUT
+    """
+    The Look Up Table that will be saved on completion of this task.
+    """
+    starting_lut: LUT | None = None
+    """
+    An optional Look Up Table that provides a set of merged fragments that must
+    be preserved in the final Look Up Table.
+    """
+    weights: dict[str, tuple[float, float]]
+    """
+    A dictionary of edge attributes and their weight and bias. These will be used
+    to compute the edge weights for the mutex watershed algorithm. Positive edges
+    will result in fragments merging, negative edges will result in splitting and
+    edges will be processed in order of high to low magnitude.
+    Each attribute will have a final score of `w * edge_data[attr] + b` for every
+    `attr, (w, b) in weights.items()`
+    If an attribute is not present in the edge data it will be skipped.
+    """
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    """
+    The roi to process. This is the roi of the full graph to process.
+    """
     edge_per_attr: bool = True
-    store_segment_intensities: dict[str, str] | None = None
+    """
+    Whether or not to create a separate edge for each attribute in the weights. If
+    False, the sum of all the weighted attributes will be used as the only edge weight.
+    """
+    mean_attrs: dict[str, str] | None = None
+    """
+    A dictionary of attributes to compute the mean of for each segment. Given
+    `mean_attrs = {"attr1": "out_attr1"}` and nodes `n_i` in a segment `s` we will
+    set `s.out_attr1 = sum(n_i.attr1 * n_i.size) / sum(n_i.size)`.
+    """
     out_db: DB | None = None
+    """
+    The db in which to store segment nodes and their attributes. Must not be None
+    if `mean_attrs` is not None.
+    """
     bounded_read: bool = True
+    """
+    Reading from the db can be made more efficient by not doing a spatial query
+    and assuming we want all nodes and edges. If you don't want to process a
+    sub volume of the graph setting this to false will speed up the read.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
 
     @property
     def task_name(self) -> str:
-        return f"{self.frags_data.name}-{self.task_type}"
+        return f"{self.lut.name}-{self.task_type}"
 
     @property
     def write_roi(self) -> Roi:
-        if self.roi is not None:
-            return Roi(*self.roi)
-        else:
-            return self.frags_data.array("r").roi
+        return Roi(*self.roi)
 
     @property
     def write_size(self) -> Coordinate:
@@ -602,11 +719,11 @@ class GraphMWS(BlockwiseTask):
 
     @property
     def num_voxels_in_block(self) -> int:
+        # We currently can't process in blocks
         return 1
 
     def drop_artifacts(self):
-        if self.lut.exists():
-            self.lut.unlink()
+        self.lut.drop()
         if self.out_db is not None:
             self.out_db.drop()
 
@@ -618,14 +735,7 @@ class GraphMWS(BlockwiseTask):
             out_rag_provider = self.out_db.open("w")
 
         if self.starting_lut is not None:
-            starting_lut = (
-                self.starting_lut
-                if self.starting_lut.name.endswith(".npz")
-                else f"{self.starting_lut}.npz"
-            )
-            starting_frags, starting_segs = np.load(starting_lut)[
-                "fragment_segment_lut"
-            ]
+            starting_frags, starting_segs = self.starting_lut.load()
             starting_map = {
                 in_frag: out_frag
                 for in_frag, out_frag in zip(starting_frags, starting_segs)
@@ -633,24 +743,24 @@ class GraphMWS(BlockwiseTask):
         else:
             starting_map = None
 
-        def process_block(block):
+        def process_block(block: daisy.Block):
             read_roi = block.write_roi if self.bounded_read else None
             node_attrs = (
-                ["size"] + list(self.store_segment_intensities.keys())
-                if self.store_segment_intensities is not None
+                ["size"] + list(self.mean_attrs.keys())
+                if self.mean_attrs is not None
                 else []
             )
             graph = rag_provider.read_graph(
-                read_roi, node_attrs=node_attrs, edge_attrs=list(self.bias.keys())
+                read_roi, node_attrs=node_attrs, edge_attrs=list(self.weights.keys())
             )
 
             edges = []
 
             for u, v, edge_attrs in graph.edges(data=True):
                 scores = [
-                    edge_attrs.get(b, None) + self.bias[b]
-                    for b in self.bias
-                    if edge_attrs.get(b, None) is not None
+                    w * edge_attrs.get(attr, None) + b
+                    for attr, (w, b) in self.weights.items()
+                    if edge_attrs.get(attr, None) is not None
                 ]
                 if self.edge_per_attr:
                     for score in scores:
@@ -660,12 +770,12 @@ class GraphMWS(BlockwiseTask):
 
             prefix_edges = []
             if starting_map is not None:
-                groups = {}
+                groups: dict[int, set[int]] = {}
                 for node in graph.nodes:
                     groups.setdefault(starting_map[node], set()).add(node)
                 for group in groups.values():
-                    group = list(group)
-                    for u, v in zip(group, group[1:]):
+                    pre_merged_ids = list(group)
+                    for u, v in zip(pre_merged_ids, pre_merged_ids[1:]):
                         prefix_edges.append((True, u, v))
 
             edges = sorted(
@@ -674,39 +784,44 @@ class GraphMWS(BlockwiseTask):
                 reverse=True,
             )
             edges = [(bool(aff > 0), u, v) for aff, u, v in edges]
-            lut = mws.cluster(prefix_edges + edges)
-            if len(lut) > 0:
-                inputs, outputs = zip(*lut)
+
+            # generate the look up table via mutex watershed clustering
+            mws_lut: list[tuple[int, int]] = mws.cluster(prefix_edges + edges)
+            inputs: list[int]
+            outputs: list[int]
+            if len(mws_lut) > 0:
+                inputs, outputs = [list(x) for x in zip(*mws_lut)]
             else:
                 inputs, outputs = [], []
 
             lut = np.array([inputs, outputs])
+            self.lut.save(lut, edges=edges)
 
-            np.savez_compressed(self.lut, fragment_segment_lut=lut, edges=edges)
-
-            if self.store_segment_intensities is not None:
+            if self.mean_attrs is not None:
                 assert self.out_db is not None, self.out_db
                 out_graph = out_rag_provider.read_graph(block.write_roi)
                 assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
-                mapping = {}
+                mapping: dict[int, set[int]] = {}
                 for in_frag, out_frag in zip(inputs, outputs):
                     in_group = mapping.setdefault(out_frag, set())
                     in_group.add(in_frag)
 
                 for out_frag, in_group in mapping.items():
-                    # update size. Each fragment will
                     computed_codes = {
                         "seg_size": sum(
                             [graph.nodes[in_frag]["size"] for in_frag in in_group]
                         )
                     }
-                    for in_code, out_code in self.store_segment_intensities.items():
+                    for in_code, out_code in self.mean_attrs.items():
                         out_codes = [
                             np.array(graph.nodes[in_frag][in_code])
                             * graph.nodes[in_frag]["size"]
                             for in_frag in in_group
                         ]
-                        out_data = np.mean(np.array(out_codes), axis=0)
+                        out_data = (
+                            np.sum(np.array(out_codes), axis=0)
+                            / computed_codes["seg_size"]
+                        )
                         computed_codes[out_code] = out_data
                     for in_frag in in_group:
                         frag_attrs = graph.nodes[in_frag]

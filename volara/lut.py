@@ -1,3 +1,5 @@
+from volara.tmp import replace_values
+
 from pathlib import Path
 from collections.abc import Sequence
 
@@ -70,27 +72,9 @@ class LUTS:
         )
 
     def load_iterated(self):
-        def merge_mapping(mapping1, mapping2):
-            # Step 1: Union of first rows (source labels)
-            combined_keys = np.union1d(mapping1[0], mapping2[0])
-
-            # Step 2: Create dicts for fast lookup
-            dict1 = dict(zip(mapping1[0], mapping1[1]))
-            dict2 = dict(zip(mapping2[0], mapping2[1]))
-
-            # Step 3: Build the new mapping values
-            combined_values = []
-            for key in combined_keys:
-                if key in dict1:
-                    combined_values.append(dict1[key])
-                else:
-                    combined_values.append(dict2[key])
-
-            return np.array([combined_keys, combined_values])
-
         starting_map = self.luts[0].load()
         for lut in self.luts[1:]:
             next_map = lut.load()
             if next_map is not None:
-                starting_map = merge_mapping(starting_map, next_map)
+                starting_map[1] = replace_values(starting_map[1], next_map[0], next_map[1])
         return starting_map

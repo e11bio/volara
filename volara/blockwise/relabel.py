@@ -97,7 +97,7 @@ class Relabel(BlockwiseTask):
         def process_block(block):
             if isinstance(self.lut, list):
                 # If multiple LUTs are provided, we assume they are for different fragments.
-                mapping = LUTS(self.lut).load_iterative()
+                mapping = LUTS(self.lut).load_iterated()
             else:
                 # Single LUT case
                 mapping = self.lut.load()

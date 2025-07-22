@@ -196,7 +196,8 @@ class AffAgglom(BlockwiseTask):
                                     count[0] * count[1] / total_count
                                     for count in key_counts
                                 ]
-                            )
+                            ),
+                            f"{score_name}__size": total_count
                         },
                     )
 
