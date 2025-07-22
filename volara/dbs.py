@@ -169,14 +169,6 @@ class SQLite(DB):
     The path to the SQLite db file to use.
     """
 
-    @field_validator("path", mode="before")
-    @classmethod
-    def cast_path(cls, v) -> Path:
-        try:
-            return Path(v)
-        except TypeError:
-            raise ValueError(f"Invalid path: {v}. Must be a path like object.")
-
     @property
     def id(self) -> str:
         return self.path.stem

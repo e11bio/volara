@@ -34,14 +34,6 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
-    @field_validator("store", mode="before")
-    @classmethod
-    def cast_store(cls, v) -> Path:
-        try:
-            return Path(v)
-        except TypeError:
-            raise ValueError(f"Invalid store path: {v}. Must be a path-like object.")
-
     @property
     def name(self) -> str:
         """
