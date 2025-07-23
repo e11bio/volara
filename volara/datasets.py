@@ -237,31 +237,37 @@ class CloudVolumeWrapper(Dataset):
     """
     Represents a volumetric dataset through Cloud Volume.
     """
-    data_name: str
-    dataset_type: Literal["volume"] = "volume"
+    dataset_type: Literal["cloudvolume"] = "cloudvolume"
     mip: int = 0
     timestamp: int = int(time.time()) # default to current time
     voxel_size: PydanticCoordinate = Coordinate((1, 1, 1))
     agglomerate: bool = True
 
     @property
-    def data(self) -> CloudVolume:
-        vol = CloudVolume(self.store, mip=self.mip, use_https=True, agglomerate=self.agglomerate, timestamp=self.timestamp)
-        return vol
+    def data(self, mode: str ="r") -> Array:
+        vol = CloudVolume(
+            self.store, 
+            mip=self.mip, 
+            use_https=True, 
+            agglomerate=self.agglomerate, 
+            timestamp=self.timestamp
+        )
 
-    @property
-    def data_shape(self) -> list[int]:
-        return self.data.shape
+        metadata = {
+            "voxel_size": self.voxel_size if self.voxel_size is not None else None,
+            "axis_names": self.axis_names if self.axis_names is not None else None,
+            "units": self.units if self.units is not None else None,
+            "offset": self.offset if self.offset is not None else vol.voxel_offset
+        }
+
+        return Array(
+            vol.to_dask(),
+            **{k: v for k, v in metadata.items() if v is not None}
+        )
 
     @property
     def name(self) -> str:
-        return self.data_name
-
-    @property
-    def roi(self) -> Roi:
-        shape = np.array(self.data.shape)[:-1].tolist()
-        offset = self.data.voxel_offset
-        return Roi(offset, shape)
+        return self.store.rstrip('/').split('/')[-1]
 
     @property
     def attrs(self):
