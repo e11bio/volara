@@ -240,11 +240,10 @@ class CloudVolumeWrapper(Dataset):
     dataset_type: Literal["cloudvolume"] = "cloudvolume"
     mip: int = 0
     timestamp: int = int(time.time()) # default to current time
-    voxel_size: PydanticCoordinate = Coordinate((1, 1, 1))
     agglomerate: bool = True
+    data_name: str | None = None
 
-    @property
-    def data(self, mode: str ="r") -> Array:
+    def array(self, mode: str ="r") -> Array:
         vol = CloudVolume(
             self.store, 
             mip=self.mip, 
@@ -254,10 +253,10 @@ class CloudVolumeWrapper(Dataset):
         )
 
         metadata = {
-            "voxel_size": self.voxel_size if self.voxel_size is not None else None,
             "axis_names": self.axis_names if self.axis_names is not None else None,
             "units": self.units if self.units is not None else None,
-            "offset": self.offset if self.offset is not None else vol.voxel_offset
+            "offset": self.offset if self.offset is not None else vol.voxel_offset,
+            "types": ["space", "space", "space", "channel"]
         }
 
         return Array(
@@ -267,7 +266,7 @@ class CloudVolumeWrapper(Dataset):
 
     @property
     def name(self) -> str:
-        return self.store.rstrip('/').split('/')[-1]
+        return self.data_name if self.data_name else self.store.rstrip('/').split('/')[-1]
 
     @property
     def attrs(self):
