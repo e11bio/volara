@@ -256,7 +256,7 @@ class CloudVolumeWrapper(Dataset):
             "axis_names": self.axis_names if self.axis_names is not None else None,
             "units": self.units if self.units is not None else None,
             "offset": self.offset if self.offset is not None else vol.voxel_offset,
-            "types": ["space", "space", "space", "channel"]
+            "types": ["space" for _ in range(len(vol.shape) - 1)] + ["channel"] # last dimension in CV is always channel
         }
 
         return Array(
