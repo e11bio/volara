@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Literal
 
 import numpy as np
@@ -46,7 +45,7 @@ class Relabel(BlockwiseTask):
     def write_roi(self) -> Roi:
         total_roi = self.frags_data.array("r").roi
         if self.roi is not None:
-            total_roi = total_roi.intersect(Roi(self.roi[0], self.roi[1]))
+            total_roi = total_roi.intersect(self.roi)
         return total_roi
 
     @property
@@ -66,7 +65,7 @@ class Relabel(BlockwiseTask):
         return [self.seg_data]
 
     def drop_artifacts(self):
-        rmtree(self.seg_data.store, ignore_errors=True)
+        self.seg_data.drop()
 
     def init(self):
         self.init_out_array()

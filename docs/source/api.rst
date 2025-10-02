@@ -6,20 +6,25 @@ API Reference
 .. automodule:: volara
     :no-index:
 
+
+.. contents::
+   :local:
+   :depth: 2
+
 Databases
----------
+=========
 
 .. automodule:: volara.dbs
     :members:
 
 Datasets
---------
+========
 
 .. automodule:: volara.datasets
     :members:
 
 Blockwise Tasks
----------------
+===============
 
 .. currentmodule:: volara.blockwise
 

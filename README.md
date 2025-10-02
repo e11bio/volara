@@ -8,7 +8,7 @@
   <picture>
     <source srcset="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara%20Logo.svg" media="(prefers-color-scheme: light)">
     <source srcset="https://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara%20Logo-white.svg" media="(prefers-color-scheme: dark)">
-    <img src="http://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg" alt="Volara Logo">
+    <img class="dark-light" src="http://raw.githubusercontent.com/e11bio/volara/refs/heads/main/docs/source/_static/Volara_Logo-white_with_bcg.svg" alt="Volara Logo">
   </picture>
 </p>
 
@@ -27,6 +27,20 @@ Some things we wanted to support:
  * Completed block tracking and task resuming
  * Syntactically nice task chaining
  * Plugin system for custom tasks
+
+# Citing Volara
+
+To cite this repository please use the following bibtex entry:
+
+```
+@software{volara2025github,
+  author = {Will Patton and Arlo Sheridan},
+  title = {Volara: Block-wise operations for large volumetric datasets},
+  url = {https://github.com/e11bio/volara},
+  version = {1.0},
+  year = {2025},
+}
+```
 
 # Getting started
 

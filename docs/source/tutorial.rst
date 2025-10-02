@@ -338,10 +338,9 @@ out small fragments can help handle massive datasets.
   from volara.lut import LUT
 
   # Global MWS
-  roi = fragments.array("r").roi
   global_mws = GraphMWS(
       db=db,
-      roi=(roi.offset, roi.shape),
+      roi=fragments.array("r").roi,
       lut=LUT(path = "cells3d.zarr/lut"),
       weights={"zyx_aff": (1.0, -0.5)},
   )

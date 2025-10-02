@@ -5,6 +5,7 @@ from typing import Any, Literal
 from funlib.persistence.graphs import PgSQLGraphDatabase, SQLiteGraphDataBase
 from funlib.persistence.graphs.graph_database import GraphDataBase
 from funlib.persistence.types import Vec
+from pydantic import field_validator
 
 from .utils import StrictBaseModel
 
@@ -132,6 +133,18 @@ class DB(StrictBaseModel, ABC):
         """
         pass
 
+    @abstractmethod
+    def spoof(self, nodes: bool = True):
+        """
+        Return a spoofed version of this database. This is used to create a
+        database that can be used for testing purposes without writing to the
+        original database.
+        In some cases you may want access to the real nodes so by default we
+        spoof both nodes and edges, but if you do not want to spoof the nodes,
+        set `nodes=False`.
+        """
+        pass
+
     @property
     @abstractmethod
     def id(self) -> str:
@@ -155,6 +168,14 @@ class SQLite(DB):
     """
     The path to the SQLite db file to use.
     """
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def cast_path(cls, v) -> Path:
+        try:
+            return Path(v)
+        except TypeError:
+            raise ValueError(f"Invalid path: {v}. Must be a path like object.")
 
     @property
     def id(self) -> str:
@@ -180,6 +201,22 @@ class SQLite(DB):
         meta_path = self.path.parent / f"{self.id}-meta.json"
         if meta_path.exists():
             meta_path.unlink()
+
+    def spoof(self, nodes: bool = True):
+        """
+        Return a spoofed version of this database. This is used to create a
+        database that can be used for testing purposes without writing to the
+        original database.
+        """
+        spoofed_db = self.__class__(
+            path=self.path.parent / f"spoofed_{self.path.name}",
+            **self.model_dump(exclude={"path"}),
+        )
+        if nodes:
+            spoofed_graph_provider = spoofed_db.open("w")
+            graph_provider = self.open("r")
+            spoofed_graph_provider.write_nodes(graph_provider.read_graph().nodes())
+        return spoofed_db
 
     def drop_edges(self) -> None:
         try:
@@ -217,6 +254,11 @@ class PostgreSQL(DB):
             node_attrs=node_attrs,
             edge_attrs=edge_attrs,
             mode=mode,
+        )
+
+    def spoof(self):
+        raise NotImplementedError(
+            "Spoofing PostgreSQL databases is not implemented yet."
         )
 
     def drop(self) -> None:

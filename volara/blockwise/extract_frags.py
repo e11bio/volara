@@ -1,6 +1,5 @@
 import logging
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Annotated, Literal
 
 import daisy
@@ -9,7 +8,8 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from pydantic import Field
-from scipy.ndimage import gaussian_filter, measurements
+from scipy.ndimage import gaussian_filter, label, maximum_filter, measurements
+from scipy.ndimage.morphology import distance_transform_edt
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
 
@@ -100,6 +100,11 @@ class ExtractFrags(BlockwiseTask):
     If using strides, you may want to switch from a grided stride to a random probability of
     filtering out an affinity. This can help avoid grid artifacts in the fragments.
     """
+    min_seed_distance: int | None = None
+    """
+    Determines whether to use seeds for mutex or not (default). Controls the
+    size of the maximum filter footprint computed on the boundary distances
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -117,7 +122,7 @@ class ExtractFrags(BlockwiseTask):
     def write_roi(self) -> Roi:
         total_roi = self.affs_data.array("r").roi
         if self.roi is not None:
-            total_roi = total_roi.intersect(Roi(self.roi[0], self.roi[1]))
+            total_roi = total_roi.intersect(self.roi)
         return total_roi
 
     @property
@@ -137,10 +142,7 @@ class ExtractFrags(BlockwiseTask):
         return self.affs_data.array("r").voxel_size
 
     def drop_artifacts(self):
-        try:
-            rmtree(self.frags_data.store)
-        except FileNotFoundError:
-            pass
+        self.frags_data.drop()
         self.db.drop()
 
     def init(self):
@@ -200,6 +202,21 @@ class ExtractFrags(BlockwiseTask):
 
         return fragments_data
 
+    def get_seeds(
+        self,
+        boundary_distances,
+        min_seed_distance=10,
+    ):
+        max_filtered = maximum_filter(boundary_distances, min_seed_distance)
+        maxima = max_filtered == boundary_distances
+
+        seeds, n = label(maxima)
+
+        if n == 0:
+            return np.zeros(boundary_distances.shape, dtype=np.uint64)
+
+        return seeds
+
     def compute_fragments(self, affs_data):
         if self.sigma is not None:
             # add 0 for channel dim
@@ -212,8 +229,6 @@ class ExtractFrags(BlockwiseTask):
         # If you have many affinities of the exact same value the order they are processed
         # in may be fifo, so you can get annoying streaks.
 
-        ### tmp comment out ###
-
         shift = np.zeros_like(affs_data)
 
         if self.noise_eps is not None:
@@ -224,8 +239,6 @@ class ExtractFrags(BlockwiseTask):
         # add smoothed affs, to solve a similar issue to the random noise. We want to bias
         # towards processing the central regions of objects first.
 
-        ### tmp comment out ###
-
         if sigma is not None:
             shift += gaussian_filter(affs_data, sigma=sigma) - affs_data
 
@@ -234,10 +247,24 @@ class ExtractFrags(BlockwiseTask):
             (-1, *((1,) * (len(affs_data.shape) - 1)))
         )
 
+        if self.min_seed_distance is not None:
+            boundary_mask = np.mean(affs_data, axis=0) > 0.5
+            boundary_distances = distance_transform_edt(boundary_mask)
+
+            seeds = self.get_seeds(
+                boundary_distances,
+                min_seed_distance=self.min_seed_distance,
+            ).astype(np.uint64)
+
+            seeds[~boundary_mask] = 0
+        else:
+            seeds = None
+
         fragments_data = mws.agglom(
             (affs_data + shift).astype(np.float64),
             offsets=self.neighborhood,
             strides=self.strides,
+            seeds=seeds,
             randomized_strides=self.randomized_strides,
         )
 
@@ -251,98 +278,104 @@ class ExtractFrags(BlockwiseTask):
         rag_provider,
         mask: Array | None = None,
     ):
-        # todo: simplify or break into more functions
+        benchmark_logger = self.get_benchmark_logger()
 
-        affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
+        with benchmark_logger.trace("Read Affs"):
+            affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
-        if affs.dtype == np.uint8:
-            max_affinity_value = 255.0
-            affs_data = affs_data.astype(np.float64)
-        else:
-            max_affinity_value = 1.0
+            if affs.dtype == np.uint8:
+                max_affinity_value = 255.0
+                affs_data = affs_data.astype(np.float64)
+            else:
+                max_affinity_value = 1.0
 
-        if affs_data.max() < 1e-3:
-            return
+            if affs_data.max() < 1e-3:
+                return
 
-        affs_data /= max_affinity_value
+            affs_data /= max_affinity_value
 
         if mask is not None:
-            logger.debug("reading mask from %s", block.read_roi)
-            mask_data = mask.to_ndarray(block.read_roi, fill_value=0)
+            with benchmark_logger.trace("Read Mask"):
+                logger.debug("reading mask from %s", block.read_roi)
+                mask_data = mask.to_ndarray(block.read_roi, fill_value=0)
 
-            if len(mask_data.shape) == block.read_roi.dims + 1:
-                # assume masking with raw data where data > 0
-                mask_data = (np.min(mask_data, axis=0) > 0).astype(np.uint8)
+                if len(mask_data.shape) == block.read_roi.dims + 1:
+                    # assume masking with raw data where data > 0
+                    mask_data = (np.min(mask_data, axis=0) > 0).astype(np.uint8)
 
-            if np.max(mask_data) == 255:
-                # should be ones
-                mask_data = (mask_data > 0).astype(np.uint8)
+                if np.max(mask_data) == 255:
+                    # should be ones
+                    mask_data = (mask_data > 0).astype(np.uint8)
 
-            logger.debug("masking affinities")
-            affs_data *= mask_data
+                logger.debug("masking affinities")
+                affs_data *= mask_data
 
-        fragments_data = self.get_fragments(affs_data)
+        with benchmark_logger.trace("Compute Fragments"):
+            fragments_data = self.get_fragments(affs_data)
 
-        fragments = Array(
-            fragments_data, offset=block.read_roi.offset, voxel_size=frags.voxel_size
-        )
+            fragments = Array(
+                fragments_data,
+                offset=block.read_roi.offset,
+                voxel_size=frags.voxel_size,
+            )
 
-        # crop fragments to write_roi
-        fragments_data = fragments.to_ndarray(block.write_roi)
-        max_id = fragments_data.max()
+        with benchmark_logger.trace("Relabel Fragments"):
+            fragments_data = fragments.to_ndarray(block.write_roi)
+            max_id = fragments_data.max()
 
-        fragments_data, max_id = relabel(fragments_data, return_num=True)
-        assert max_id < self.num_voxels_in_block, f"max_id: {max_id}"
+            fragments_data, max_id = relabel(fragments_data, return_num=True)
+            assert max_id < self.num_voxels_in_block, f"max_id: {max_id}"
 
-        # ensure unique IDs
-        id_bump = block.block_id[1] * self.num_voxels_in_block
-        fragments_data[fragments_data > 0] += id_bump
+            # ensure unique IDs
+            id_bump = block.block_id[1] * self.num_voxels_in_block
+            fragments_data[fragments_data > 0] += id_bump
 
-        # store fragments
-        frags[block.write_roi] = fragments_data
+        with benchmark_logger.trace("Write Fragments"):
+            frags[block.write_roi] = fragments_data
 
         # following only makes a difference if fragments were found
         if fragments_data.max() == 0:
             return
 
-        fragment_ids, counts = np.unique(fragments_data, return_counts=True)
-        logger.info("Found %d fragments", len(fragment_ids))
-        fragment_ids, counts = zip(
-            *[(f, c) for f, c in zip(fragment_ids, counts) if f > 0]
-        )
-        centers_of_masses = measurements.center_of_mass(
-            np.ones_like(fragments_data), fragments_data, fragment_ids
-        )
-
-        fragment_centers = {
-            fragment_id: {
-                "center": block.write_roi.get_offset()
-                + affs.voxel_size * Coordinate(center),
-                "size": count,
-            }
-            for fragment_id, center, count in zip(
-                fragment_ids, centers_of_masses, counts
+        with benchmark_logger.trace("Compute Fragment Centers"):
+            fragment_ids, counts = np.unique(fragments_data, return_counts=True)
+            logger.info("Found %d fragments", len(fragment_ids))
+            fragment_ids, counts = zip(
+                *[(f, c) for f, c in zip(fragment_ids, counts) if f > 0]
             )
-            if fragment_id > 0
-        }
+            centers_of_masses = measurements.center_of_mass(
+                np.ones_like(fragments_data), fragments_data, fragment_ids
+            )
 
-        # store nodes
-        rag = rag_provider[block.write_roi]
-
-        for node, data in fragment_centers.items():
-            # centers
-            node_attrs = {
-                "position": data["center"],
+            fragment_centers = {
+                fragment_id: {
+                    "center": block.write_roi.get_offset()
+                    + affs.voxel_size * Coordinate(center),
+                    "size": count,
+                }
+                for fragment_id, center, count in zip(
+                    fragment_ids, centers_of_masses, counts
+                )
+                if fragment_id > 0
             }
 
-            node_attrs["size"] = int(data["size"])
+        with benchmark_logger.trace("Update RAG"):
+            rag = rag_provider[block.write_roi]
 
-            rag.add_node(int(node), **node_attrs)
+            for node, data in fragment_centers.items():
+                # centers
+                node_attrs = {
+                    "position": data["center"],
+                }
 
-        rag_provider.write_graph(
-            rag,
-            block.write_roi,
-        )
+                node_attrs["size"] = int(data["size"])
+
+                rag.add_node(int(node), **node_attrs)
+
+            rag_provider.write_graph(
+                rag,
+                block.write_roi,
+            )
 
     @contextmanager
     def process_block_func(self):

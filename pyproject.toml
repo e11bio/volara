@@ -28,6 +28,8 @@ dependencies = [
     "scipy>=1.15.3",
     "scikit-image>=0.25.2",
     "cloud-volume>=12.4.1",
+    "polars>=1.31.0",
+    "psutil>=7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -89,5 +91,8 @@ module = [
     "dacapo.*",
     "numba.*",
     "psycopg2.*",
+    "matplotlib.*",
+    "psutil.*",
+
 ]
 ignore_missing_imports = true

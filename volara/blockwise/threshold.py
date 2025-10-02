@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from shutil import rmtree
 from typing import Literal
 
 import numpy as np
@@ -42,7 +41,7 @@ class Threshold(BlockwiseTask):
     def write_roi(self) -> Roi:
         total_roi = self.in_data.array("r").roi
         if self.roi is not None:
-            total_roi = total_roi.intersect(Roi(self.roi[0], self.roi[1]))
+            total_roi = total_roi.intersect(self.roi)
         return total_roi
 
     @property
@@ -62,7 +61,7 @@ class Threshold(BlockwiseTask):
         return [self.mask]
 
     def drop_artifacts(self):
-        rmtree(self.mask.store, ignore_errors=True)
+        self.mask.drop()
 
     def init(self):
         self.init_out_array()

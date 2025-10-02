@@ -11,6 +11,7 @@ from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
+from pydantic import Field, field_validator
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -25,12 +26,21 @@ class Dataset(StrictBaseModel, ABC):
     for all dataset types.
     """
 
-    store: str | Path
+    store: Path
 
     voxel_size: PydanticCoordinate | None = None
     offset: PydanticCoordinate | None = None
     axis_names: list[str] | None = None
     units: list[str] | None = None
+    writable: bool = True
+
+    @field_validator("store", mode="before")
+    @classmethod
+    def cast_store(cls, v) -> Path:
+        try:
+            return Path(v)
+        except TypeError:
+            raise ValueError(f"Invalid store path: {v}. Must be a path-like object.")
 
     @property
     def name(self) -> str:
@@ -48,7 +58,28 @@ class Dataset(StrictBaseModel, ABC):
         """
         Delete this dataset
         """
-        rmtree(self.store)
+        if self.store.exists():
+            rmtree(self.store)
+
+    def spoof(self, spoof_dir: Path):
+        spoof_path = spoof_dir / f"spoof_{self.name}"
+        if not spoof_path.parent.exists():
+            spoof_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.store.exists() and not self.writable:
+            """
+            If the store is not writable, it is an input to some task and we can
+            safely read from it.
+            """
+            print("Symlinking", self.store)
+            if not spoof_path.exists():
+                spoof_path.symlink_to(self.store.absolute(), target_is_directory=True)
+        else:
+            print("Spoofing", self.store)
+
+        return self.__class__(
+            store=spoof_dir / f"spoof_{self.name}",
+            **self.model_dump(exclude={"store"}),
+        )
 
     def prepare(
         self,
@@ -77,6 +108,10 @@ class Dataset(StrictBaseModel, ABC):
         array._source_data.attrs.update(self.attrs)
 
     def array(self, mode: str = "r") -> Array:
+        if not self.writable and mode != "r":
+            raise ValueError(
+                f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
+            )
         return open_ds(self.store, mode=mode)
 
     @property
@@ -123,6 +158,11 @@ class Raw(Dataset):
         return attrs
 
     def array(self, mode="r"):
+        if not self.writable and mode != "r":
+            raise ValueError(
+                f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
+            )
+
         def scale_shift(data, scale_shift):
             data = data.astype(np.float32)
             scale, shift = scale_shift
@@ -176,32 +216,33 @@ class Affs(Dataset):
     """
 
     dataset_type: Literal["affs"] = "affs"
-    neighborhood: list[PydanticCoordinate] | None = None
+    neighborhood: list[PydanticCoordinate] = Field(default_factory=list)
 
     @property
     def attrs(self):
         return {"neighborhood": self.neighborhood}
 
     def model_post_init(self, context):
+        provided = len(self.neighborhood) > 0
         try:
             in_array = self.array("r")
         except ArrayNotFoundError as e:
             in_array = None
-            if self.neighborhood is None:
+            if not provided:
                 raise ValueError(
                     "Affs(..., neighborhood=?)\n"
                     "neighborhood must be provided when referencing an array that does not yet exist\n"
                 ) from e
         if in_array is not None and "neighborhood" in in_array.attrs:
             neighborhood = in_array.attrs["neighborhood"]
-            if self.neighborhood is None:
+            if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
                 assert np.isclose(neighborhood, self.neighborhood).all(), (
                     f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
                 )
         else:
-            if self.neighborhood is None:
+            if not provided:
                 raise ValueError(
                     "Affs(..., neighborhood=?)\n"
                     "neighborhood must be provided when referencing an affs array that does not have "
