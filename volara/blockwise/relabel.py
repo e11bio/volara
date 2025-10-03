@@ -84,9 +84,13 @@ class Relabel(BlockwiseTask):
         )
 
     def map_block(self, block, frags, segs, mapping):
-        segs[block.write_roi] = replace_values(
-            frags.to_ndarray(block.write_roi), mapping[0], mapping[1]
-        )
+        benchmark_logger = self.get_benchmark_logger()
+        with benchmark_logger.trace("Read Frags"):
+            in_frags = frags.to_ndarray(block.write_roi)
+        with benchmark_logger.trace("Relabel"):
+            out_segs = replace_values(in_frags, mapping[0], mapping[1])
+        with benchmark_logger.trace("Write Segments"):
+            segs[block.write_roi] = out_segs
 
     @contextmanager
     def process_block_func(self):
