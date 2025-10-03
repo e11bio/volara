@@ -104,17 +104,25 @@ class AffAgglom(BlockwiseTask):
         self.db.drop_edges()
 
     def agglomerate(self, affs: np.ndarray, frags: np.ndarray, rag: nx.Graph):
-        fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
-        num_frags = len(fragment_ids)
-        frag_mapping = {
-            old: seq for seq, old in zip(range(1, num_frags + 1), fragment_ids)
-        }
-        rev_mapping = {v: k for k, v in frag_mapping.items()}
-        for old, seq in frag_mapping.items():
-            frags[frags == old] = seq
+        benchmark_logger = self.get_benchmark_logger()
 
-        if len(fragment_ids) == 0:
-            return
+        with benchmark_logger.trace("Preprocess fragments"):
+            fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
+            num_frags = len(fragment_ids)
+            frag_mapping = {
+                old: seq for seq, old in zip(range(1, num_frags + 1), fragment_ids)
+            }
+            rev_mapping = {v: k for k, v in frag_mapping.items()}
+            for old, seq in frag_mapping.items():
+                frags[frags == old] = seq
+
+            if len(fragment_ids) == 0:
+                return
+                
+            neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
+
+            # affs_data.neighborhood cannot be None, assert called to make mypy happy
+            assert self.affs_data.neighborhood is not None
 
         def count_affs(
             fragments: np.ndarray, affinities: np.ndarray, offset: Coordinate
@@ -171,53 +179,55 @@ class AffAgglom(BlockwiseTask):
             }
             return mapping
 
-        neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
+        with benchmark_logger.trace("Count affinities"):
+            for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
+                neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
 
-        # affs_data.neighborhood cannot be None, assert called to make mypy happy
-        assert self.affs_data.neighborhood is not None
-
-        for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
-            neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
-
-        for score_name, score_neighborhood in self.scores.items():
-            offset_counts = [neighborhood_affs[offset] for offset in score_neighborhood]
-            cantor_ids = set(chain(*[x.keys() for x in offset_counts]))
-            for cantor_id in cantor_ids:
-                key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]
-                total_count = sum([count[1] for count in key_counts])
-                if total_count > 0:
-                    u, v = inv_cantor_number(cantor_id, dims=2)
-                    rag.add_edge(
-                        rev_mapping[u],
-                        rev_mapping[v],
-                        **{
-                            score_name: sum(
-                                [
-                                    count[0] * count[1] / total_count
-                                    for count in key_counts
-                                ]
-                            )
-                        },
-                    )
+        with benchmark_logger.trace("postprocess scores"):
+            for score_name, score_neighborhood in self.scores.items():
+                offset_counts = [neighborhood_affs[offset] for offset in score_neighborhood]
+                cantor_ids = set(chain(*[x.keys() for x in offset_counts]))
+                for cantor_id in cantor_ids:
+                    key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]
+                    total_count = sum([count[1] for count in key_counts])
+                    if total_count > 0:
+                        u, v = inv_cantor_number(cantor_id, dims=2)
+                        rag.add_edge(
+                            rev_mapping[u],
+                            rev_mapping[v],
+                            **{
+                                score_name: sum(
+                                    [
+                                        count[0] * count[1] / total_count
+                                        for count in key_counts
+                                    ]
+                                )
+                            },
+                        )
 
     def agglomerate_in_block(
         self, block: Block, affs: Array, frags: Array, rag_provider: GraphDataBase
     ):
-        frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
-        rag = rag_provider[block.read_roi]
+        benchmark_logger = self.get_benchmark_logger()
 
-        affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
+        with benchmark_logger.trace("Read data in block"):
+            frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
+            rag = rag_provider[block.read_roi]
 
-        if affs_data.dtype == np.uint8:
-            affs_data = affs_data.astype(np.float32) / 255.0
+            affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
-        self.agglomerate(
-            affs_data,
-            frags_data,
-            rag,
-        )
+            if affs_data.dtype == np.uint8:
+                affs_data = affs_data.astype(np.float32) / 255.0
 
-        rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+        with benchmark_logger.trace("Agglomerate"):
+            self.agglomerate(
+                affs_data,
+                frags_data,
+                rag,
+            )
+
+        with benchmark_logger.trace("Write RAG edges"):
+            rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
 
     def init(self) -> None:
         self.db.init()
