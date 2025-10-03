@@ -82,7 +82,7 @@ class Pipeline:
 
         return combined_pipeline
 
-    def benchmark(self, multiprocessing: bool = True):
+    def benchmark(self, multiprocessing: bool = True, out_dir: Path | None = None):
         """
         Run the pipeline in a benchmark mode, which will run each task
         in the pipeline and log the time taken for each task.
@@ -136,9 +136,9 @@ class Pipeline:
         finally:
             for node in node_ordering:
                 node.drop()
-            benchmark_logger.print_report()
+            benchmark_logger.print_report(out_dir)
             set_log_basedir(log_basedir)
-            sys.exit(0)
+            # sys.exit(0)
 
     def run_blockwise(self, multiprocessing: bool = True):
         with ExitStack() as stack:

@@ -148,7 +148,7 @@ class BenchmarkLogger:
         else:
             yield
 
-    def print_report(self):
+    def print_report(self, out_dir: Path | None = None):
         if self.conn is not None:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM benchmark;")
@@ -248,8 +248,8 @@ class BenchmarkLogger:
                 values="io_profile", index="task", columns="operation"
             ).select(["task"] + ops_order)
 
-            time_df.write_csv("time.csv")
-            mem_df.write_csv("memory.csv")
-            io_df.write_csv("io.csv")
+            time_df.write_csv(out_dir / "time.csv")
+            mem_df.write_csv(out_dir / "memory.csv")
+            io_df.write_csv(out_dir / "io.csv")
         else:
             print("No benchmark data available.")
