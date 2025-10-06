@@ -1,4 +1,5 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
@@ -6,6 +7,7 @@ from typing import Literal, Sequence
 
 import numpy as np
 import zarr
+from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
@@ -267,6 +269,49 @@ class Labels(Dataset):
     """
 
     dataset_type: Literal["labels"] = "labels"
+
+    @property
+    def attrs(self):
+        return {}
+
+
+class CloudVolumeWrapper(Dataset):
+    """
+    Represents a volumetric dataset through Cloud Volume.
+    """
+
+    dataset_type: Literal["cloudvolume"] = "cloudvolume"
+    mip: int = 0
+    timestamp: int = int(time.time())  # default to current time
+    agglomerate: bool = True
+    data_name: str | None = None
+
+    def array(self, mode: str = "r") -> Array:
+        vol = CloudVolume(
+            self.store,
+            mip=self.mip,
+            use_https=True,
+            agglomerate=self.agglomerate,
+            timestamp=self.timestamp,
+        )
+
+        metadata = {
+            "axis_names": self.axis_names if self.axis_names is not None else None,
+            "units": self.units if self.units is not None else None,
+            "offset": self.offset if self.offset is not None else vol.voxel_offset,
+            "types": ["space" for _ in range(len(vol.shape) - 1)]
+            + ["channel"],  # last dimension in CV is always channel
+        }
+
+        return Array(
+            vol.to_dask(), **{k: v for k, v in metadata.items() if v is not None}
+        )
+
+    @property
+    def name(self) -> str:
+        return (
+            self.data_name if self.data_name else self.store.rstrip("/").split("/")[-1]
+        )
 
     @property
     def attrs(self):
