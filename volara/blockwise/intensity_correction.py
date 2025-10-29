@@ -3,15 +3,13 @@ from typing import Literal
 
 import numpy as np
 from funlib.geometry import Coordinate, Roi
-
-from scipy.ndimage import gaussian_filter
-
-from volara.datasets import Dataset, Raw
-from volara.blockwise.blockwise import BlockwiseTask
-from volara.utils import PydanticCoordinate
+from funlib.persistence import Array
 from skimage.exposure import equalize_adapthist
 
-from funlib.persistence import Array
+from volara.blockwise.blockwise import BlockwiseTask
+from volara.datasets import Dataset, Raw
+from volara.utils import PydanticCoordinate
+
 
 class CLAHE(BlockwiseTask):
     task_type: Literal["clahe"] = "clahe"

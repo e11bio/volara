@@ -127,7 +127,9 @@ class GraphMWS(BlockwiseTask):
             )
             with benchmark_logger.trace("Read graph"):
                 graph = rag_provider.read_graph(
-                    read_roi, node_attrs=node_attrs, edge_attrs=list(self.weights.keys())
+                    read_roi,
+                    node_attrs=node_attrs,
+                    edge_attrs=list(self.weights.keys()),
                 )
 
             with benchmark_logger.trace("Prepare MWS edges"):

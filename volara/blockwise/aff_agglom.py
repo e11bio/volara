@@ -118,7 +118,7 @@ class AffAgglom(BlockwiseTask):
 
             if len(fragment_ids) == 0:
                 return
-                
+
             neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
 
             # affs_data.neighborhood cannot be None, assert called to make mypy happy
@@ -185,7 +185,9 @@ class AffAgglom(BlockwiseTask):
 
         with benchmark_logger.trace("postprocess scores"):
             for score_name, score_neighborhood in self.scores.items():
-                offset_counts = [neighborhood_affs[offset] for offset in score_neighborhood]
+                offset_counts = [
+                    neighborhood_affs[offset] for offset in score_neighborhood
+                ]
                 cantor_ids = set(chain(*[x.keys() for x in offset_counts]))
                 for cantor_id in cantor_ids:
                     key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]

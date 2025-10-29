@@ -1,5 +1,4 @@
 import logging
-import sys
 from contextlib import ExitStack
 from itertools import product
 from pathlib import Path

@@ -11,7 +11,7 @@ from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -230,9 +230,9 @@ class Affs(Dataset):
             if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
-                assert np.isclose(neighborhood, self.neighborhood).all(), (
-                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
-                )
+                assert np.isclose(
+                    neighborhood, self.neighborhood
+                ).all(), f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
         else:
             if not provided:
                 raise ValueError(

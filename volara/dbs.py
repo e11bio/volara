@@ -5,7 +5,6 @@ from typing import Any, Literal
 from funlib.persistence.graphs import PgSQLGraphDatabase, SQLiteGraphDataBase
 from funlib.persistence.graphs.graph_database import GraphDataBase
 from funlib.persistence.types import Vec
-from pydantic import field_validator
 
 from .utils import StrictBaseModel
 
