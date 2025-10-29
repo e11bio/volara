@@ -1,6 +1,6 @@
 [![tests](https://github.com/e11bio/volara/actions/workflows/tests.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/tests.yaml)
 [![ruff](https://github.com/e11bio/volara/actions/workflows/ruff.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/ruff.yaml)
-[![mypy](https://github.com/e11bio/volara/actions/workflows/mypy.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/mypy.yaml)
+[![ty](https://github.com/e11bio/volara/actions/workflows/ty.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/ty.yaml)
 [![docs](https://github.com/e11bio/volara/actions/workflows/docs.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/docs.yaml)
 <!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
 
