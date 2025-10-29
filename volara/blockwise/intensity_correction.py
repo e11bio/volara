@@ -77,11 +77,24 @@ class CLAHE(BlockwiseTask):
         def process_block(block):
             # compute in read roi
             data = in_arr.to_ndarray(block.read_roi)
-            data = equalize_adapthist(
-                data,
-                clip_limit=self.clip_limit,
-                kernel_size=self.context * 2,
-            )
+            if data.ndim == self.kernel.dims:
+                data = equalize_adapthist(
+                    data,
+                    clip_limit=self.clip_limit,
+                    kernel_size=self.kernel,
+                )
+            else:
+                data = np.stack(
+                    [
+                        equalize_adapthist(
+                            data[i],
+                            clip_limit=self.clip_limit,
+                            kernel_size=self.kernel,
+                        )
+                        for i in range(data.shape[0])
+                    ],
+                    axis=0,
+                )
 
             # crop to write roi
             block_out_roi = block.write_roi.intersect(out_arr.roi)
