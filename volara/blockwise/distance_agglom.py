@@ -7,7 +7,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 from scipy.ndimage import laplace
-from scipy.spatial import cKDTree
+from scipy.spatial import cKDTree  # type: ignore[unresolved-import]
 
 from volara.lut import LUT
 
@@ -87,7 +87,10 @@ class DistanceAgglom(BlockwiseTask):
         return []
 
     def drop_artifacts(self):
-        self.db.drop_edges()
+        if isinstance(self.storage, LUT):
+            self.storage.drop()
+        else:
+            self.storage.drop_edges()
 
     def label_distances(self, labels, voxel_size, dist_threshold=0.0):
         # First 0 out all voxel where the laplace is 0 (not an edge voxel)

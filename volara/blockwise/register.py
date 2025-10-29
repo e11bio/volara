@@ -201,7 +201,8 @@ class ApplyShift(BlockwiseTask):
 
     def drop_artifacts(self):
         self.aligned.drop()
-        self.interp_shifts.drop()
+        if self.interp_shifts is not None:
+            self.interp_shifts.drop()
 
     def init(self):
         self.init_out_array()
@@ -219,7 +220,8 @@ class ApplyShift(BlockwiseTask):
             ),
             offset=self.write_roi.offset,
             voxel_size=self.voxel_size,
-            units=self.intensities.units,
+            units=in_array.units,
+            types=in_array.types,
             axis_names=in_array.axis_names,
             dtype=np.uint8,
         )
@@ -236,7 +238,8 @@ class ApplyShift(BlockwiseTask):
                 ),
                 offset=self.write_roi.offset,
                 voxel_size=self.voxel_size,
-                units=self.intensities.units,
+                units=in_array.units,
+                types=in_array.types,
                 axis_names=[in_array.axis_names[0], "axis", *in_array.axis_names[1:]],
                 dtype=np.float32,
             )

@@ -48,7 +48,7 @@ def test_aff_agglom(tmpdir):
     )
     frags_arr[:] = frags_data
     frags = Labels(
-        store=tmpdir / "test_data.zarr" / "frags", neighborhood=[Coordinate(1, 0)]
+        store=tmpdir / "test_data.zarr" / "frags"
     )
 
     # add fragment nodes to db

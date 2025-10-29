@@ -126,7 +126,7 @@ class Pipeline:
                     daisy.run_blockwise(all_tasks)
                 else:
                     server = daisy.SerialServer()
-                    cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                    cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
                     server.run_blockwise(all_tasks)
 
         except Exception as e:
@@ -166,7 +166,7 @@ class Pipeline:
                 daisy.run_blockwise(all_tasks)
             else:
                 server = daisy.SerialServer()
-                cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
                 server.run_blockwise(all_tasks)
 
     def drop(self):

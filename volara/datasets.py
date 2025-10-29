@@ -79,7 +79,7 @@ class Dataset(StrictBaseModel, ABC):
         chunk_shape: Sequence[int],
         offset: Coordinate,
         voxel_size: Coordinate,
-        units: list[str],
+        units: list[str] | None,
         axis_names: list[str],
         types: list[str],
         dtype,
@@ -195,7 +195,7 @@ class Raw(Dataset):
         if self.channels is not None:
             array.lazy_op(np.s_[self.channels])
         if self.stack is not None:
-            array.lazy_op(lambda data: stack(data, self.stack.array("r").data))
+            array.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
 
         return array
 
@@ -280,7 +280,7 @@ class CloudVolumeWrapper(Dataset):
 
     def array(self, mode: str = "r") -> Array:
         vol = CloudVolume(
-            self.store,
+            str(self.store),
             mip=self.mip,
             use_https=True,
             agglomerate=self.agglomerate,
@@ -290,14 +290,19 @@ class CloudVolumeWrapper(Dataset):
         metadata = {
             "axis_names": self.axis_names if self.axis_names is not None else None,
             "units": self.units if self.units is not None else None,
-            "offset": self.offset if self.offset is not None else vol.voxel_offset,
-            "types": ["space" for _ in range(len(vol.shape) - 1)]
+            "offset": self.offset if self.offset is not None else vol.voxel_offset,  # type: ignore[unresolved-attribute]
+            "types": ["space" for _ in range(len(vol.shape) - 1)]  # type: ignore[unresolved-attribute]
             + ["channel"],  # last dimension in CV is always channel
         }
 
-        return Array(
-            vol.to_dask(), **{k: v for k, v in metadata.items() if v is not None}
-        )
+        if hasattr(vol, "to_dask") and callable(vol.to_dask):
+            return Array(
+                vol.to_dask(), **{k: v for k, v in metadata.items() if v is not None}
+            )
+        else:
+            raise Exception(
+                "CloudVolume version does not support to_dask(). Please upgrade cloud-volume package."
+            )
 
     @property
     def name(self) -> str:

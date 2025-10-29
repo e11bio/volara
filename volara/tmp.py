@@ -98,7 +98,7 @@ def replace_values(arr, src, dst):
     label_map = {src[i]: dst[i] for i in range(len(src))}
     relabeled_arr = np.zeros_like(arr)
 
-    for i in numba.prange(arr.shape[0]):
+    for i in numba.prange(arr.shape[0]):  # type: ignore[non-iterable]
         relabeled_arr[i] = label_map.get(arr[i], arr[i])
 
     return relabeled_arr.reshape(shape)

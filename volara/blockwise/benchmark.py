@@ -112,9 +112,9 @@ class BenchmarkLogger:
             else:
                 worker_id = -1
             proc = psutil.Process(os.getpid())
-            try:
+            if hasattr(proc, "io_counters"):
                 io_before = proc.io_counters()
-            except AttributeError:
+            else:
                 # MacOS does not support io_counters
                 io_before = None
             cpu_before = proc.cpu_times()
@@ -127,9 +127,9 @@ class BenchmarkLogger:
                 mem_after = proc.memory_info()
                 cpu_after = proc.cpu_times()
                 try:
-                    io_after = proc.io_counters()
-                    io_read = io_after.read_bytes - io_before.read_bytes
-                    io_write = io_after.write_bytes - io_before.write_bytes
+                    io_after = proc.io_counters()  # type: ignore
+                    io_read = io_after.read_bytes - io_before.read_bytes  # type: ignore
+                    io_write = io_after.write_bytes - io_before.write_bytes  # type: ignore
                 except AttributeError:
                     # MacOS does not support io_counters
                     io_read = 0
@@ -149,6 +149,8 @@ class BenchmarkLogger:
             yield
 
     def print_report(self, out_dir: Path | None = None):
+        if out_dir is None:
+            out_dir = Path("./volara_benchmark_report")
         if self.conn is not None:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM benchmark;")

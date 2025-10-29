@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
 
 import daisy
 import numpy as np
@@ -235,6 +235,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             logging.info("Running block with config %s..." % config_file)
 
             def run_worker():
+                assert self.worker_config is not None  # TODO: remove this, shouldn't be needed for type checker
                 cmd = self.worker_config.get_command(config_file, self.task_name)
                 return subprocess.run(cmd)
 
@@ -258,7 +259,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 client = daisy.Client()
                 # TODO: this shouldn't be necessary, daisy should be doing this for us
                 try:
-                    set_log_basedir(client.context["logdir"])
+                    set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
                 except KeyError as e:
                     raise ValueError(client.context) from e
                 mark_block_done = self.mark_block_done_func()
@@ -360,7 +361,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> daisy.Task:
+    ) -> Iterator[daisy.Task]:
         """
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.
@@ -440,7 +441,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 data[name] = value
         return self.__class__(**data)
 
-    def benchmark(self, multiprocessing: bool = True) -> None:
+    def benchmark(self, multiprocessing: bool = True) -> dict:
         """
         A helper function for benchmarking and debugging a blockwise task or pipeline.
 
@@ -472,17 +473,18 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     result = daisy.run_blockwise(tasks)  # noqa
                 else:
                     server = daisy.SerialServer()
-                    _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                    _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
                     result = server.run_blockwise(tasks)
-            return result
+
         except Exception as e:
-            logger.exception(e)
+            raise e
 
         finally:
             debug_self.drop()
             benchmark_logger.print_report()
             set_log_basedir(log_basedir)
-            sys.exit(0)
+
+        return result
 
     def run_blockwise(
         self,
@@ -497,7 +499,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 result = daisy.run_blockwise(tasks)  # noqa
             else:
                 server = daisy.SerialServer()
-                _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # noqa
+                _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
                 result = server.run_blockwise(tasks)
             return result
 
