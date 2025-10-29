@@ -6,147 +6,60 @@ from funlib.geometry import Coordinate, Roi
 
 from scipy.ndimage import gaussian_filter
 
-from ..datasets import Dataset, Raw
-from .blockwise import BlockwiseTask
-from ..utils import PydanticCoordinate
+from volara.datasets import Dataset, Raw
+from volara.blockwise.blockwise import BlockwiseTask
+from volara.utils import PydanticCoordinate
+from skimage.exposure import equalize_adapthist
 
+from funlib.persistence import Array
 
-class FlatFieldCorrection(BlockwiseTask):
-    """ """
-
-    task_type: Literal["flat_field_correction"] = "flat_field_correction"
-
-    intensities: Raw
-    gain: Raw
-    bias: Raw
-
-    stats_block_size: PydanticCoordinate
-
-    fit: Literal["shrink"] = "shrink"
-    read_write_conflict: Literal[False] = False
-    _out_array_dtype: np.dtype = np.dtype(np.uint64)
-
-    @property
-    def task_name(self) -> str:
-        return f"{self.gain.name}-{self.task_type}"
-
-    @property
-    def write_roi(self) -> Roi:
-        roi = self.intensities.array("r").roi
-        if self.roi is not None:
-            roi = roi.intersect(self.roi)
-        return roi
-
-    @property
-    def voxel_size(self) -> Coordinate:
-        return self.intensities.array("r").voxel_size
-
-    @property
-    def write_size(self) -> Coordinate:
-        return self.stats_block_size * self.voxel_size
-
-    @property
-    def context_size(self) -> Coordinate:
-        return self.voxel_size * 0
-
-    @property
-    def output_datasets(self) -> list[Dataset]:
-        return [self.gain, self.bias]
-
-    def drop_artifacts(self):
-        self.gain.drop()
-        self.bias.drop()
-
-    def init(self):
-        in_data = self.intensities.array("r")
-        self.gain.prepare(
-            self.write_roi.shape.ceil_division(self.write_size),
-            self.write_size / self.write_size,
-            self.write_roi.offset,
-            self.write_size,
-            units=in_data.units,
-            axis_names=in_data.axis_names,
-            types=in_data.types,
-            dtype=self._out_array_dtype,
-        )
-        self.bias.prepare(
-            self.write_roi.shape.ceil_division(self.write_size),
-            self.write_size / self.write_size,
-            self.write_roi.offset,
-            self.write_size,
-            units=in_data.units,
-            axis_names=in_data.axis_names,
-            types=in_data.types,
-            dtype=self._out_array_dtype,
-        )
-
-    @contextmanager
-    def process_block_func(self):
-        intensities = self.intensities.array("r")
-        gain_arr = self.gain.array("r+")
-        bias_arr = self.bias.array("r+")
-
-        def process_block(block):
-            data = intensities.to_ndarray(block.write_roi)
-
-            bias = np.median(data)  # or a low-percentile, see below
-            data_zb = data - bias  # zero-baselined
-            data_zb[data_zb < 0] = 0  # clamp tiny negatives from noise
-
-            gain = float(data_zb.mean())
-
-            gain_arr[block.write_roi] = gain
-            bias_arr[block.write_roi] = bias
-
-        yield process_block
-
-
-class Blur(BlockwiseTask):
-    task_type: Literal["blur"] = "blur"
+class CLAHE(BlockwiseTask):
+    task_type: Literal["clahe"] = "clahe"
 
     in_arr: Raw
-    out_arr: Raw | None = None
-    sigma_grid: tuple[int, ...]
-    operation: Literal["scale_mean", "subtract_mean"] | None = None
+    out_arr: Raw
 
-    fit: Literal["shrink"] = "shrink"
+    block_size: PydanticCoordinate
+    kernel: PydanticCoordinate
+
+    clip_limit: float = 0.01
+
+    fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
-    _out_array_dtype: np.dtype = np.dtype(np.uint64)
 
     @property
     def task_name(self) -> str:
-        return f"{self.arr}-{self.task_type}"
+        return f"{self.out_arr.name}-{self.task_type}"
+
+    @property
+    def context(self) -> Coordinate:
+        return self.kernel // 2
 
     @property
     def write_roi(self) -> Roi:
-        roi = self.arr.array("r").roi
+        roi = self.in_arr.array("r").roi
         if self.roi is not None:
             roi = roi.intersect(self.roi)
         return roi
 
     @property
     def voxel_size(self) -> Coordinate:
-        return self.arr.array("r").voxel_size
+        return self.in_arr.array("r").voxel_size
 
     @property
     def write_size(self) -> Coordinate:
-        return self.arr.array("r").roi.shape
+        return self.block_size * self.voxel_size
 
     @property
     def context_size(self) -> Coordinate:
-        return self.voxel_size * 0
-
-    @property
-    def output_datasets(self) -> list[Dataset]:
-        return []
+        return self.voxel_size * self.context
 
     def drop_artifacts(self):
-        if self.out_arr:
-            self.out_arr.drop()
+        self.out_arr.drop()
 
     def init(self):
-        in_data = self.in_arr.array("r")
         if self.out_arr is not None:
+            in_data = self.in_arr.array("r")
             self.out_arr.prepare(
                 in_data.shape,
                 in_data.chunk_shape,
@@ -155,30 +68,28 @@ class Blur(BlockwiseTask):
                 units=in_data.units,
                 axis_names=in_data.axis_names,
                 types=in_data.types,
-                dtype=self._out_array_dtype,
+                dtype=np.uint8,
             )
 
     @contextmanager
     def process_block_func(self):
         in_arr = self.in_arr.array("r")
-        out_arr = self.out_arr.array("r+") if self.out_arr else in_arr.array("r+")
+        out_arr = Dataset.array(self.out_arr, "r+")
 
         def process_block(block):
-            data = in_arr.to_ndarray(block.write_roi)
+            # compute in read roi
+            data = in_arr.to_ndarray(block.read_roi)
+            data = equalize_adapthist(
+                data,
+                clip_limit=self.clip_limit,
+                kernel_size=self.context * 2,
+            )
 
-            # fill gaps
-            filler = np.nanmean(data)
-            data[np.isnan(data)] = filler
+            # crop to write roi
+            block_out_roi = block.write_roi.intersect(out_arr.roi)
+            array = Array(data, block.read_roi.get_begin(), in_arr.voxel_size)
+            write_data = array[block_out_roi]
 
-            # blur and normalise
-            data = gaussian_filter(data, self.sigma_grid, mode="reflect")
-            if self.operation is None:
-                pass
-            elif self.operation == "scale_mean":
-                data /= data.mean()
-            elif self.operation == "subtract_mean":
-                data -= data.mean()
-
-            out_arr[block.write_roi] = data
+            out_arr[block_out_roi] = write_data * 255
 
         yield process_block
