@@ -47,9 +47,7 @@ def test_aff_agglom(tmpdir):
         mode="w",
     )
     frags_arr[:] = frags_data
-    frags = Labels(
-        store=tmpdir / "test_data.zarr" / "frags"
-    )
+    frags = Labels(store=tmpdir / "test_data.zarr" / "frags")
 
     # add fragment nodes to db
     db = db_config.open("r+")

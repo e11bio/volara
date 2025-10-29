@@ -230,9 +230,9 @@ class Affs(Dataset):
             if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
-                assert np.isclose(
-                    neighborhood, self.neighborhood
-                ).all(), f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
+                assert np.isclose(neighborhood, self.neighborhood).all(), (
+                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
+                )
         else:
             if not provided:
                 raise ValueError(
