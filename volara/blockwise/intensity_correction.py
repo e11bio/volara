@@ -4,7 +4,8 @@ from typing import Literal
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
-from skimage.exposure import equalize_adapthist
+from skimage.exposure import rescale_intensity
+from skimage.exposure._adapthist import _clahe
 
 from volara.blockwise.blockwise import BlockwiseTask
 from volara.datasets import Dataset, Raw
@@ -16,11 +17,13 @@ class CLAHE(BlockwiseTask):
 
     in_arr: Raw
     out_arr: Raw
+    mask_arr: Raw | None = None
 
     block_size: PydanticCoordinate
     kernel: PydanticCoordinate
 
     clip_limit: float = 0.01
+    in_range: list[tuple[int, int]] | tuple[int, int] | str = "image"
 
     fit: Literal["overhang"] = "overhang"
     read_write_conflict: Literal[False] = False
@@ -73,28 +76,66 @@ class CLAHE(BlockwiseTask):
     def process_block_func(self):
         in_arr = self.in_arr.array("r")
         out_arr = Dataset.array(self.out_arr, "r+")
+        mask_arr = self.mask_arr.array("r") if self.mask_arr else None
 
         def process_block(block):
             # compute in read roi
             data = in_arr.to_ndarray(block.read_roi)
+
+            # rescale:
+            if data.ndim == self.kernel.dims + 1 and not isinstance(self.in_range, str):
+                assert len(self.in_range) == data.shape[0], (
+                    "in_range must match channel dimension"
+                )
+                data = np.stack(
+                    [
+                        np.round(
+                            rescale_intensity(
+                                data[i],
+                                out_range=(0, 2**14 - 1),
+                                in_range=self.in_range[i],
+                            )
+                        ).astype(np.min_scalar_type(2**14))
+                        for i in range(data.shape[0])
+                    ],
+                    axis=0,
+                )
+            else:
+                data = np.round(
+                    rescale_intensity(
+                        data, out_range=(0, 2**14 - 1), in_range=self.in_range
+                    )
+                ).astype(np.min_scalar_type(2**14))
+
+            if mask_arr is not None:
+                mask_data = mask_arr.to_ndarray(block.read_roi)
+                if data.ndim == self.kernel.dims:
+                    data = data * (mask_data > 0)
+                else:
+                    data = data * (mask_data[None] > 0)
             if data.ndim == self.kernel.dims:
-                data = equalize_adapthist(
+                data = _clahe(
                     data,
                     clip_limit=self.clip_limit,
                     kernel_size=self.kernel,
+                    nbins=256,
                 )
             else:
                 data = np.stack(
                     [
-                        equalize_adapthist(
+                        _clahe(
                             data[i],
                             clip_limit=self.clip_limit,
                             kernel_size=self.kernel,
+                            nbins=256,
                         )
                         for i in range(data.shape[0])
                     ],
                     axis=0,
                 )
+
+            # rescale to float
+            data = rescale_intensity(data, out_range=(0, 1), in_range=(0, 2**14 - 1))
 
             # crop to write roi
             block_out_roi = block.write_roi.intersect(out_arr.roi)

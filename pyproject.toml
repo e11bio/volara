@@ -67,6 +67,7 @@ graph-mws = "volara.blockwise:GraphMWS"
 lut = "volara.blockwise:Relabel"
 seeded-extract-frags = "volara.blockwise:SeededExtractFrags"
 threshold = "volara.blockwise:Threshold"
+clahe = "volara.blockwise:CLAHE"
 
 [tool.setuptools.dynamic]
 version = { attr = "volara.__version__" }

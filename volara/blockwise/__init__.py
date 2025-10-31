@@ -11,6 +11,7 @@ from .distance_agglom import (
 )
 from .extract_frags import ExtractFrags as ExtractFrags
 from .graph_mws import GraphMWS as GraphMWS
+from .intensity_correction import CLAHE as CLAHE
 from .register import ApplyShift as ApplyShift
 from .register import ComputeShift as ComputeShift
 from .relabel import Relabel as Relabel
@@ -74,4 +75,5 @@ __all__ = [
     "Relabel",
     "SeededExtractFrags",
     "Threshold",
+    "CLAHE",
 ]
