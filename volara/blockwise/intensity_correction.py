@@ -63,7 +63,7 @@ class CLAHE(BlockwiseTask):
             in_data = self.in_arr.array("r")
             self.out_arr.prepare(
                 in_data.shape,
-                in_data.chunk_shape,
+                ((in_data.shape[0],) if in_data.types[0] not in ["time", "space"] else ()) + tuple(self.block_size),
                 in_data.roi.offset,
                 voxel_size=in_data.voxel_size,
                 units=in_data.units,
@@ -80,7 +80,8 @@ class CLAHE(BlockwiseTask):
 
         def process_block(block):
             # compute in read roi
-            data = in_arr.to_ndarray(block.read_roi)
+            read_roi = block.read_roi.intersect(in_arr.roi)
+            data = in_arr.to_ndarray(read_roi)
 
             # rescale:
             if data.ndim == self.kernel.dims + 1 and not isinstance(self.in_range, str):
@@ -139,7 +140,7 @@ class CLAHE(BlockwiseTask):
 
             # crop to write roi
             block_out_roi = block.write_roi.intersect(out_arr.roi)
-            array = Array(data, block.read_roi.get_begin(), in_arr.voxel_size)
+            array = Array(data, read_roi.offset, in_arr.voxel_size)
             write_data = array[block_out_roi]
 
             out_arr[block_out_roi] = write_data * 255
