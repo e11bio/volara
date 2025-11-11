@@ -301,25 +301,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         # prepare blocks done ds
 
-        def cmin(a, b):
-            return Coordinate([min(ai, bi) for ai, bi in zip(a, b)])
-
-        def cmax(a, b):
-            return Coordinate([max(ai, bi) for ai, bi in zip(a, b)])
-
-        def gcd(a, b):
-            while b:
-                a, b = b, a % b
-            return a
-
-        def cgcd(a, *bs):
-            while len(bs) > 0:
-                b = bs[0]
-                bs = bs[1:]
-                a, b = cmax(a, b), cmin(a, b)
-                a = Coordinate([gcd(ai, bi) for ai, bi in zip(a, b)])
-            return abs(a)
-
         def get_dtype(write_roi, write_size):
             # need to factor in block offset, so use cantor number of last block
             # + 1 to be safe
@@ -332,9 +313,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 f"Number of blocks ({num_blocks}) is too large for available data types."
             )
 
-        block_voxel_size = cgcd(
-            self.write_roi.offset, self.write_size, self.write_roi.shape
-        )
+        block_voxel_size = self.write_size
 
         try:
             prepare_ds(
