@@ -9,8 +9,6 @@ from pydantic import Field
 from scipy.ndimage import laplace
 from scipy.spatial import cKDTree  # type: ignore[unresolved-import]
 
-from volara.lut import LUT
-
 from ..datasets import Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
@@ -40,7 +38,6 @@ class DistanceAgglom(BlockwiseTask):
             PostgreSQL | SQLite,
             Field(discriminator="db_type"),
         ]
-        | LUT
     )
     """
     Where to store the edges and or the final Look Up Table.
@@ -87,10 +84,7 @@ class DistanceAgglom(BlockwiseTask):
         return []
 
     def drop_artifacts(self):
-        if isinstance(self.storage, LUT):
-            self.storage.drop()
-        else:
-            self.storage.drop_edges()
+        self.storage.drop_edges()
 
     def label_distances(self, labels, voxel_size, dist_threshold=0.0):
         # First 0 out all voxel where the laplace is 0 (not an edge voxel)
@@ -181,7 +175,7 @@ class DistanceAgglom(BlockwiseTask):
     @contextmanager
     def process_block_func(self):
         frags = self.frags_data.array("r")
-        rag_provider = self.db.open("r+")
+        rag_provider = self.storage.open("r+")
 
         def process_block(block):
             self.agglomerate_in_block(

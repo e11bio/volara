@@ -185,7 +185,7 @@ class Raw(Dataset):
         array = open_ds(
             self.store,
             mode=mode,
-            **{k: v for k, v in metadata.items() if v is not None},
+            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
         )
 
         if self.ome_norm:
@@ -297,7 +297,8 @@ class CloudVolumeWrapper(Dataset):
 
         if hasattr(vol, "to_dask") and callable(vol.to_dask):
             return Array(
-                vol.to_dask(), **{k: v for k, v in metadata.items() if v is not None}
+                vol.to_dask(),
+                **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument]
             )
         else:
             raise Exception(
@@ -307,7 +308,9 @@ class CloudVolumeWrapper(Dataset):
     @property
     def name(self) -> str:
         return (
-            self.data_name if self.data_name else self.store.rstrip("/").split("/")[-1]
+            self.data_name
+            if self.data_name
+            else str(self.store).rstrip("/").split("/")[-1]
         )
 
     @property

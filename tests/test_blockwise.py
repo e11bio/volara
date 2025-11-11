@@ -121,11 +121,21 @@ def test_aff_agglom(affs, labels, tmp_path):
     )
     affs_config = AffAgglom(
         db=db,
-        affs_data=Affs(store=affs_path, neighborhood=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        affs_data=Affs(
+            store=affs_path,
+            neighborhood=[
+                Coordinate(1, 0, 0),
+                Coordinate(0, 1, 0),
+                Coordinate(0, 0, 1),
+            ],
+        ),
         frags_data=Labels(store=labels_path),
-        block_size=(20, 20, 20),
-        context=(2, 2, 2),
-        scores={"xy_aff": [(1, 0, 0), (0, 1, 0)], "z_aff": [(0, 0, 1)]},
+        block_size=Coordinate(20, 20, 20),
+        context=Coordinate(2, 2, 2),
+        scores={
+            "xy_aff": [Coordinate(1, 0, 0), Coordinate(0, 1, 0)],
+            "z_aff": [Coordinate(0, 0, 1)],
+        },
     )
     affs_config.run_blockwise(multiprocessing=False)
 
