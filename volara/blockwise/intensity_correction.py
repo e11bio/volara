@@ -63,7 +63,12 @@ class CLAHE(BlockwiseTask):
             in_data = self.in_arr.array("r")
             self.out_arr.prepare(
                 in_data.shape,
-                ((in_data.shape[0],) if in_data.types[0] not in ["time", "space"] else ()) + tuple(self.block_size),
+                (
+                    (in_data.shape[0],)
+                    if in_data.types[0] not in ["time", "space"]
+                    else ()
+                )
+                + tuple(self.block_size),
                 in_data.roi.offset,
                 voxel_size=in_data.voxel_size,
                 units=in_data.units,

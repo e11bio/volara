@@ -33,12 +33,10 @@ class DistanceAgglom(BlockwiseTask):
 
     task_type: Literal["distance-agglom"] = "distance-agglom"
 
-    storage: (
-        Annotated[
-            PostgreSQL | SQLite,
-            Field(discriminator="db_type"),
-        ]
-    )
+    storage: Annotated[
+        PostgreSQL | SQLite,
+        Field(discriminator="db_type"),
+    ]
     """
     Where to store the edges and or the final Look Up Table.
     If a Database is provided, it is assumed that each fragment in the
