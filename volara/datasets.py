@@ -34,6 +34,8 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
+    zarr_kwargs: dict = Field(default_factory=dict)
+
     @property
     def name(self) -> str:
         """
@@ -100,6 +102,7 @@ class Dataset(StrictBaseModel, ABC):
             chunk_shape=chunk_shape,
             dtype=dtype,
             mode="a",
+            **self.zarr_kwargs,
         )
         array._source_data.attrs.update(self.attrs)
 
@@ -108,7 +111,7 @@ class Dataset(StrictBaseModel, ABC):
             raise ValueError(
                 f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
             )
-        return open_ds(self.store, mode=mode)
+        return open_ds(self.store, mode=mode, **self.zarr_kwargs)
 
     @property
     @abstractmethod
@@ -133,7 +136,7 @@ class Raw(Dataset):
     @property
     def bounds(self) -> list[tuple[float, float]] | None:
         if self.ome_norm is not None:
-            array = open_ds(self.store, mode="r")
+            array = open_ds(self.store, mode="r", **self.zarr_kwargs)
             metadata_group = zarr.open(self.ome_norm)
             channels_meta = metadata_group.attrs["omero"]["channels"]
             bounds = [
@@ -190,6 +193,7 @@ class Raw(Dataset):
             self.store,
             mode=mode,
             **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
+            **self.zarr_kwargs,
         )
 
         if self.ome_norm:
