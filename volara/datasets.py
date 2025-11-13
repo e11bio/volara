@@ -26,7 +26,7 @@ class Dataset(StrictBaseModel, ABC):
     for all dataset types.
     """
 
-    store: Path
+    store: Path | str
 
     voxel_size: PydanticCoordinate | None = None
     offset: PydanticCoordinate | None = None
@@ -50,10 +50,14 @@ class Dataset(StrictBaseModel, ABC):
         """
         Delete this dataset
         """
+        if not isinstance(self.store, Path):
+            raise ValueError(f"Not dropping dataset: store {self.store} is not a Path")
         if self.store.exists():
             rmtree(self.store)
 
     def spoof(self, spoof_dir: Path):
+        if not isinstance(self.store, Path):
+            raise ValueError(f"Not spoofing dataset: store {self.store} is not a Path")
         spoof_path = spoof_dir / f"spoof_{self.name}"
         if not spoof_path.parent.exists():
             spoof_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +83,7 @@ class Dataset(StrictBaseModel, ABC):
         chunk_shape: Sequence[int],
         offset: Coordinate,
         voxel_size: Coordinate,
-        units: list[str] | None,
+        units: list[str],
         axis_names: list[str],
         types: list[str],
         dtype,
