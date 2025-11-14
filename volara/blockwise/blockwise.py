@@ -213,6 +213,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 # successful processing if there was no error
                 block_array = open_ds(self.block_ds, mode="a")
                 write_roi = block.write_roi.intersect(block_array.roi)
+                write_roi.shape = block_array.voxel_size
                 block_array[write_roi] = np.full(
                     write_roi.shape // block_array.voxel_size,
                     fill_value=block.block_id[1] + 1,
@@ -318,7 +319,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         try:
             prepare_ds(
                 self.block_ds,
-                shape=self.write_roi.shape / block_voxel_size,
+                shape=(self.write_roi.shape + block_voxel_size - 1) / block_voxel_size,
                 offset=self.write_roi.offset,
                 voxel_size=block_voxel_size,
                 chunk_shape=self.write_size / block_voxel_size,
