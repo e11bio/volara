@@ -105,6 +105,13 @@ class ExtractFrags(BlockwiseTask):
     Determines whether to use seeds for mutex or not (default). Controls the
     size of the maximum filter footprint computed on the boundary distances
     """
+    seed_eps: float | None = None
+    """
+    If using seeds, this will decay the affs based on distance from the seeds.
+    The seed_eps is the scale to apply to the seed distance transform which is
+    then subtracted from the shift. This is useful if increased fragmentation of
+    the supervoxels is desired.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -257,6 +264,10 @@ class ExtractFrags(BlockwiseTask):
             ).astype(np.uint64)
 
             seeds[~boundary_mask] = 0
+
+            if self.seed_eps is not None:
+                D = distance_transform_edt(seeds == 0)
+                shift -= self.seed_eps * D
         else:
             seeds = None
 
