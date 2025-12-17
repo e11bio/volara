@@ -12,6 +12,7 @@ from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from funlib.persistence.arrays.datasets import ArrayNotFoundError
 from pydantic import Field
+import s3fs
 
 from .utils import PydanticCoordinate, StrictBaseModel
 
@@ -52,10 +53,22 @@ class Dataset(StrictBaseModel, ABC):
         """
         Delete this dataset
         """
-        if not isinstance(self.store, Path):
-            raise ValueError(f"Not dropping dataset: store {self.store} is not a Path")
-        if self.store.exists():
-            rmtree(self.store)
+        if isinstance(self.store, Path):
+            if self.store.exists():
+                rmtree(self.store)
+        elif isinstance(self.store, str) and self.store.startswith("s3://"):
+            fs = s3fs.S3FileSystem()
+            # Check if it exists to avoid errors
+            if fs.exists(self.store):
+                print(f"Deleting {self.store}...")
+                fs.rm(self.store, recursive=True)
+                print("Deletion complete.")
+            else:
+                print("Path not found.")
+        else:
+            raise ValueError(
+                f"Not dropping dataset: store {self.store} is not a Path or s3 url"
+            )
 
     def spoof(self, spoof_dir: Path):
         if not isinstance(self.store, Path):
