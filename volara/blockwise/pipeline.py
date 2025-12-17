@@ -137,7 +137,6 @@ class Pipeline:
                 node.drop()
             benchmark_logger.print_report(out_dir)
             set_log_basedir(log_basedir)
-            # sys.exit(0)
 
     def run_blockwise(self, multiprocessing: bool = True):
         with ExitStack() as stack:

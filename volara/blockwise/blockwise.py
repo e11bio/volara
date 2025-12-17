@@ -235,9 +235,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
             logging.info("Running block with config %s..." % config_file)
 
             def run_worker():
-                assert (
-                    self.worker_config is not None
-                )  # TODO: remove this, shouldn't be needed for type checker
                 cmd = self.worker_config.get_command(config_file, self.task_name)
                 return subprocess.run(cmd)
 
