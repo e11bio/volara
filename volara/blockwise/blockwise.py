@@ -401,7 +401,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
     def get_benchmark_logger(self) -> BenchmarkLogger:
         benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
         return BenchmarkLogger(
-            benchmark_db_path if benchmark_db_path.exists() else None,
+            None,
             task=self.task_name,
         )
 
