@@ -167,3 +167,6 @@ volara_logs
 uv.lock
 *.zarr
 volara_benchmark_logs
+*.sqlite
+*.json
+*.npz
