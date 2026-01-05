@@ -205,11 +205,8 @@ class SQLite(DB):
         )
         if nodes:
             spoofed_graph_provider = spoofed_db.open("w")
-            try:
-                graph_provider = self.open("r")
-                spoofed_graph_provider.write_nodes(graph_provider.read_graph().nodes())
-            except RuntimeError:
-                pass
+            graph_provider = self.open("r")
+            spoofed_graph_provider.write_nodes(graph_provider.read_graph().nodes())
         return spoofed_db
 
     def drop_edges(self) -> None:
