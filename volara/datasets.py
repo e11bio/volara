@@ -128,7 +128,7 @@ class Raw(Dataset):
     """
 
     dataset_type: Literal["raw"] = "raw"
-    channels: list[int] | None = None
+    channels: tuple[list[int] | int] | list[int] | None = None
     ome_norm: Path | str | None = None
     scale_shift: tuple[float, float] | None = None
     stack: Dataset | None = None
@@ -201,7 +201,11 @@ class Raw(Dataset):
         if self.scale_shift is not None:
             array.lazy_op(lambda data: scale_shift(data, self.scale_shift))
         if self.channels is not None:
-            array.lazy_op(np.s_[self.channels])
+            if isinstance(self.channels, int):
+                array.lazy_op(np.s_[self.channels])
+            elif isinstance(self.channels, list):
+                for channels in self.channels:
+                    array.lazy_op(np.s_[channels])
         if self.stack is not None:
             array.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
 
