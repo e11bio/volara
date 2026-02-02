@@ -242,7 +242,6 @@ class Raw(Dataset):
             arr.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
 
 
-
 class Affs(Dataset):
     """
     Represents a dataset containing affinities.

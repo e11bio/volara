@@ -1,9 +1,9 @@
-from volara.tmp import replace_values
-
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
+
+from volara.tmp import replace_values
 
 from .utils import StrictBaseModel
 
@@ -38,7 +38,9 @@ class LUT(StrictBaseModel):
             self.file.unlink()
 
     def save(self, lut: np.ndarray, edges=None):
-        np.savez_compressed(self.file, fragment_segment_lut=lut.astype(int), edges=edges)
+        np.savez_compressed(
+            self.file, fragment_segment_lut=lut.astype(int), edges=edges
+        )
 
     def load(self) -> np.ndarray | None:
         if not self.file.exists():
@@ -76,5 +78,7 @@ class LUTS:
         for lut in self.luts[1:]:
             next_map = lut.load()
             if next_map is not None:
-                starting_map[1] = replace_values(starting_map[1], next_map[0], next_map[1])
+                starting_map[1] = replace_values(
+                    starting_map[1], next_map[0], next_map[1]
+                )
         return starting_map

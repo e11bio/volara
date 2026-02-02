@@ -1,12 +1,13 @@
+from pathlib import Path
+
+import numpy as np
 import pytest
 import yaml
-import numpy as np
 import zarr
-from pathlib import Path
 from funlib.geometry import Coordinate
-
-from volara.datasets import Raw, Affs, LSD, Labels
 from pydantic import ValidationError
+
+from volara.datasets import LSD, Affs, Labels, Raw
 
 
 @pytest.fixture
@@ -77,7 +78,7 @@ def test_affs_serialization(tmp_path):
     yaml_data = f"""
     dataset_type: affs
     store: {tmp_path / "affs.zarr"}
-    neighborhood: 
+    neighborhood:
       - [0, 1, 0]
       - [0, 0, 1]
     """
@@ -109,7 +110,7 @@ def test_lazy_channel_slicing(zarr_store):
     assert data.shape == (10, 10)
     assert np.all(data == 1.0)  # Original data was 1s
 
-    ds = Raw(store=zarr_store, channels=[0, [0,2,4,6,8]])
+    ds = Raw(store=zarr_store, channels=[0, [0, 2, 4, 6, 8]])
 
     arr = ds.array()
     data = arr[:]
@@ -117,7 +118,7 @@ def test_lazy_channel_slicing(zarr_store):
     assert data.shape == (5, 10)
     assert np.all(data == 1.0)  # Original data was 1s
 
-    ds = Raw(store=zarr_store, channels=[0, 0, [0,2,4,6,8]])
+    ds = Raw(store=zarr_store, channels=[0, 0, [0, 2, 4, 6, 8]])
 
     arr = ds.array()
     data = arr[:]

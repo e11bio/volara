@@ -399,7 +399,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             yield task
 
     def get_benchmark_logger(self) -> BenchmarkLogger:
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
         return BenchmarkLogger(
             None,
             task=self.task_name,

@@ -1,16 +1,14 @@
-from contextlib import contextmanager
-from typing import Annotated, Literal
-import tempfile
-import itertools
 import functools
+import itertools
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-import time
-from pprint import pprint
+from typing import Annotated, Literal
 
 import daisy
 import mwatershed as mws
-import numpy as np
 import networkx as nx
+import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 
@@ -20,7 +18,6 @@ from volara.tmp import replace_values
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
-from ..datasets import Labels
 
 DB = Annotated[
     PostgreSQL | SQLite,
@@ -313,7 +310,6 @@ class IterativeGraphMWS(BlockwiseTask):
                     both_sides=True,
                 )
 
-                t1 = time.time()
                 edges = []
                 inputs = set(
                     node
@@ -391,7 +387,6 @@ class IterativeGraphMWS(BlockwiseTask):
                     in_group = new_seg_to_frag_mapping.setdefault(int(out_frag), set())
                     in_group.add(int(in_frag))
 
-                t1 = time.time()
                 # save the lut to a temporary file for this block
                 block_lut = LUT(
                     path=f"{tmp_path}/{'-'.join([str(o) for o in block.write_roi.offset])}-lut"
@@ -399,7 +394,6 @@ class IterativeGraphMWS(BlockwiseTask):
                 lut = np.array([inputs, outputs])
                 block_lut.save(lut, edges=edges)
 
-                t1 = time.time()
                 # read luts and existing super fragments in neighboring blocks
                 existing_luts = [
                     LUT(
@@ -420,7 +414,6 @@ class IterativeGraphMWS(BlockwiseTask):
                     + [self.lut],
                 ).load()
 
-                t1 = time.time()
                 frag_seg_mapping: dict[int, int] = {
                     int(k): int(v) for k, v in total_lut.T
                 }
@@ -429,10 +422,8 @@ class IterativeGraphMWS(BlockwiseTask):
                     in_group = seg_frag_mapping.setdefault(out_frag, set())
                     in_group.add(in_frag)
 
-                t1 = time.time()
                 out_graph = out_rag_provider.read_graph(block.read_roi)
 
-                t1 = time.time()
                 for out_seg, in_frags in new_seg_to_frag_mapping.items():
                     agglomerated_attrs = {
                         "size": sum(
@@ -454,7 +445,6 @@ class IterativeGraphMWS(BlockwiseTask):
 
                     out_graph.add_node(int(out_seg), **agglomerated_attrs)
 
-                t1 = time.time()
                 edges_to_agglomerate = {}
                 for u, v in graph.edges():
                     if (
@@ -601,7 +591,6 @@ class GraphMWSExtractFragments(BlockwiseTask):
                     edge_attrs=list(self.weights.keys()),
                 )
 
-                t1 = time.time()
                 edges = []
                 for u, v, edge_attrs in graph.edges(data=True):
                     if (
@@ -630,7 +619,6 @@ class GraphMWSExtractFragments(BlockwiseTask):
                 else:
                     inputs, outputs = [], []
 
-                t1 = time.time()
                 # save the lut to a temporary file for this block
                 block_lut = LUT(
                     path=f"{tmp_path}/{'-'.join([str(o) for o in block.write_roi.offset])}-lut"
@@ -638,7 +626,6 @@ class GraphMWSExtractFragments(BlockwiseTask):
                 lut = np.array([inputs, outputs])
                 block_lut.save(lut, edges=edges)
 
-                t1 = time.time()
                 # read luts and existing super fragments in neighboring blocks
                 existing_luts = [
                     LUT(
@@ -659,7 +646,6 @@ class GraphMWSExtractFragments(BlockwiseTask):
                     + [self.lut],
                 ).load()
 
-                t1 = time.time()
                 frag_seg_mapping: dict[int, int] = {
                     int(k): int(v) for k, v in total_lut.T
                 }
@@ -668,11 +654,9 @@ class GraphMWSExtractFragments(BlockwiseTask):
                     in_group = seg_frag_mapping.setdefault(out_frag, set())
                     in_group.add(in_frag)
 
-                t1 = time.time()
                 out_graph = out_rag_provider.read_graph(block.read_roi)
                 assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
 
-                t1 = time.time()
                 for out_frag in np.unique(outputs):
                     if out_frag is not None and out_frag not in out_graph.nodes:
                         in_group = seg_frag_mapping[out_frag]
@@ -699,7 +683,6 @@ class GraphMWSExtractFragments(BlockwiseTask):
 
                         out_graph.add_node(int(out_frag), **agglomerated_attrs)
 
-                t1 = time.time()
                 edges_to_agglomerate = {}
                 for u, v in graph.edges():
                     if u in frag_seg_mapping and v in frag_seg_mapping:
