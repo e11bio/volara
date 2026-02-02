@@ -53,8 +53,17 @@ class Dataset(StrictBaseModel, ABC):
         Delete this dataset
         """
         if not isinstance(self.store, Path):
-            raise ValueError(f"Not dropping dataset: store {self.store} is not a Path")
-        if self.store.exists():
+            if isinstance(self.store, str) and self.store.startswith("s3://"):
+                # drop an s3 zarr
+                import s3fs
+                fs = s3fs.S3FileSystem()
+                try:
+                    fs.rm(self.store, recursive=True)
+                except FileNotFoundError:
+                    pass
+            else:
+                raise ValueError(f"Not dropping dataset: store {self.store} is not a Path or s3 path")
+        elif self.store.exists():
             rmtree(self.store)
 
     def spoof(self, spoof_dir: Path):
