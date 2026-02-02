@@ -34,6 +34,25 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
+    channels: list[list[int] | int] | int | None = None
+    """
+    We want to be able to subsample channels from a dataset. Specifically
+    we often want to slice away a channel e.g. make a [C,Z,Y,X] dataset
+    into a [Z,Y,X] dataset by selecting only one channel, slice specific
+    channels form a dataset e.g. make a [C,Z,Y,X] dataset into a [C',Z,Y,X],
+    or a combination of the two e.g. make a [T,C,Z,Y,X] dataset into a [C',Z,Y,X]
+    dataset.
+
+    Anything passed in will be passed directly to numpy indexing with `np.s_[]`
+    with the exception of lists which will have each element passed to `np.s_[]`
+    in sequence.
+
+    Valid options are:
+    - 0: `[C,Z,Y,X] -> [Z,Y,X]`
+    - [0,0]: `[T,C,Z,Y,X] -> [Z,Y,X]`
+    - [[0,1,2]]: `[C,Z,Y,X] -> [3,Z,Y,X]`
+    """
+
     zarr_kwargs: dict = Field(default_factory=dict)
 
     @property
@@ -56,13 +75,16 @@ class Dataset(StrictBaseModel, ABC):
             if isinstance(self.store, str) and self.store.startswith("s3://"):
                 # drop an s3 zarr
                 import s3fs
+
                 fs = s3fs.S3FileSystem()
                 try:
                     fs.rm(self.store, recursive=True)
                 except FileNotFoundError:
                     pass
             else:
-                raise ValueError(f"Not dropping dataset: store {self.store} is not a Path or s3 path")
+                raise ValueError(
+                    f"Not dropping dataset: store {self.store} is not a Path or s3 path"
+                )
         elif self.store.exists():
             rmtree(self.store)
 
@@ -115,12 +137,41 @@ class Dataset(StrictBaseModel, ABC):
         )
         array._source_data.attrs.update(self.attrs)
 
+    def lazy_ops(self, arr: Array) -> None:
+        """
+        Apply any lazy operations to the array.
+        By default, does nothing.
+        Subclasses can override this method to apply
+        specific lazy operations.
+        """
+        pass
+
     def array(self, mode: str = "r") -> Array:
         if not self.writable and mode != "r":
             raise ValueError(
                 f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
             )
-        return open_ds(self.store, mode=mode, **self.zarr_kwargs)
+
+        metadata = {
+            "voxel_size": self.voxel_size if self.voxel_size is not None else None,
+            "offset": self.offset if self.offset is not None else None,
+            "axis_names": self.axis_names if self.axis_names is not None else None,
+            "units": self.units if self.units is not None else None,
+        }
+        arr = open_ds(
+            self.store,
+            mode=mode,
+            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
+            **self.zarr_kwargs,
+        )
+        self.lazy_ops(arr)
+        if self.channels is not None:
+            if isinstance(self.channels, list):
+                for channels in self.channels:
+                    arr.lazy_op(np.s_[channels])
+            else:
+                arr.lazy_op(np.s_[self.channels])
+        return arr
 
     @property
     @abstractmethod
@@ -137,7 +188,6 @@ class Raw(Dataset):
     """
 
     dataset_type: Literal["raw"] = "raw"
-    channels: tuple[list[int] | int] | list[int] | None = None
     ome_norm: Path | str | None = None
     scale_shift: tuple[float, float] | None = None
     stack: Dataset | None = None
@@ -159,18 +209,11 @@ class Raw(Dataset):
     @property
     def attrs(self):
         attrs = {}
-        if self.channels is not None:
-            attrs["channels"] = self.channels
         if self.ome_norm:
             attrs["bounds"] = self.bounds
         return attrs
 
-    def array(self, mode="r"):
-        if not self.writable and mode != "r":
-            raise ValueError(
-                f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
-            )
-
+    def lazy_ops(self, arr: Array) -> None:
         def scale_shift(data, scale_shift):
             data = data.astype(np.float32)
             scale, shift = scale_shift
@@ -191,34 +234,13 @@ class Raw(Dataset):
         def stack(data, other_data):
             return np.concatenate([data, other_data], axis=0)
 
-        metadata = {
-            "voxel_size": self.voxel_size if self.voxel_size is not None else None,
-            "offset": self.offset if self.offset is not None else None,
-            "axis_names": self.axis_names if self.axis_names is not None else None,
-            "units": self.units if self.units is not None else None,
-        }
-
-        array = open_ds(
-            self.store,
-            mode=mode,
-            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
-            **self.zarr_kwargs,
-        )
-
         if self.ome_norm:
-            array.lazy_op(lambda data: ome_norm(data, self.bounds))
+            arr.lazy_op(lambda data: ome_norm(data, self.bounds))
         if self.scale_shift is not None:
-            array.lazy_op(lambda data: scale_shift(data, self.scale_shift))
-        if self.channels is not None:
-            if isinstance(self.channels, int):
-                array.lazy_op(np.s_[self.channels])
-            elif isinstance(self.channels, list):
-                for channels in self.channels:
-                    array.lazy_op(np.s_[channels])
+            arr.lazy_op(lambda data: scale_shift(data, self.scale_shift))
         if self.stack is not None:
-            array.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
+            arr.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
 
-        return array
 
 
 class Affs(Dataset):
