@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import daisy
-import polars as pl
 import psutil
 
 
@@ -149,6 +148,8 @@ class BenchmarkLogger:
             yield
 
     def print_report(self, out_dir: Path | None = None):
+        import polars as pl
+
         if out_dir is None:
             out_dir = Path("./volara_benchmark_report")
         if self.conn is not None:
