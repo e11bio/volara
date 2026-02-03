@@ -58,6 +58,13 @@ s3 = [
     "s3fs>=2026.1.0",
 ]
 
+# tests seem to be failing because a dependency of ours fails
+# without some packages installed. These are not used directly
+# by volara.
+indirect = [
+    "pandas>=3.0.0",
+]
+
 [project.scripts]
 volara-cli = "volara.cli:cli"
 
