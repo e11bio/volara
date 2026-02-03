@@ -4,7 +4,7 @@ import daisy
 
 # default log dir
 LOG_BASEDIR = Path("./volara_logs")
-daisy.logging.set_log_basedir(LOG_BASEDIR)  # type: ignore[unresolved-attribute]
+daisy.logging.set_log_basedir(LOG_BASEDIR)
 
 
 def set_log_basedir(path: Path | str):
@@ -24,7 +24,7 @@ def set_log_basedir(path: Path | str):
         raise NotImplementedError("None is not a valid log directory")
         LOG_BASEDIR = None
 
-    daisy.logging.set_log_basedir(LOG_BASEDIR)  # type: ignore[unresolved-attribute]
+    daisy.logging.set_log_basedir(LOG_BASEDIR)
 
 
 def get_log_basedir():

@@ -217,7 +217,7 @@ def test_attrs_affs_validation(tmp_path):
     # Case 3: Mismatch -> Error
     with pytest.raises(ValidationError):
         # Disk has [[0,1], [1,0]], we provide [[5,5]]
-        Affs(store=path, neighborhood=[[5, 5]])
+        Affs(store=path, neighborhood=[Coordinate(5, 5)])
 
 
 def test_attrs_labels_lsd():

@@ -18,7 +18,7 @@ from .relabel import Relabel as Relabel
 from .seeded_extract_frags import SeededExtractFrags as SeededExtractFrags
 from .threshold import Threshold as Threshold
 
-BLOCKWISE_TASKS = []
+BLOCKWISE_TASKS: list[BlockwiseTask] = []
 
 
 def register_task(task: BlockwiseTask):
@@ -57,7 +57,7 @@ def get_blockwise_tasks_type():
         TASKS_DISCOVERED = True
     return TypeAdapter(
         Annotated[
-            Union[tuple(BLOCKWISE_TASKS)],
+            Union[tuple[BLOCKWISE_TASKS]],
             Field(discriminator="task_type"),
         ]
     )

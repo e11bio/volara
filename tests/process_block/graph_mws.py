@@ -56,6 +56,8 @@ def test_graph_mws(tmpdir, y_bias: float):
     with config.process_block_func() as process_block:
         process_block(block)
 
-    fragments, segments = config.lut.load()
+    lut = config.lut.load()
+    assert lut is not None
+    fragments, segments = lut
     assert len(np.unique(fragments)) == 2, fragments
     assert len(np.unique(segments)) == 1 + (y_bias < 0), segments

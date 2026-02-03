@@ -117,7 +117,9 @@ class GraphMWS(BlockwiseTask):
             out_rag_provider = self.out_db.open("w")
 
         if self.starting_lut is not None:
-            starting_frags, starting_segs = self.starting_lut.load()
+            starting_lut = self.starting_lut.load()
+            assert starting_lut is not None, "Unable to load starting LUT"
+            starting_frags, starting_segs = starting_lut
             starting_map = {
                 in_frag: out_frag
                 for in_frag, out_frag in zip(starting_frags, starting_segs)

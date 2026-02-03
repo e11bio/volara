@@ -247,7 +247,7 @@ class PostgreSQL(DB):
             mode=mode,
         )
 
-    def spoof(self):
+    def spoof(self, nodes: bool = True):
         raise NotImplementedError(
             "Spoofing PostgreSQL databases is not implemented yet."
         )

@@ -196,7 +196,7 @@ class Raw(Dataset):
     def bounds(self) -> list[tuple[float, float]] | None:
         if self.ome_norm is not None:
             array = open_ds(self.store, mode="r", **self.zarr_kwargs)
-            metadata_group = zarr.open(self.ome_norm)
+            metadata_group = zarr.open(str(self.ome_norm))
             channels_meta = metadata_group.attrs["omero"]["channels"]
             bounds = [
                 (channels_meta[c]["window"]["min"], channels_meta[c]["window"]["max"])
@@ -339,8 +339,8 @@ class CloudVolumeWrapper(Dataset):
 
         if hasattr(vol, "to_dask") and callable(vol.to_dask):
             return Array(
-                vol.to_dask(),
-                **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument]
+                vol.to_dask(),  # type: ignore
+                **{k: v for k, v in metadata.items() if v is not None},  # type: ignore
             )
         else:
             raise Exception(

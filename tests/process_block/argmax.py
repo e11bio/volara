@@ -36,7 +36,7 @@ def test_argmax(tmpdir):
     # create labels array
     prepare_ds(
         tmpdir / "test_data.zarr" / "labels",
-        shape=probs_data[1:],
+        shape=probs_data.shape[1:],
         voxel_size=Coordinate(1, 1),
         dtype=np.uint32,
         mode="w",
