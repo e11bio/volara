@@ -54,6 +54,9 @@ docs = [
     "jupytext>=1.16.7",
     "pydata-sphinx-theme",
 ]
+s3 = [
+    "s3fs>=2026.1.0",
+]
 
 [project.scripts]
 volara-cli = "volara.cli:cli"

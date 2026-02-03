@@ -414,6 +414,8 @@ class IterativeGraphMWS(BlockwiseTask):
                     + [self.lut],
                 ).load()
 
+                assert isinstance(total_lut, np.ndarray), "LUTs failed to load"
+
                 frag_seg_mapping: dict[int, int] = {
                     int(k): int(v) for k, v in total_lut.T
                 }
@@ -645,6 +647,7 @@ class GraphMWSExtractFragments(BlockwiseTask):
                     + [lut for lut in existing_luts if lut is not None]
                     + [self.lut],
                 ).load()
+                assert isinstance(total_lut, np.ndarray), "LUTs failed to load"
 
                 frag_seg_mapping: dict[int, int] = {
                     int(k): int(v) for k, v in total_lut.T
@@ -791,6 +794,7 @@ class FragSegEdgeAgglom(BlockwiseTask):
                 edge_attrs=self.edge_attrs,
             )
 
+            raise ValueError("Not finished yet")
             frag_seg_mapping = ...
 
             seg_frag_edge_mapping = {}

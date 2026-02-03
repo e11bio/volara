@@ -226,7 +226,8 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         The function defining how workers are started.
         """
-        if self.worker_config is not None:
+        worker_config = self.worker_config
+        if worker_config is not None:
             config_file = self.config_file
 
             with open(config_file, "w") as f:
@@ -235,7 +236,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             logging.info("Running block with config %s..." % config_file)
 
             def run_worker():
-                cmd = self.worker_config.get_command(config_file, self.task_name)
+                cmd = worker_config.get_command(config_file, self.task_name)
                 return subprocess.run(cmd)
 
             return run_worker

@@ -32,6 +32,8 @@ class LUT(StrictBaseModel):
             )
         elif isinstance(self.path, Path):
             return self.path
+        else:
+            raise TypeError(f"Invalid type for path ({self.path}): {type(self.path)}")
 
     def drop(self):
         if self.file.exists():
@@ -59,13 +61,13 @@ class LUT(StrictBaseModel):
 
 class LUTS:
     def __init__(self, luts: LUT | Sequence[LUT]):
-        self.luts = luts if not isinstance(luts, LUT) else [luts]
+        self.luts: Sequence[LUT] = luts if not isinstance(luts, LUT) else [luts]
 
     def __add__(self, other):
         if isinstance(other, LUTS):
             return LUTS(self.luts + other.luts)
         elif isinstance(other, LUT):
-            return LUTS(self.luts + [other])
+            return LUTS(list(self.luts) + [other])
         raise TypeError(f"Cannot add {type(other)} to LUTS")
 
     def load(self):
@@ -75,6 +77,7 @@ class LUTS:
 
     def load_iterated(self):
         starting_map = self.luts[0].load()
+        assert starting_map is not None, "No lookup tables to load"
         for lut in self.luts[1:]:
             next_map = lut.load()
             if next_map is not None:
