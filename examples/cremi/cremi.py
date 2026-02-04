@@ -13,6 +13,10 @@ from pathlib import Path
 
 from funlib.geometry import Coordinate
 
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+
 Path("_static/cremi").mkdir(parents=True, exist_ok=True)
 
 # %% [markdown]
