@@ -1,6 +1,6 @@
 import logging
-from contextlib import contextmanager
-from typing import Annotated, Literal
+from contextlib import contextmanager, nullcontext
+from typing import Annotated, Iterator, Literal
 
 import daisy
 import mwatershed as mws
@@ -111,6 +111,13 @@ class ExtractFrags(BlockwiseTask):
     The seed_eps is the scale to apply to the seed distance transform which is
     then subtracted from the shift. This is useful if increased fragmentation of
     the supervoxels is desired.
+    """
+
+    bulk_write: bool = False
+    """
+    Whether to bulk-write to database (false by default). This removes/rebuilds
+    indexes, and sets other useful flags for writing large amounts of data
+    quickly, which can be useful for large runs to prevent database bottlenecks.
     """
 
     fit: Literal["shrink"] = "shrink"
@@ -383,10 +390,23 @@ class ExtractFrags(BlockwiseTask):
 
                 rag.add_node(int(node), **node_attrs)
 
-            rag_provider.write_graph(
-                rag,
-                block.write_roi,
+            if self.bulk_write:
+                rag_provider.bulk_write_graph(
+                    rag,
+                    block.write_roi,
+                )
+            else:
+                rag_provider.write_graph(
+                    rag,
+                    block.write_roi,
+                )
+
+    def _task_context(self, worker):
+        if self.bulk_write:
+            return self.db.open("r+").bulk_write_mode(
+                worker=worker, node_writes=True, edge_writes=False
             )
+        return nullcontext()
 
     @contextmanager
     def process_block_func(self):
@@ -405,4 +425,19 @@ class ExtractFrags(BlockwiseTask):
                 mask=mask,
             )
 
-        yield process_block
+        with self._task_context(worker=True):
+            yield process_block
+
+    @contextmanager
+    def task(
+        self,
+        upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
+        multiprocessing: bool = True,
+    ) -> Iterator[daisy.Task]:
+
+        # temporary workaround since bulk_write_mode needs to modify the db
+        self.init()
+
+        with self._task_context(worker=False):
+            with super().task(upstream_tasks, multiprocessing) as task:
+                yield task
