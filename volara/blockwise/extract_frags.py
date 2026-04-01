@@ -4,6 +4,7 @@ from typing import Annotated, Iterator, Literal
 
 import daisy
 import mwatershed as mws
+import networkx as nx
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
@@ -378,7 +379,13 @@ class ExtractFrags(BlockwiseTask):
             }
 
         with benchmark_logger.trace("Update RAG"):
-            rag = rag_provider[block.write_roi]
+            if self.bulk_write:
+                # since we drop indexes, the read_graph query has to check each
+                # node for containment which grows with cost as the db grows
+                rag = nx.Graph()
+            else:
+                rag = rag_provider[block.write_roi]
+                assert len(rag) == 0, "RAG should be empty"
 
             for node, data in fragment_centers.items():
                 # centers
