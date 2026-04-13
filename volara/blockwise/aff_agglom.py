@@ -1,8 +1,9 @@
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from itertools import chain
-from typing import Annotated, Callable, Generator, Literal
+from typing import Annotated, Callable, Generator, Iterator, Literal
 
+import daisy
 import networkx as nx
 import numpy as np
 import scipy.ndimage
@@ -67,6 +68,14 @@ class AffAgglom(BlockwiseTask):
         }
 
     """
+
+    bulk_write: bool = False
+    """
+    Whether to bulk-write to database (false by default). This removes/rebuilds
+    indexes, and sets other useful flags for writing large amounts of data
+    quickly, which can be useful for large runs to prevent database bottlenecks.
+    """
+
     fit: Literal["shrink"] = "shrink"
     """
     The boundary behavior for our daisy task.
@@ -214,7 +223,12 @@ class AffAgglom(BlockwiseTask):
 
         with benchmark_logger.trace("Read data in block"):
             frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
-            rag = rag_provider[block.read_roi]
+
+            if self.bulk_write:
+                rag = nx.Graph()
+            else:
+                rag = rag_provider[block.read_roi]
+                assert rag.number_of_edges() == 0, "RAG should contain no edges"
 
             affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
@@ -229,7 +243,17 @@ class AffAgglom(BlockwiseTask):
             )
 
         with benchmark_logger.trace("Write RAG edges"):
-            rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+            if self.bulk_write:
+                rag_provider.bulk_write_graph(rag, block.write_roi, write_nodes=False)
+            else:
+                rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+
+    def _task_context(self, worker):
+        if self.bulk_write:
+            return self.db.open("r+").bulk_write_mode(
+                worker=worker, node_writes=False, edge_writes=True
+            )
+        return nullcontext()
 
     def init(self) -> None:
         self.db.init()
@@ -248,4 +272,19 @@ class AffAgglom(BlockwiseTask):
                 rag_provider,
             )
 
-        yield process_block
+        with self._task_context(worker=True):
+            yield process_block
+
+    @contextmanager
+    def task(
+        self,
+        upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
+        multiprocessing: bool = True,
+    ) -> Iterator[daisy.Task]:
+
+        # temporary workaround since bulk_write_mode needs to modify the db
+        self.init()
+
+        with self._task_context(worker=False):
+            with super().task(upstream_tasks, multiprocessing) as task:
+                yield task
