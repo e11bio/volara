@@ -6,6 +6,7 @@ import daisy
 import mwatershed as mws
 import numpy as np
 from funlib.geometry import Coordinate, Roi
+from funlib.math import cantor_number
 from funlib.persistence import Array
 from pydantic import Field
 from scipy.ndimage import gaussian_filter, label, maximum_filter, measurements
@@ -338,7 +339,13 @@ class ExtractFrags(BlockwiseTask):
             assert max_id < self.num_voxels_in_block, f"max_id: {max_id}"
 
             # ensure unique IDs
-            id_bump = block.block_id[1] * self.num_voxels_in_block
+            id_bump = (
+                cantor_number(
+                    (block.write_roi.offset - self.frags_data.array("r").offset) // block.write_roi.shape
+                )
+                * self.num_voxels_in_block
+            )
+
             fragments_data[fragments_data > 0] += id_bump
 
         with benchmark_logger.trace("Write Fragments"):
