@@ -228,7 +228,12 @@ class AffAgglom(BlockwiseTask):
                 rag = nx.Graph()
             else:
                 rag = rag_provider[block.read_roi]
-                assert rag.number_of_edges() == 0, "RAG should contain no edges"
+                # Note: cannot assert rag.number_of_edges() == 0 — read_roi
+                # extends into neighboring blocks' write_rois (non-zero
+                # context, read_write_conflict=False), so once any neighbor
+                # commits its edges they show up here through the context
+                # overlap. The downstream write_graph(write_roi) filter is
+                # what keeps each edge attributed to a single block.
 
             affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
@@ -244,7 +249,23 @@ class AffAgglom(BlockwiseTask):
 
         with benchmark_logger.trace("Write RAG edges"):
             if self.bulk_write:
-                rag_provider.bulk_write_graph(rag, block.write_roi, write_nodes=False)
+                # In bulk mode the rag's nodes are bare (auto-created by
+                # add_edge), so funlib's bulk_write_edges roi/position
+                # filter would drop every edge — every node looks like
+                # "no position". Filter here by fragment id instead: emit
+                # edge (u, v) iff min(u, v) has voxels in block.write_roi.
+                # Fragments that straddle block boundaries may be emitted
+                # by more than one block; INSERT OR IGNORE in the bulk
+                # insert keeps the first writer's row.
+                write_frags_data = frags.to_ndarray(block.write_roi, fill_value=0)
+                home_ids = {int(i) for i in np.unique(write_frags_data) if i != 0}
+                filtered = nx.Graph()
+                for u, v, data in rag.edges(data=True):
+                    if min(int(u), int(v)) in home_ids:
+                        filtered.add_edge(u, v, **data)
+                rag_provider.bulk_write_edges(
+                    filtered.nodes, filtered.edges, roi=None
+                )
             else:
                 rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
 
