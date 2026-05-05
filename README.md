@@ -45,7 +45,7 @@ To cite this repository please use the following bibtex entry:
 # Getting started
 
 * Volara is available on PyPi and can be installed with `pip install volara`
-* For running inference with pre-trained pytorch models, you can also install [volara-torch](https://github.com/e11bio/volara-torch) with `pip install volara-torch`
+* For running inference with pre-trained pytorch models, you can also install [volara-ml](https://github.com/e11bio/volara-ml) with `pip install volara-ml`
 
 # Useful links
 - [Blog post](https://e11.bio/blog/volara)
