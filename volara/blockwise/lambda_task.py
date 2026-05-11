@@ -11,7 +11,7 @@ from .blockwise import BlockwiseTask
 
 class LambdaTask(BlockwiseTask):
     """
-    Generic blockwise task that applies a lambda function operating, on a numpy array, to a dataset.
+    Generic blockwise task that applies a lambda function, operating on a numpy array, to a dataset.
     """
 
     task_type: Literal["lambda"] = "lambda"
@@ -80,10 +80,10 @@ class LambdaTask(BlockwiseTask):
 
     @contextmanager
     def process_block_func(self):
-        input = self.in_data.array("r")
-        output = self.out_data.array("r+")
+        source = self.in_data.array("r")
+        destination = self.out_data.array("r+")
 
         def process_block(block):
-            output[block.write_roi] = self.lambda_func(input[block.write_roi])
+            destination[block.write_roi] = self.lambda_func(source[block.write_roi])
 
         yield process_block
