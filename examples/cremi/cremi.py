@@ -7,7 +7,7 @@
 # %%
 import multiprocessing as mp
 
-mp.set_start_method("fork", force=True)  # type: ignore[call-arg]
+mp.set_start_method("fork", force=True)  # type: ignore
 # %%
 from pathlib import Path
 
@@ -27,8 +27,8 @@ import matplotlib.pyplot as plt
 
 from volara.datasets import Affs, Raw
 
-raw = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0))  # type: ignore[arg-type]
-affs = Affs(store="sample_A+_20160601.zarr/affs")  # type: ignore[arg-type]
+raw = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0))  # type: ignore
+affs = Affs(store="sample_A+_20160601.zarr/affs")  # type: ignore
 
 fig, axes = plt.subplots(1, 3, figsize=(14, 8))
 
@@ -105,11 +105,11 @@ from volara.lut import LUT
 
 # %%
 fragments_graph = SQLite(
-    path="sample_A+_20160601.zarr/fragments.db",  # type: ignore[arg-type]
+    path="sample_A+_20160601.zarr/fragments.db",  # type: ignore
     edge_attrs={"xy_aff": "float", "z_aff": "float", "lr_aff": "float"},
 )
-fragments_dataset = Labels(store="sample_A+_20160601.zarr/fragments")  # type: ignore[arg-type]
-segments_dataset = Labels(store="sample_A+_20160601.zarr/segments")  # type: ignore[arg-type]
+fragments_dataset = Labels(store="sample_A+_20160601.zarr/fragments")  # type: ignore
+segments_dataset = Labels(store="sample_A+_20160601.zarr/segments")  # type: ignore
 
 # %% [markdown]
 # Now we define the tasks with the parameters we want to use.
@@ -153,7 +153,7 @@ aff_agglom = AffAgglom(
 
 # Run mutex watershed again, this time on the fragment graph with agglomerated edges
 # instead of the voxel graph of affinities
-lut = LUT(path="sample_A+_20160601.zarr/lut.npz")  # type: ignore[arg-type]
+lut = LUT(path="sample_A+_20160601.zarr/lut.npz")  # type: ignore
 total_roi = raw.array("r").roi
 graph_mws = GraphMWS(
     db=fragments_graph,

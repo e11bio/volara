@@ -7,7 +7,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 from scipy.ndimage import laplace
-from scipy.spatial import cKDTree  # type: ignore[unresolved-import]
+from scipy.spatial import cKDTree  # type: ignore
 
 from ..datasets import Dataset, Labels
 from ..dbs import PostgreSQL, SQLite

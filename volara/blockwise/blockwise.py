@@ -257,7 +257,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 client = daisy.Client()
                 # TODO: this shouldn't be necessary, daisy should be doing this for us
                 try:
-                    set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
+                    set_log_basedir(client.context["logdir"])  # type: ignore
                 except KeyError as e:
                     raise ValueError(client.context) from e
                 mark_block_done = self.mark_block_done_func()

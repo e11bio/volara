@@ -1,14 +1,10 @@
-import importlib
-
 import daisy
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
+from volara.blockwise.lambda_task import LambdaTask
 from volara.datasets import Labels, Raw
-
-# `lambda` is a Python keyword; `from volara.blockwise.lambda import` is a syntax error
-LambdaTask = importlib.import_module("volara.blockwise.lambda").LambdaTask
 
 
 def test_lambda_task_init_and_drop(zarr_2d, tmp_path):

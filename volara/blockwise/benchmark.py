@@ -126,7 +126,7 @@ class BenchmarkLogger:
                 mem_after = proc.memory_info()
                 cpu_after = proc.cpu_times()
                 try:
-                    io_after = proc.io_counters()  # type: ignore
+                    io_after = proc.io_counters()
                     io_read = io_after.read_bytes - io_before.read_bytes  # type: ignore
                     io_write = io_after.write_bytes - io_before.write_bytes  # type: ignore
                 except AttributeError:
