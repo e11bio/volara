@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Literal, Callable
+from typing import Callable, Literal
 
 import numpy as np
 from funlib.geometry import Coordinate, Roi
