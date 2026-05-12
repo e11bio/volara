@@ -27,10 +27,13 @@ class LambdaTask(BlockwiseTask):
     """
     The lambda function to apply to your dataset.
     """
+    out_array_dtype: np.dtype | None = None
+    """
+    The dtype of the output array. If None, it will be the same as the input array.
+    """
     block_size: PydanticCoordinate
-    fit: Literal["shrink"] = "shrink"
-    read_write_conflict: Literal[False] = False
-    _out_array_dtype: np.dtype = np.dtype(np.uint8)
+    fit: str = "shrink"
+    read_write_conflict: bool = False
 
     @property
     def task_name(self) -> str:
@@ -63,6 +66,10 @@ class LambdaTask(BlockwiseTask):
         self.out_data.drop()
 
     def init(self):
+        if self.out_array_dtype is not None:
+            self._out_array_dtype = self.out_array_dtype
+        else:
+            self._out_array_dtype = self.in_data.array("r").dtype
         self.init_out_array()
 
     def init_out_array(self):
