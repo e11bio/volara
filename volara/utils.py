@@ -1,7 +1,7 @@
-import cloudpickle
 import pickle
 from typing import Annotated, Any, Callable, Literal
 
+import cloudpickle
 from funlib.geometry import Coordinate, Roi
 from pydantic import (
     BaseModel,
