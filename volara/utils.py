@@ -98,6 +98,8 @@ class _CallablePydanticAnnotation:
         def from_b64(value: str) -> Callable:
             import pickle
 
+            # Safe under the assumption that config files are user-owned (mode 700 tmp dirs).
+            # Do not use in contexts where config files may be written by untrusted parties.
             return pickle.loads(base64.b64decode(value))
 
         def to_b64(func: Callable) -> str:
