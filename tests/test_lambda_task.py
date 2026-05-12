@@ -9,7 +9,7 @@ from funlib.persistence.arrays import prepare_ds
 
 from volara.blockwise.lambda_task import LambdaTask
 from volara.datasets import Labels, Raw
-from volara.workers import LSFWorker, LocalWorker, SlurmWorker
+from volara.workers import LocalWorker, LSFWorker, SlurmWorker
 
 slurm_available = pytest.mark.skipif(
     shutil.which("sbatch") is None or os.environ.get("VOLARA_SLURM_TEST_QUEUE") is None,
