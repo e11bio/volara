@@ -3,7 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
-from typing import Literal, Sequence
+from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
 import zarr
@@ -275,9 +275,9 @@ class Affs(Dataset):
             if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
-                assert np.isclose(neighborhood, self.neighborhood).all(), (
-                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
-                )
+                assert np.isclose(
+                    neighborhood, self.neighborhood
+                ).all(), f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
         else:
             if not provided:
                 raise ValueError(
@@ -361,3 +361,9 @@ class CloudVolumeWrapper(Dataset):
     @property
     def attrs(self):
         return {}
+
+
+PydanticDataset = Annotated[
+    Union[Raw, Affs, LSD, Labels, CloudVolumeWrapper],
+    Field(discriminator="dataset_type"),
+]

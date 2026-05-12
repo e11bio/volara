@@ -9,11 +9,10 @@ import multiprocessing as mp
 
 mp.set_start_method("fork", force=True)  # type: ignore[call-arg]
 # %%
+import logging
 from pathlib import Path
 
 from funlib.geometry import Coordinate
-
-import logging
 
 logging.basicConfig(level=logging.WARNING)
 

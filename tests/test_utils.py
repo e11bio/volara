@@ -1,4 +1,3 @@
-
 from funlib.geometry import Coordinate, Roi
 from pydantic import ValidationError
 
