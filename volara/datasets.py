@@ -73,7 +73,7 @@ class Dataset(StrictBaseModel, ABC):
         if not isinstance(self.store, Path):
             if isinstance(self.store, str) and self.store.startswith("s3://"):
                 # drop an s3 zarr
-                import s3fs  # type: ignore
+                import s3fs  # type: ignore[unresolved-import]
 
                 fs = s3fs.S3FileSystem()
                 try:
@@ -160,7 +160,7 @@ class Dataset(StrictBaseModel, ABC):
         arr = open_ds(
             self.store,
             mode=mode,
-            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore
+            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
             **self.zarr_kwargs,
         )
         self.lazy_ops(arr)
@@ -199,7 +199,7 @@ class Raw(Dataset):
         if self.ome_norm is not None:
             array = open_ds(self.store, mode="r", **self.zarr_kwargs)
             metadata_group = zarr.open_group(str(self.ome_norm))
-            omero: dict = metadata_group.attrs["omero"]  # type: ignore
+            omero: dict = metadata_group.attrs["omero"]  # type: ignore[assignment]
             channels_meta: list[dict] = omero["channels"]
             bounds = [
                 (channels_meta[c]["window"]["min"], channels_meta[c]["window"]["max"])
@@ -242,7 +242,7 @@ class Raw(Dataset):
         if self.scale_shift is not None:
             arr.lazy_op(lambda data: scale_shift(data, self.scale_shift))
         if self.stack is not None:
-            arr.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore
+            arr.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
 
 
 class Affs(Dataset):
@@ -275,9 +275,9 @@ class Affs(Dataset):
             if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
-                assert np.isclose(neighborhood, self.neighborhood).all(), (
-                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
-                )
+                assert np.isclose(
+                    neighborhood, self.neighborhood
+                ).all(), f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
         else:
             if not provided:
                 raise ValueError(
@@ -335,8 +335,8 @@ class CloudVolumeWrapper(Dataset):
         metadata = {
             "axis_names": self.axis_names if self.axis_names is not None else None,
             "units": self.units if self.units is not None else None,
-            "offset": self.offset if self.offset is not None else vol.voxel_offset,  # type: ignore
-            "types": ["space" for _ in range(len(vol.shape) - 1)]  # type: ignore
+            "offset": self.offset if self.offset is not None else vol.voxel_offset,  # type: ignore[unresolved-attribute]
+            "types": ["space" for _ in range(len(vol.shape) - 1)]  # type: ignore[unresolved-attribute]
             + ["channel"],  # last dimension in CV is always channel
         }
 

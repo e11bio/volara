@@ -58,7 +58,7 @@ def get_blockwise_tasks_type():
         TASKS_DISCOVERED = True
     return TypeAdapter(
         Annotated[
-            Union[tuple(BLOCKWISE_TASKS)],  # type: ignore
+            Union[tuple(BLOCKWISE_TASKS)],  # type: ignore[invalid-type-form]
             Field(discriminator="task_type"),
         ]
     )
