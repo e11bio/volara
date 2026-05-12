@@ -1,11 +1,11 @@
 from contextlib import contextmanager
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
-from ..datasets import Dataset
-from ..utils import PydanticCoordinate
+from ..datasets import Dataset, PydanticDataset
+from ..utils import PydanticCallable, PydanticCoordinate
 from .blockwise import BlockwiseTask
 
 
@@ -15,15 +15,15 @@ class LambdaTask(BlockwiseTask):
     """
 
     task_type: Literal["lambda"] = "lambda"
-    in_data: Dataset
+    in_data: PydanticDataset
     """
     The dataset to apply the lambda function to.
     """
-    out_data: Dataset
+    out_data: PydanticDataset
     """
     The output dataset after applying the lambda function.
     """
-    lambda_func: Callable
+    lambda_func: PydanticCallable
     """
     The lambda function to apply to your dataset.
     """

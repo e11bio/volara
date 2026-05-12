@@ -5,6 +5,7 @@ from funlib.persistence.arrays import prepare_ds
 
 from volara.blockwise.lambda_task import LambdaTask
 from volara.datasets import Labels, Raw
+from volara.workers import LocalWorker
 
 
 def test_lambda_task_init_and_drop(zarr_2d, tmp_path):
@@ -78,6 +79,34 @@ def test_lambda_task_multiblock(tmp_path):
     with task.process_block_func() as process_block:
         process_block(block1)
         process_block(block2)
+
+    result = task.out_data.array("r")[:]
+    expected = (data > 0.5).astype(np.uint8)
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_lambda_task_multiprocessing_local_worker(tmp_path):
+    """LambdaTask produces correct output when dispatched to LocalWorker subprocesses."""
+    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
+    in_path = tmp_path / "data.zarr" / "raw"
+    prepare_ds(
+        in_path,
+        shape=data.shape,
+        voxel_size=Coordinate(1, 1),
+        dtype=data.dtype,
+        mode="w",
+    )[:] = data
+
+    out_path = tmp_path / "data.zarr" / "out"
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        block_size=Coordinate(10, 10),
+        num_workers=2,
+        worker_config=LocalWorker(),
+    )
+    task.run_blockwise(multiprocessing=True)
 
     result = task.out_data.array("r")[:]
     expected = (data > 0.5).astype(np.uint8)

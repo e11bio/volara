@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Callable, Literal
 
 from funlib.geometry import Coordinate, Roi
 from pydantic import (
@@ -84,6 +84,46 @@ class _RoiPydanticAnnotation:
 
 
 PydanticRoi = Annotated[Roi, _RoiPydanticAnnotation]
+
+
+class _CallablePydanticAnnotation:
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: Any,
+    ) -> core_schema.CoreSchema:
+        import base64
+
+        def from_b64(value: str) -> Callable:
+            import pickle
+
+            return pickle.loads(base64.b64decode(value))
+
+        def to_b64(func: Callable) -> str:
+            import cloudpickle
+
+            return base64.b64encode(cloudpickle.dumps(func)).decode("utf-8")
+
+        from_b64_schema = core_schema.no_info_plain_validator_function(from_b64)
+
+        def callable_or_b64(value: Any) -> Callable:
+            if callable(value):
+                return value
+            if isinstance(value, str):
+                return from_b64(value)
+            raise ValueError(
+                f"Expected a callable or base64-encoded callable, got {type(value).__name__}"
+            )
+
+        return core_schema.json_or_python_schema(
+            json_schema=from_b64_schema,
+            python_schema=core_schema.no_info_plain_validator_function(callable_or_b64),
+            serialization=core_schema.plain_serializer_function_ser_schema(to_b64),
+        )
+
+
+PydanticCallable = Annotated[Callable, _CallablePydanticAnnotation]
 
 
 class StrictBaseModel(BaseModel):

@@ -3,7 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
-from typing import Literal, Sequence
+from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
 import zarr
@@ -361,3 +361,9 @@ class CloudVolumeWrapper(Dataset):
     @property
     def attrs(self):
         return {}
+
+
+PydanticDataset = Annotated[
+    Union[Raw, Affs, LSD, Labels, CloudVolumeWrapper],
+    Field(discriminator="dataset_type"),
+]
