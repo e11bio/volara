@@ -1,3 +1,5 @@
+import cloudpickle
+import pickle
 from typing import Annotated, Any, Callable, Literal
 
 from funlib.geometry import Coordinate, Roi
@@ -95,16 +97,15 @@ class _CallablePydanticAnnotation:
     ) -> core_schema.CoreSchema:
         import base64
 
-        def from_b64(value: str) -> Callable:
-            import pickle
-
-            # Safe under the assumption that config files are user-owned (mode 700 tmp dirs).
+        def from_b64(
+            value: str,
+        ) -> (
+            Callable
+        ):  # Safe under the assumption that config files are user-owned (mode 700 tmp dirs).
             # Do not use in contexts where config files may be written by untrusted parties.
             return pickle.loads(base64.b64decode(value))
 
         def to_b64(func: Callable) -> str:
-            import cloudpickle
-
             return base64.b64encode(cloudpickle.dumps(func)).decode("utf-8")
 
         from_b64_schema = core_schema.no_info_plain_validator_function(from_b64)

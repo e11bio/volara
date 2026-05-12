@@ -33,6 +33,7 @@ def test_lambda_task_basic(zarr_2d, block_2d, tmp_path):
         out_data=Labels(store=out_path),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
         block_size=Coordinate(10, 10),
+        out_array_dtype=np.dtype(np.uint8),
     )
     task.init()
 
