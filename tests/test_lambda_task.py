@@ -42,6 +42,7 @@ def test_lambda_task_basic(zarr_2d, block_2d, tmp_path):
     result = task.out_data.array("r")[:]
     expected = (data > 0.5).astype(np.uint8)
     np.testing.assert_array_equal(result, expected)
+    assert result.dtype == expected.dtype
 
 
 def test_lambda_task_multiblock(tmp_path):
