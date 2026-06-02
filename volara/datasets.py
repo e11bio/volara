@@ -102,6 +102,7 @@ class Dataset(StrictBaseModel, ABC):
         """
         if not isinstance(self.store, Path):
             if isinstance(self.store, str) and self.store.startswith("s3://"):
+                # drop an s3 zarr
                 fs = self._s3fs()
                 try:
                     fs.rm(self.store, recursive=True)
@@ -124,6 +125,10 @@ class Dataset(StrictBaseModel, ABC):
             spoof_path.parent.mkdir(parents=True, exist_ok=True)
 
         if self.store.exists() and not self.writable:
+            """
+            If the store is not writable, it is an input to some task and we can
+            safely read from it.
+            """
             print("Symlinking", self.store)
             if not spoof_path.exists():
                 spoof_path.symlink_to(self.store.absolute(), target_is_directory=True)
