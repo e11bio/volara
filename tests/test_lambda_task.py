@@ -226,3 +226,135 @@ def test_lambda_task_properties(zarr_2d, tmp_path):
     assert task.write_size == Coordinate(5, 5)
     assert task.output_datasets == [out_data]
     assert task.write_roi == Raw(store=raw_path).array("r").roi
+
+
+def test_lambda_task_init_out_false_skips_prepare_and_drop(tmp_path):
+    """With init_out=False, init() does not create out_data and drop_artifacts() is a no-op.
+
+    pytest tests/test_lambda_task.py::test_lambda_task_init_out_false_skips_prepare_and_drop
+    """
+    data = np.random.default_rng(0).random((10, 10), dtype=np.float32)
+    in_path = tmp_path / "data.zarr" / "raw"
+    prepare_ds(
+        in_path,
+        shape=data.shape,
+        voxel_size=Coordinate(1, 1),
+        dtype=data.dtype,
+        mode="w",
+    )[:] = data
+
+    # Pre-create the output dataset (simulating an already-existing volume)
+    out_path = tmp_path / "data.zarr" / "out"
+    out_data_arr = prepare_ds(
+        out_path,
+        shape=(20, 20),
+        voxel_size=Coordinate(1, 1),
+        dtype=np.uint8,
+        mode="w",
+    )
+    out_data_arr[:] = 0
+
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        init_out=False,
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        block_size=Coordinate(10, 10),
+    )
+
+    # init() should not recreate or overwrite the output
+    task.init()
+    result_shape = task.out_data.array("r").shape
+    assert result_shape == (20, 20), "init_out=False should not recreate the output array"
+
+    # drop_artifacts() should not remove the output
+    task.drop_artifacts()
+    assert out_path.exists(), "init_out=False should not drop the output array"
+
+
+def test_lambda_task_default_block_size_from_out_data(tmp_path):
+    """When block_size is None, write_size defaults to out_data's chunk shape.
+
+    pytest tests/test_lambda_task.py::test_lambda_task_default_block_size_from_out_data
+    """
+    data = np.random.default_rng(0).random((20, 20), dtype=np.float32)
+    in_path = tmp_path / "data.zarr" / "raw"
+    prepare_ds(
+        in_path,
+        shape=data.shape,
+        voxel_size=Coordinate(1, 1),
+        dtype=data.dtype,
+        mode="w",
+    )[:] = data
+
+    # Create output with a specific chunk shape (5, 5)
+    out_path = tmp_path / "data.zarr" / "out"
+    prepare_ds(
+        out_path,
+        shape=(20, 20),
+        voxel_size=Coordinate(1, 1),
+        dtype=np.uint8,
+        chunk_shape=Coordinate(5, 5),
+        mode="w",
+    )
+
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        init_out=False,
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        # block_size intentionally omitted
+    )
+
+    # write_size should be chunk_shape * voxel_size = (5, 5) * (1, 1) = (5, 5)
+    assert task.write_size == Coordinate(5, 5)
+
+
+def test_lambda_task_skips_non_overlapping_blocks(tmp_path):
+    """Blocks outside in_data.roi are skipped without error.
+
+    pytest tests/test_lambda_task.py::test_lambda_task_skips_non_overlapping_blocks
+    """
+    # in_data covers (0,0) to (10,10)
+    data = np.ones((10, 10), dtype=np.float32)
+    in_path = tmp_path / "data.zarr" / "raw"
+    prepare_ds(
+        in_path,
+        shape=data.shape,
+        voxel_size=Coordinate(1, 1),
+        dtype=data.dtype,
+        mode="w",
+    )[:] = data
+
+    # out_data covers (0,0) to (20,20) -- larger than in_data
+    out_path = tmp_path / "data.zarr" / "out"
+    prepare_ds(
+        out_path,
+        shape=(20, 20),
+        voxel_size=Coordinate(1, 1),
+        dtype=np.uint8,
+        mode="w",
+    )
+
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        init_out=False,
+        lambda_func=lambda x: (x * 2).astype(np.uint8),
+        block_size=Coordinate(10, 10),
+    )
+    task.init()
+
+    # Block entirely outside in_data.roi -- should be skipped
+    non_overlapping_block = daisy.Block(
+        total_roi=Roi((0, 0), (20, 20)),
+        read_roi=Roi((10, 10), (10, 10)),
+        write_roi=Roi((10, 10), (10, 10)),
+    )
+
+    with task.process_block_func() as process_block:
+        process_block(non_overlapping_block)
+
+    # The region should remain zeros (untouched)
+    result = task.out_data.array("r")[Roi((10, 10), (10, 10))]
+    np.testing.assert_array_equal(result, np.zeros((10, 10), dtype=np.uint8))
