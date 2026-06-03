@@ -78,7 +78,9 @@ class LambdaTask(BlockwiseTask):
 
     @property
     def voxel_size(self) -> Coordinate:
-        return self.in_data.array("r").voxel_size
+        if self.init_out:
+            return self.in_data.array("r").voxel_size
+        return self.out_data.array("r").voxel_size
 
     @property
     def write_size(self) -> Coordinate:
