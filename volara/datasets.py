@@ -91,6 +91,11 @@ class Dataset(StrictBaseModel, ABC):
 
     @property
     def name(self) -> str:
+        """
+        A name for this dataset. Often it is simply the name of the
+        path provided as the store. We use it to differentiate between
+        multiple runs of the same blockwise task on different data.
+        """
         if isinstance(self.store, Path):
             return self.store.name
         else:
@@ -308,9 +313,9 @@ class Affs(Dataset):
             if not provided:
                 self.neighborhood = list(Coordinate(offset) for offset in neighborhood)
             else:
-                assert np.isclose(
-                    neighborhood, self.neighborhood
-                ).all(), f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
+                assert np.isclose(neighborhood, self.neighborhood).all(), (
+                    f"(Neighborhood metadata) {neighborhood} != {self.neighborhood} (given Neighborhood)"
+                )
         else:
             if not provided:
                 raise ValueError(
