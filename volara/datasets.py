@@ -322,6 +322,7 @@ class CloudVolumeWrapper(Dataset):
     timestamp: int = int(time.time())  # default to current time
     agglomerate: bool = True
     data_name: str | None = None
+    fill_missing: bool = False
 
     def array(self, mode: OpenMode = "r") -> Array:
         vol = CloudVolume(
@@ -330,6 +331,7 @@ class CloudVolumeWrapper(Dataset):
             use_https=True,
             agglomerate=self.agglomerate,
             timestamp=self.timestamp,
+            fill_missing=self.fill_missing,
         )
 
         metadata = {
