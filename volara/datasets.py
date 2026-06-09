@@ -161,6 +161,21 @@ class Dataset(StrictBaseModel, ABC):
         """
         pass
 
+    def _apply_common_lazy_ops(self, arr: Array) -> None:
+        """Apply lazy_ops, channel selection, and lambda_func to the array."""
+        self.lazy_ops(arr)
+        if self.channels is not None:
+            if isinstance(self.channels, list):
+                for channels in self.channels:
+                    if isinstance(channels, list):
+                        arr.lazy_op(lambda d: d[channels])
+                    else:
+                        arr.lazy_op(np.s_[channels])
+            else:
+                arr.lazy_op(np.s_[self.channels])
+        if self.lambda_func is not None:
+            arr.lazy_op(self.lambda_func)
+
     def array(self, mode: OpenMode = "r") -> Array:
         if not self.writable and mode != "r":
             raise ValueError(
@@ -179,18 +194,7 @@ class Dataset(StrictBaseModel, ABC):
             **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
             **self.zarr_kwargs,
         )
-        self.lazy_ops(arr)
-        if self.channels is not None:
-            if isinstance(self.channels, list):
-                for channels in self.channels:
-                    if isinstance(channels, list):
-                        arr.lazy_op(lambda d: d[channels])
-                    else:
-                        arr.lazy_op(np.s_[channels])
-            else:
-                arr.lazy_op(np.s_[self.channels])
-        if self.lambda_func is not None:
-            arr.lazy_op(self.lambda_func)
+        self._apply_common_lazy_ops(arr)
         return arr
 
     @property
@@ -359,7 +363,7 @@ class CloudVolumeWrapper(Dataset):
         }
 
         if hasattr(vol, "to_dask") and callable(vol.to_dask):
-            return Array(
+            arr = Array(
                 vol.to_dask(),  # type: ignore
                 **{k: v for k, v in metadata.items() if v is not None},  # type: ignore
             )
@@ -367,6 +371,8 @@ class CloudVolumeWrapper(Dataset):
             raise Exception(
                 "CloudVolume version does not support to_dask(). Please upgrade cloud-volume package."
             )
+        self._apply_common_lazy_ops(arr)
+        return arr
 
     @property
     def name(self) -> str:
