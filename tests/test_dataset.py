@@ -161,6 +161,50 @@ def test_lazy_stacking(zarr_store, second_zarr_store):
     assert np.all(data[2:4] == 2.0)
 
 
+def test_lazy_lambda_func(zarr_store):
+    """
+    Test that a user-defined lambda_func is applied as a lazy op.
+    Original: 1.0
+    Lambda: multiply by 3
+    Expected: 3.0
+    """
+    ds = Raw(store=zarr_store, lambda_func=lambda d: d * 3)
+    arr = ds.array()
+    data = arr[:]
+
+    assert np.allclose(data, 3.0)
+
+
+def test_lazy_lambda_func_after_channels(zarr_store):
+    """
+    Test that lambda_func is applied after channel selection.
+    Original shape: (2, 10, 10), values=1.0
+    channels=0 -> shape (10, 10), values=1.0
+    lambda_func: multiply by 5 -> values=5.0
+    """
+    ds = Raw(store=zarr_store, channels=0, lambda_func=lambda d: d * 5)
+    arr = ds.array()
+    data = arr[:]
+
+    assert data.shape == (10, 10)
+    assert np.allclose(data, 5.0)
+
+
+def test_lazy_lambda_func_serialization_roundtrip(zarr_store):
+    """
+    Test that a dataset with a lambda_func can be serialized and deserialized
+    (via model_dump / model_validate) and still produce correct results.
+    """
+    ds = Raw(store=zarr_store, lambda_func=lambda d: d * 7)
+    dumped = ds.model_dump()
+    ds_reloaded = Raw(**dumped)
+
+    arr = ds_reloaded.array()
+    data = arr[:]
+
+    assert np.allclose(data, 7.0)
+
+
 # --- Test Category 3: Attributes ---
 
 

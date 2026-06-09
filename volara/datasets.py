@@ -12,7 +12,7 @@ from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from pydantic import Field
 
-from .utils import OpenMode, PydanticCoordinate, StrictBaseModel
+from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -50,6 +50,19 @@ class Dataset(StrictBaseModel, ABC):
     - 0: `[C,Z,Y,X] -> [Z,Y,X]`
     - [0,0]: `[T,C,Z,Y,X] -> [Z,Y,X]`
     - [[0,1,2]]: `[C,Z,Y,X] -> [3,Z,Y,X]`
+    """
+
+    lambda_func: PydanticCallable | None = None
+    """
+    An optional user-defined callable that is applied as a lazy operation
+    when the dataset is opened via :meth:`array`. The callable receives a
+    numpy array and must return a numpy array.  It is applied after all
+    built-in lazy ops (type-specific ops from :meth:`lazy_ops` and channel
+    selection from :attr:`channels`).
+
+    Example::
+
+        ds = Raw(store="data.zarr", lambda_func=lambda d: d.astype(np.float32) / 255)
     """
 
     zarr_kwargs: dict = Field(default_factory=dict)
@@ -173,6 +186,8 @@ class Dataset(StrictBaseModel, ABC):
                         arr.lazy_op(np.s_[channels])
             else:
                 arr.lazy_op(np.s_[self.channels])
+        if self.lambda_func is not None:
+            arr.lazy_op(self.lambda_func)
         return arr
 
     @property
