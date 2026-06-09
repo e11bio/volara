@@ -54,11 +54,15 @@ class Dataset(StrictBaseModel, ABC):
 
     lambda_func: PydanticCallable | None = None
     """
-    An optional user-defined callable that is applied as a lazy operation
-    when the dataset is opened via :meth:`array`. The callable receives a
-    numpy array and must return a numpy array.  It is applied after all
-    built-in lazy ops (type-specific ops from :meth:`lazy_ops` and channel
-    selection from :attr:`channels`).
+    An optional user-defined callable applied as a lazy operation when the dataset is
+    opened via :meth:`array`. The callable receives a numpy array and must return a
+    numpy array. It is applied after all built-in lazy ops (type-specific ops from
+    :meth:`lazy_ops` and channel selection from :attr:`channels`).
+
+    Security note: this callable is serialized/deserialized with cloudpickle (i.e.
+    pickle) via :class:`~volara.utils.PydanticCallable`, so only load configs from
+    trusted sources.
+    """
 
     Example::
 
