@@ -62,7 +62,6 @@ class Dataset(StrictBaseModel, ABC):
     Security note: this callable is serialized/deserialized with cloudpickle (i.e.
     pickle) via :class:`~volara.utils.PydanticCallable`, so only load configs from
     trusted sources.
-    """
 
     Example::
 
