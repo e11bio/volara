@@ -195,10 +195,8 @@ def test_lazy_lambda_func_serialization_roundtrip(zarr_store):
     Test that a dataset with a lambda_func can be serialized and deserialized
     (via model_dump / model_validate) and still produce correct results.
     """
-    ds = Raw(store=zarr_store, lambda_func=lambda d: d * 7)
-    dumped = ds.model_dump()
-    ds_reloaded = Raw(**dumped)
-
+    dumped = ds.model_dump(mode="json")
+    ds_reloaded = Raw.model_validate(dumped)
     arr = ds_reloaded.array()
     data = arr[:]
 
