@@ -127,6 +127,25 @@ def test_lazy_channel_slicing(zarr_store):
     assert np.all(data == 1.0)  # Original data was 1s
 
 
+def test_lazy_channel_slicing_multiple_list_steps(tmp_path):
+    """
+    Test that multiple list-based channel selections are applied in order.
+    """
+    path = tmp_path / "multi_list_channels.zarr"
+    source = np.arange(20, dtype=np.int32).reshape(5, 4)
+    store = zarr.open_array(str(path), mode="w", shape=source.shape, chunks=source.shape)
+    store[:] = source
+    store.attrs["offset"] = (0, 0)
+    store.attrs["voxel_size"] = (1, 1)
+
+    ds = Raw(store=path, channels=[[0, 1, 2, 3], [1, 3]])
+
+    data = ds.array()[:]
+
+    expected = source[[0, 1, 2, 3]][[1, 3]]
+    assert np.array_equal(data, expected)
+
+
 def test_lazy_scale_shift(zarr_store):
     """
     Test that scale_shift lazy op modifies values.
