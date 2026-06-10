@@ -70,6 +70,41 @@ class Dataset(StrictBaseModel, ABC):
 
     zarr_kwargs: dict = Field(default_factory=dict)
 
+    s3_kwargs: dict | None = None
+    """
+    Optional config for S3-compatible stores like Lyve Cloud
+    Leave as None for existing local / standard S3 behavior
+    """
+
+    def _s3fs(self):
+        import s3fs  # type: ignore[unresolved-import]
+
+        if self.s3_kwargs is None:
+            return s3fs.S3FileSystem()
+
+        return s3fs.S3FileSystem(**self.s3_kwargs)
+
+    @property
+    def prepared_store(self):
+        """
+        Return the actual object passed to prepare_ds/open_ds.
+
+        Existing behavior:
+        - Path -> Path
+        - normal s3:// string -> string
+
+        Custom S3 behavior:
+        - s3:// string + s3_kwargs -> fsspec mapper
+        """
+        if (
+            self.s3_kwargs is not None
+            and isinstance(self.store, str)
+            and self.store.startswith("s3://")
+        ):
+            return self._s3fs().get_mapper(self.store, check=False)
+
+        return self.store
+
     @property
     def name(self) -> str:
         """
@@ -80,18 +115,16 @@ class Dataset(StrictBaseModel, ABC):
         if isinstance(self.store, Path):
             return self.store.name
         else:
-            return self.store.split("/")[-1]
+            return self.store.rstrip("/").split("/")[-1]
 
     def drop(self) -> None:
         """
-        Delete this dataset
+        Delete this dataset.
         """
         if not isinstance(self.store, Path):
             if isinstance(self.store, str) and self.store.startswith("s3://"):
                 # drop an s3 zarr
-                import s3fs  # type: ignore[unresolved-import]
-
-                fs = s3fs.S3FileSystem()
+                fs = self._s3fs()
                 try:
                     fs.rm(self.store, recursive=True)
                 except FileNotFoundError:
@@ -106,9 +139,12 @@ class Dataset(StrictBaseModel, ABC):
     def spoof(self, spoof_dir: Path):
         if not isinstance(self.store, Path):
             raise ValueError(f"Not spoofing dataset: store {self.store} is not a Path")
+
         spoof_path = spoof_dir / f"spoof_{self.name}"
+
         if not spoof_path.parent.exists():
             spoof_path.parent.mkdir(parents=True, exist_ok=True)
+
         if self.store.exists() and not self.writable:
             """
             If the store is not writable, it is an input to some task and we can
@@ -138,7 +174,7 @@ class Dataset(StrictBaseModel, ABC):
     ) -> None:
         # prepare ds
         array = prepare_ds(
-            self.store,
+            self.prepared_store,
             shape=shape,
             offset=Coordinate(offset),
             voxel_size=Coordinate(voxel_size),
@@ -189,7 +225,7 @@ class Dataset(StrictBaseModel, ABC):
             "units": self.units if self.units is not None else None,
         }
         arr = open_ds(
-            self.store,
+            self.prepared_store,
             mode=mode,
             **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
             **self.zarr_kwargs,
