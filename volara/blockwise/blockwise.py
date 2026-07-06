@@ -27,6 +27,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _run_blockwise_with_states(tasks):
+    """``daisy.run_blockwise``'s multiprocessing path, but returning daisy's
+    ``{task_id: TaskState}`` map instead of collapsing it to a bool (which hides failed /
+    orphaned blocks). Mirrors ``daisy.convenience._run_blockwise`` and its ThreadPool /
+    stop_event handling so a ``KeyboardInterrupt`` still stops the server cleanly. Defined at
+    module scope because ``BlockwiseTask.run_blockwise``'s ``multiprocessing`` parameter
+    shadows the stdlib module inside the method."""
+    from multiprocessing import Event
+    from multiprocessing.pool import ThreadPool
+
+    from daisy.tcp import IOLooper
+
+    stop_event = Event()
+    IOLooper.clear()
+
+    def _run():
+        server = daisy.Server(stop_event=stop_event)
+        _cl_monitor = CLMonitor(server)  # noqa: F841
+        return server.run_blockwise(tasks)
+
+    with ThreadPool(processes=1) as pool:
+        result = pool.apply_async(_run)
+        try:
+            return result.get()
+        except KeyboardInterrupt:
+            stop_event.set()
+            return result.get()
+
+
 class BlockwiseTask(StrictBaseModel, ABC):
     roi: PydanticRoi | None = None
     """
@@ -469,16 +498,21 @@ class BlockwiseTask(StrictBaseModel, ABC):
     ):
         """
         Execute this task blockwise.
+
+        Returns daisy's ``{task_id: TaskState}`` map for BOTH the multiprocessing and serial
+        paths. Previously the multiprocessing path went through ``daisy.run_blockwise``, which
+        collapses the states to a bool and, worse, reports ``True`` even when blocks failed
+        (``TaskState.is_done()`` counts failed/orphaned blocks as "done"). Returning the states
+        lets callers inspect ``failed_count`` / ``orphaned_count`` / ``is_done()`` and react to
+        an incomplete run instead of silently accepting a partial output.
         """
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]
             if multiprocessing:
-                result = daisy.run_blockwise(tasks)  # noqa
-            else:
-                server = daisy.SerialServer()
-                _cl_monitor = CLMonitor(server)
-                result = server.run_blockwise(tasks)
-            return result
+                return _run_blockwise_with_states(tasks)
+            server = daisy.SerialServer()
+            _cl_monitor = CLMonitor(server)  # noqa: F841
+            return server.run_blockwise(tasks)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """
