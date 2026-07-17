@@ -140,6 +140,15 @@ class Pipeline:
             set_log_basedir(log_basedir)
 
     def run_blockwise(self, multiprocessing: bool = True):
+        """Execute every task in the pipeline.
+
+        Independent subgraphs (combined with ``|``) run concurrently in one daisy scheduling
+        pass; dependency edges (added by ``+``) are honored. Returns daisy's
+        ``{task_id: TaskState}`` map -- matching ``BlockwiseTask.run_blockwise`` -- so callers can
+        inspect ``failed_count`` / ``orphaned_count`` / ``is_done()`` instead of silently accepting
+        a partial run (the previous ``daisy.run_blockwise`` path collapsed the states to a bool
+        that reports ``True`` even when blocks failed).
+        """
         with ExitStack() as stack:
             node_ordering: list[BlockwiseTask] = list(
                 nx.topological_sort(self.task_graph)
@@ -163,11 +172,17 @@ class Pipeline:
             all_tasks = list(task_map.values())
 
             if multiprocessing:
-                daisy.run_blockwise(all_tasks)
+                # Return daisy's {task_id: TaskState} map via the states-returning helper
+                # (mirrors BlockwiseTask.run_blockwise) instead of the bool-collapsing
+                # daisy.run_blockwise, so a Pipeline surfaces failed/orphaned blocks too. Local
+                # import avoids the blockwise<->pipeline module cycle (see TYPE_CHECKING above).
+                from .blockwise import _run_blockwise_with_states
+
+                return _run_blockwise_with_states(all_tasks)
             else:
                 server = daisy.SerialServer()
                 _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
-                server.run_blockwise(all_tasks)
+                return server.run_blockwise(all_tasks)
 
     def drop(self):
         for task in self.task_graph.nodes():
