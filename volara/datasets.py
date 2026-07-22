@@ -360,14 +360,18 @@ class CloudVolumeWrapper(Dataset):
     timestamp: int = int(time.time())  # default to current time
     agglomerate: bool = True
     data_name: str | None = None
+    fill_missing: bool = False
 
     def array(self, mode: OpenMode = "r") -> Array:
+        import dask.array as da
+
         vol = CloudVolume(
             str(self.store),
             mip=self.mip,
             use_https=True,
             agglomerate=self.agglomerate,
             timestamp=self.timestamp,
+            fill_missing=self.fill_missing,
         )
 
         metadata = {
@@ -378,15 +382,37 @@ class CloudVolumeWrapper(Dataset):
             + ["channel"],  # last dimension in CV is always channel
         }
 
-        if hasattr(vol, "to_dask") and callable(vol.to_dask):
-            return Array(
-                vol.to_dask(),  # type: ignore
-                **{k: v for k, v in metadata.items() if v is not None},  # type: ignore
+        # da.from_array indexes from 0, but CloudVolume reads at absolute voxel
+        # coords; shift each spatial slice by voxel_offset so volumes with a
+        # non-zero offset are read at the correct location.
+        offset = tuple(int(o) for o in vol.voxel_offset)  # type: ignore[unresolved-attribute]
+
+        def getitem(a, index):
+            idx = tuple(
+                slice(
+                    (s.start or 0) + (offset[i] if i < len(offset) else 0),
+                    (s.stop if s.stop is not None else a.shape[i])
+                    + (offset[i] if i < len(offset) else 0),
+                    s.step,
+                )
+                if isinstance(s, slice)
+                else s + (offset[i] if i < len(offset) else 0)
+                for i, s in enumerate(index)
             )
-        else:
-            raise Exception(
-                "CloudVolume version does not support to_dask(). Please upgrade cloud-volume package."
-            )
+            return a[idx]
+
+        chunks = tuple(int(c) for c in vol.chunk_size) + (int(vol.num_channels),)  # type: ignore[unresolved-attribute]
+        dask_arr = da.from_array(
+            vol,
+            chunks=chunks,
+            getitem=getitem,
+            meta=np.empty((0,) * len(vol.shape), dtype=vol.dtype),  # type: ignore[unresolved-attribute]
+        )
+
+        return Array(
+            dask_arr,  # type: ignore
+            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore
+        )
 
     @property
     def name(self) -> str:
