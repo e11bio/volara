@@ -204,7 +204,7 @@ class Dataset(StrictBaseModel, ABC):
             if isinstance(self.channels, list):
                 for channels in self.channels:
                     if isinstance(channels, list):
-                        arr.lazy_op(lambda d: d[channels])
+                        arr.lazy_op(lambda d, channels=channels: d[channels])
                     else:
                         arr.lazy_op(np.s_[channels])
             else:
