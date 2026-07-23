@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import daisy
 import networkx as nx
-from daisy.cl_monitor import CLMonitor
 
 from .benchmark import BenchmarkLogger
 
@@ -123,12 +122,9 @@ class Pipeline:
 
                 all_tasks = list(task_map.values())
 
-                if multiprocessing:
-                    daisy.run_blockwise(all_tasks)
-                else:
-                    server = daisy.SerialServer()
-                    _cl_monitor = CLMonitor(server)
-                    server.run_blockwise(all_tasks)
+                # Benchmark discards the result; a single daisy v2 run_blockwise
+                # call handles both the multiprocessing and serial paths.
+                daisy.run_blockwise(all_tasks, multiprocessing=multiprocessing)
 
         except Exception as e:
             logger.exception(e)
@@ -172,17 +168,16 @@ class Pipeline:
             all_tasks = list(task_map.values())
 
             if multiprocessing:
-                # Return daisy's {task_id: TaskState} map via the states-returning helper
-                # (mirrors BlockwiseTask.run_blockwise) instead of the bool-collapsing
-                # daisy.run_blockwise, so a Pipeline surfaces failed/orphaned blocks too. Local
-                # import avoids the blockwise<->pipeline module cycle (see TYPE_CHECKING above).
-                from .blockwise import _run_blockwise_with_states
-
-                return _run_blockwise_with_states(all_tasks)
-            else:
-                server = daisy.SerialServer()
-                _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
-                return server.run_blockwise(all_tasks)
+                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                # map natively (honouring the v1_compat upstream_tasks edges each
+                # task carries), so a Pipeline surfaces failed/orphaned blocks too.
+                return daisy.Server().run_blockwise(all_tasks)
+            # Serial path: module-level run_blockwise returns a bool unless
+            # return_states=True (see daisy._runner); request the states map to
+            # match the distributed path's contract.
+            return daisy.run_blockwise(
+                all_tasks, multiprocessing=False, return_states=True
+            )
 
     def drop(self):
         for task in self.task_graph.nodes():

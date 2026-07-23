@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import daisy
 import numpy as np
-from daisy.block import BlockStatus
-from daisy.cl_monitor import CLMonitor
+from daisy import BlockStatus
 from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
 from funlib.persistence import open_ds, prepare_ds
@@ -27,33 +26,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _run_blockwise_with_states(tasks):
-    """``daisy.run_blockwise``'s multiprocessing path, but returning daisy's
-    ``{task_id: TaskState}`` map instead of collapsing it to a bool (which hides failed /
-    orphaned blocks). Mirrors ``daisy.convenience._run_blockwise`` and its ThreadPool /
-    stop_event handling so a ``KeyboardInterrupt`` still stops the server cleanly. Defined at
-    module scope because ``BlockwiseTask.run_blockwise``'s ``multiprocessing`` parameter
-    shadows the stdlib module inside the method."""
-    from multiprocessing import Event
-    from multiprocessing.pool import ThreadPool
+def _to_daisy_roi(roi: Roi) -> daisy.Roi:
+    """Convert a ``funlib.geometry.Roi`` into a native ``daisy.Roi``.
 
-    from daisy.tcp import IOLooper
-
-    stop_event = Event()
-    IOLooper.clear()
-
-    def _run():
-        server = daisy.Server(stop_event=stop_event)
-        _cl_monitor = CLMonitor(server)  # noqa: F841
-        return server.run_blockwise(tasks)
-
-    with ThreadPool(processes=1) as pool:
-        result = pool.apply_async(_run)
-        try:
-            return result.get()
-        except KeyboardInterrupt:
-            stop_event.set()
-            return result.get()
+    daisy v2's ``Roi``/``Coordinate`` are Rust-backed and are NOT interchangeable
+    with ``funlib.geometry``'s (see daisy's MIGRATION.md). The ``daisy.v1_compat``
+    ``Task`` shim already coerces its ``total_roi``/``read_roi``/``write_roi`` kwargs,
+    but the raw ``daisy.Block`` constructor does not -- so we convert explicitly at
+    every daisy boundary to be robust regardless of which surface is imported."""
+    return daisy.Roi(
+        tuple(int(x) for x in roi.offset), tuple(int(x) for x in roi.shape)
+    )
 
 
 class BlockwiseTask(StrictBaseModel, ABC):
@@ -191,8 +174,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
         A helper function to process a given roi without needing to start a
         whole blockwise job.
         """
+        read_roi = roi if context is None else roi.grow(context, context)
+        # daisy.Block is the raw Rust ctor (NOT shimmed by v1_compat): funlib Rois
+        # must be converted to native daisy.Rois here.
         block = daisy.Block(
-            roi, roi if context is None else roi.grow(context, context), roi
+            _to_daisy_roi(roi), _to_daisy_roi(read_roi), _to_daisy_roi(roi)
         )
         process_block = self.process_block_func()
         process_block(block)
@@ -264,7 +250,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             def run_worker():
                 cmd = worker_config.get_command(config_file, self.task_name)
-                return subprocess.run(cmd)
+                # daisy v2 runs this spawn function in a THREAD and expects it to
+                # BLOCK for the worker's lifetime -- a spawn fn that returns early
+                # is treated as a dead worker and respawned (up to
+                # max_worker_restarts). worker_config.run blocks for the worker's
+                # lifetime (and, for cluster backends, babysits + reaps the
+                # submitted job); a bare subprocess.run(sbatch) fire-and-forgot the
+                # slurm job and would trip the v2 respawn loop. See Worker.run.
+                return worker_config.run(cmd)
 
             return run_worker
 
@@ -403,13 +396,22 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             task = daisy.Task(
                 self.task_name,
-                total_roi=self.write_roi.grow(context_low, context_high),
-                read_roi=self.block_write_roi.grow(context_low, context_high),
-                write_roi=self.block_write_roi,
+                # Convert funlib Rois to native daisy.Rois at the daisy boundary
+                # (see _to_daisy_roi). v1_compat's Task shim also coerces these, but
+                # converting here keeps the boundary explicit and surface-agnostic.
+                total_roi=_to_daisy_roi(
+                    self.write_roi.grow(context_low, context_high)
+                ),
+                read_roi=_to_daisy_roi(
+                    self.block_write_roi.grow(context_low, context_high)
+                ),
+                write_roi=_to_daisy_roi(self.block_write_roi),
                 process_function=process_func,
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
-                num_workers=self.num_workers,
+                # daisy v2 renamed num_workers -> max_workers (v1_compat still
+                # shims num_workers with a DeprecationWarning).
+                max_workers=self.num_workers,
                 check_function=self.check_block_func(),
                 max_retries=2,
                 timeout=None,
@@ -476,11 +478,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
             with debug_self.task(multiprocessing=multiprocessing) as task:
                 tasks = [task]
                 if multiprocessing:
-                    result = daisy.run_blockwise(tasks)  # noqa
+                    # daisy v2 Server.run_blockwise returns the {task_id: TaskState} map.
+                    result = daisy.Server().run_blockwise(tasks)
                 else:
-                    server = daisy.SerialServer()
-                    _cl_monitor = CLMonitor(server)
-                    result = server.run_blockwise(tasks)
+                    result = daisy.run_blockwise(
+                        tasks, multiprocessing=False, return_states=True
+                    )
 
         except Exception as e:
             raise e
@@ -509,10 +512,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]
             if multiprocessing:
-                return _run_blockwise_with_states(tasks)
-            server = daisy.SerialServer()
-            _cl_monitor = CLMonitor(server)  # noqa: F841
-            return server.run_blockwise(tasks)
+                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
+                # states workaround is no longer needed.
+                return daisy.Server().run_blockwise(tasks)
+            # Serial path: module-level run_blockwise returns a bool unless
+            # return_states=True (see daisy._runner), so request the states map to
+            # keep the same {task_id: TaskState} contract as the distributed path.
+            return daisy.run_blockwise(tasks, multiprocessing=False, return_states=True)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """

@@ -24,11 +24,23 @@ class Worker(StrictBaseModel, ABC):
         ]
         return cmd
 
+    def run(self, cmd: list[str]) -> None:
+        """Run ONE worker to completion. MUST block for the worker's lifetime: daisy v2 runs
+        this from the worker's spawn function (in a thread) and treats an early return as a dead
+        worker -> it respawns, up to ``max_worker_restarts``. The base / local backend is a plain
+        child process, which ``subprocess.run`` blocks on and daisy can terminate directly.
+        Cluster backends (slurm/lsf) submit an INDEPENDENT job that is NOT a child of this
+        process, so they MUST override ``run`` to babysit + reap it -- otherwise the job outlives
+        both this call and the driver (see SlurmWorker.run)."""
+        sp.run(cmd)
+
 
 class SlurmWorker(Worker):
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
+    # how often (s) run() polls squeue to detect the worker job finishing
+    poll_interval: float = 15.0
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
@@ -37,7 +49,7 @@ class SlurmWorker(Worker):
         worker_id = context["worker_id"]
         task_id = context["task_id"]
 
-        worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
+        worker_log_basename = daisy.logging.get_worker_log_basename(worker_id, task_id)
 
         log_file = worker_log_basename / "slurm_worker.log"
         log_error = worker_log_basename / "slurm_worker.err"
@@ -46,12 +58,69 @@ class SlurmWorker(Worker):
             command=" ".join(cmd),
             execute=False,
             expand=False,
+            parsable=True,  # sbatch prints just the job id so run() can capture + reap it
+            job_name=task_name,  # name the worker after its task (identifiable in squeue)
             queue=self.queue,
             num_gpus=self.num_gpus,
             num_cpus=self.num_cpus,
             log_file=log_file,
             error_file=log_error,
         )
+
+    def _job_active(self, job_id: str) -> bool:
+        """True while the slurm worker job is still in the queue (pending/running/completing).
+        A squeue error is treated as 'not active' (better to stop babysitting + reap than to
+        poll forever on a broken squeue)."""
+        q = sp.run(["squeue", "-h", "-j", job_id], capture_output=True, text=True)
+        return q.returncode == 0 and job_id in q.stdout
+
+    def run(self, cmd: list[str]) -> None:
+        """Submit the worker as a slurm job and BLOCK until it finishes, scancelling it on
+        completion OR on teardown (SIGTERM from daisy).
+
+        daisy v2 runs this spawn function in a thread and expects it to block for the worker's
+        lifetime. volara previously fire-and-forgot ``sbatch`` (no --wait) and discarded the job
+        id, so ``subprocess.run`` returned the instant the job was queued -- under v2 that reads
+        as a dead worker and triggers a respawn loop, and under either version daisy's
+        ``terminate()`` (which only kills the already-dead local sbatch client) could never reap
+        the actual slurm job. Capturing the id (--parsable) and scancelling it in a ``finally`` +
+        a SIGTERM handler reaps the job on normal completion, daisy teardown, AND driver abort."""
+        import signal
+        import time
+
+        submit = sp.run(cmd, capture_output=True, text=True)
+        if submit.returncode != 0:
+            raise RuntimeError(
+                f"sbatch worker submission failed (rc={submit.returncode}): "
+                f"{submit.stderr.strip()}"
+            )
+        job_id = submit.stdout.strip().split(";")[0]  # --parsable -> "<jobid>[;<cluster>]"
+        logger.info("submitted slurm worker job %s on queue %s", job_id, self.queue)
+
+        class _Terminated(BaseException):
+            pass
+
+        def _on_term(_signum, _frame):
+            raise _Terminated()
+
+        try:
+            prev_handler = signal.signal(signal.SIGTERM, _on_term)
+        except ValueError:
+            # Not the main thread of the process (daisy v2 runs spawn functions in worker
+            # threads) -> cannot install a signal handler; the finally still reaps on normal
+            # completion (the common path) and the run_blockwise teardown sweep (PR#33) is the
+            # backstop for the abort path.
+            prev_handler = None
+
+        try:
+            while self._job_active(job_id):
+                time.sleep(self.poll_interval)
+        except _Terminated:
+            pass  # daisy is tearing this worker down; the finally scancels the (maybe-hung) job
+        finally:
+            sp.run(["scancel", job_id], capture_output=True)  # no-op if the job already exited
+            if prev_handler is not None:
+                signal.signal(signal.SIGTERM, prev_handler)
 
     def is_sbatch_available(self) -> bool:
         try:
@@ -85,6 +154,7 @@ class SlurmWorker(Worker):
         log_file: str | None = None,
         error_file: str | None = None,
         flags: list[str] | None = None,
+        parsable: bool = False,
     ) -> list[str]:
         """
         Prepares and optionally executes a command on a slurm cluster,
@@ -141,6 +211,11 @@ class SlurmWorker(Worker):
         # Initialize the command list with the base sbatch command
         run_command = ["sbatch"]
 
+        # --parsable makes sbatch print ONLY the job id (optionally "<id>;<cluster>") so the
+        # caller can capture it and later scancel the job (worker teardown / leak fix).
+        if parsable:
+            run_command.append("--parsable")
+
         # Job array handling
         if array_size > 1:
             array_cmd = (
@@ -186,7 +261,7 @@ class LSFWorker(Worker):
         worker_id = context["worker_id"]
         task_id = context["task_id"]
 
-        worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
+        worker_log_basename = daisy.logging.get_worker_log_basename(worker_id, task_id)
         if not worker_log_basename.exists():
             worker_log_basename.mkdir(parents=True, exist_ok=True)
 
@@ -268,7 +343,7 @@ class LocalWorker(Worker):
         worker_id = context["worker_id"]
         task_id = context["task_id"]
 
-        worker_log_basename = daisy.get_worker_log_basename(worker_id, task_id)
+        worker_log_basename = daisy.logging.get_worker_log_basename(worker_id, task_id)
 
         _log_file = worker_log_basename / "out.log"
         _log_error = worker_log_basename / "out.err"

@@ -19,7 +19,9 @@ requires-python = ">=3.11"
 
 dependencies = [
     "click>=8.0",
-    "daisy>=1.2.2",
+    # daisy v2 (Rust rewrite) -- pinned to the git v2.0 branch via
+    # [tool.uv.sources] below until 2.0.0 is published to PyPI.
+    "daisy>=2",
     "funlib.geometry>=0.3",
     "funlib.persistence>=0.7.0",
     "mwatershed>=0.5.2",
@@ -70,6 +72,12 @@ s3 = [
 indirect = [
     "pandas>=3.0.0",
 ]
+
+[tool.uv.sources]
+# daisy v2.0.0 is not on PyPI yet; install the Rust-backed package from the
+# funkelab/daisy v2.0 branch. The buildable pyproject (maturin) is at the repo
+# ROOT (python-source = daisy-py/python), so NO #subdirectory is needed.
+daisy = { git = "https://github.com/funkelab/daisy", branch = "v2.0" }
 
 [project.scripts]
 volara-cli = "volara.cli:cli"
