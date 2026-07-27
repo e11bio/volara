@@ -167,26 +167,17 @@ class Pipeline:
 
             all_tasks = list(task_map.values())
 
-            try:
-                if multiprocessing:
-                    # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
-                    # map natively (honouring the v1_compat upstream_tasks edges each
-                    # task carries), so a Pipeline surfaces failed/orphaned blocks too.
-                    return daisy.Server().run_blockwise(all_tasks)
-                # Serial path: module-level run_blockwise returns a bool unless
-                # return_states=True (see daisy._runner); request the states map to
-                # match the distributed path's contract.
-                return daisy.run_blockwise(
-                    all_tasks, multiprocessing=False, return_states=True
-                )
-            finally:
-                # Teardown sweep for EVERY task in the pipeline: reap cluster worker jobs that
-                # outlived the run. daisy has stopped its pools and all blocks are terminal here,
-                # so the name-scoped scancel per node cannot touch in-flight work. No-op for
-                # local workers. See Worker.cleanup.
-                for node in node_ordering:
-                    if node.worker_config is not None:
-                        node.worker_config.cleanup(node.task_name)
+            if multiprocessing:
+                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                # map natively (honouring the v1_compat upstream_tasks edges each
+                # task carries), so a Pipeline surfaces failed/orphaned blocks too.
+                return daisy.Server().run_blockwise(all_tasks)
+            # Serial path: module-level run_blockwise returns a bool unless
+            # return_states=True (see daisy._runner); request the states map to
+            # match the distributed path's contract.
+            return daisy.run_blockwise(
+                all_tasks, multiprocessing=False, return_states=True
+            )
 
     def drop(self):
         for task in self.task_graph.nodes():

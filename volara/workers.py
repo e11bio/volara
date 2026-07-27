@@ -25,33 +25,21 @@ class Worker(StrictBaseModel, ABC):
         return cmd
 
     def run(self, cmd: list[str]) -> None:
-        """Run ONE worker to completion. MUST block for the worker's lifetime: daisy v2 runs
-        this from the worker's spawn function (in a thread) and treats an early return as a dead
-        worker -> it respawns, up to ``max_worker_restarts``. The base / local backend is a plain
-        child process, which ``subprocess.run`` blocks on and daisy can terminate directly.
-        Cluster backends (slurm/lsf) submit an INDEPENDENT job that is NOT a child of this
-        process, so they MUST override ``run`` to babysit + reap it -- otherwise the job outlives
-        both this call and the driver (see SlurmWorker.run)."""
-        sp.run(cmd)
-
-    def cleanup(self, task_name: str) -> None:
-        """Reap any workers for ``task_name`` that outlived the run. Called when a task's
-        ``run_blockwise`` returns (after daisy has stopped its worker pools and every block
-        is terminal, so nothing is in flight to corrupt). Base/local: no-op -- local worker
-        child processes are already gone. Cluster backends (slurm/lsf) submit INDEPENDENT
-        jobs that are NOT children of this process, so daisy's ``terminate()`` cannot reap
-        them; they override ``cleanup`` to scancel/bkill any lingering jobs by name (see
-        SlurmWorker.cleanup). Safety net ON TOP of the per-worker reap in ``run``: it catches
-        workers daisy respawned to maintain a pool for a since-finished task, or that
-        orphaned from their launcher after the run finished."""
+        """Run ONE worker to completion. MUST block for the worker's lifetime: daisy v2's
+        worker accounting (``max_workers``, the start budget, abandonment) tracks the
+        spawn-function call, so a submit-and-return command reads as an instantly-dead
+        worker (see daisy's MIGRATION.md, "blocking-spawn contract"). ``get_command``
+        therefore builds a BLOCKING submission on every backend: a plain child process
+        locally, ``srun`` on slurm, ``bsub -K`` on LSF. A worker that exits non-zero
+        raises, so daisy records the failure (a dirty exit, counted against
+        ``max_worker_restarts``) instead of silently respawning."""
+        sp.run(cmd, check=True)
 
 
 class SlurmWorker(Worker):
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
-    # how often (s) run() polls squeue to detect the worker job finishing
-    poll_interval: float = 15.0
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
@@ -66,10 +54,7 @@ class SlurmWorker(Worker):
         log_error = worker_log_basename / "slurm_worker.err"
 
         return self.get_slurm_command(
-            command=" ".join(cmd),
-            execute=False,
-            expand=False,
-            parsable=True,  # sbatch prints just the job id so run() can capture + reap it
+            command=cmd,
             job_name=task_name,  # name the worker after its task (identifiable in squeue)
             queue=self.queue,
             num_gpus=self.num_gpus,
@@ -78,197 +63,96 @@ class SlurmWorker(Worker):
             error_file=log_error,
         )
 
-    def _job_active(self, job_id: str) -> bool:
-        """True while the slurm worker job is still in the queue (pending/running/completing).
-        A squeue error is treated as 'not active' (better to stop babysitting + reap than to
-        poll forever on a broken squeue)."""
-        q = sp.run(["squeue", "-h", "-j", job_id], capture_output=True, text=True)
-        return q.returncode == 0 and job_id in q.stdout
-
-    def run(self, cmd: list[str]) -> None:
-        """Submit the worker as a slurm job and BLOCK until it finishes, scancelling it on
-        completion OR on teardown (SIGTERM from daisy).
-
-        daisy v2 runs this spawn function in a thread and expects it to block for the worker's
-        lifetime. volara previously fire-and-forgot ``sbatch`` (no --wait) and discarded the job
-        id, so ``subprocess.run`` returned the instant the job was queued -- under v2 that reads
-        as a dead worker and triggers a respawn loop, and under either version daisy's
-        ``terminate()`` (which only kills the already-dead local sbatch client) could never reap
-        the actual slurm job. Capturing the id (--parsable) and scancelling it in a ``finally`` +
-        a SIGTERM handler reaps the job on normal completion, daisy teardown, AND driver abort."""
-        import signal
-        import time
-
-        submit = sp.run(cmd, capture_output=True, text=True)
-        if submit.returncode != 0:
-            raise RuntimeError(
-                f"sbatch worker submission failed (rc={submit.returncode}): "
-                f"{submit.stderr.strip()}"
-            )
-        job_id = submit.stdout.strip().split(";")[0]  # --parsable -> "<jobid>[;<cluster>]"
-        logger.info("submitted slurm worker job %s on queue %s", job_id, self.queue)
-
-        class _Terminated(BaseException):
-            pass
-
-        def _on_term(_signum, _frame):
-            raise _Terminated()
-
-        try:
-            prev_handler = signal.signal(signal.SIGTERM, _on_term)
-        except ValueError:
-            # Not the main thread of the process (daisy v2 runs spawn functions in worker
-            # threads) -> cannot install a signal handler; the finally still reaps on normal
-            # completion (the common path) and the run_blockwise teardown sweep (PR#33) is the
-            # backstop for the abort path.
-            prev_handler = None
-
-        try:
-            while self._job_active(job_id):
-                time.sleep(self.poll_interval)
-        except _Terminated:
-            pass  # daisy is tearing this worker down; the finally scancels the (maybe-hung) job
-        finally:
-            sp.run(["scancel", job_id], capture_output=True)  # no-op if the job already exited
-            if prev_handler is not None:
-                signal.signal(signal.SIGTERM, prev_handler)
-
-    def cleanup(self, task_name: str) -> None:
-        """scancel every worker job named after this task. Workers are submitted with
-        ``--job-name=<task_name>`` (see get_command), so this reaps ANY that survived the run --
-        workers that finished connecting after their run_blockwise server had already shut down
-        and so never received ``block is None`` to self-exit, or workers daisy respawned to
-        maintain a pool for a since-finished task. These leaked until walltime and piled up across
-        stages (the observed ~99-node worker storm); daisy's per-worker ``terminate()`` cannot reap
-        them because the sbatch client it launched exited the instant the job was queued. Called on
-        run_blockwise teardown, after every block is terminal and daisy has stopped its pools, so a
-        name-scoped scancel cannot interrupt in-flight work. A no-op if nothing matches. This is the
-        automation of the manual ``scancel --name`` operators were running by hand."""
-        sp.run(["scancel", "--name", task_name], capture_output=True)
-
-    def is_sbatch_available(self) -> bool:
+    def is_srun_available(self) -> bool:
         try:
             _result = sp.run(
-                ["sbatch", "--version"], capture_output=True, text=True, check=True
+                ["srun", "--version"], capture_output=True, text=True, check=True
             )
             # successful, return True
             return True
         except sp.CalledProcessError as e:
             # errors in the subprocess
-            raise RuntimeError(f"sbatch failed to execute: {e}") from e
+            raise RuntimeError(f"srun failed to execute: {e}") from e
         except FileNotFoundError:
-            # sbatch is not found in the system's PATH
+            # srun is not found in the system's PATH
             raise EnvironmentError(
-                "sbatch is not installed or not in PATH. Either install sbatch on your cluster, or run locally."
+                "srun is not installed or not in PATH. Either install slurm on your cluster, or run locally."
             )
 
     def get_slurm_command(
         self,
-        command: str,
+        command: list[str],
         num_cpus: int = 1,
         num_gpus: int = 0,
         memory: int = 15564,
         constraint: str = "",
         queue: str = "",
-        execute: bool = False,
-        expand: bool = True,
         job_name: str = "",
-        array_size: int = 1,
-        array_limit: int | None = None,
-        log_file: str | None = None,
-        error_file: str | None = None,
+        log_file: str | Path | None = None,
+        error_file: str | Path | None = None,
         flags: list[str] | None = None,
-        parsable: bool = False,
     ) -> list[str]:
         """
-        Prepares and optionally executes a command on a slurm cluster,
+        Build the ``srun`` line that runs one worker as a slurm job.
+
+        ``srun`` rather than ``sbatch``: it submits AND blocks for the job's lifetime,
+        which is daisy v2's spawn contract (see ``Worker.run``) -- ``sbatch`` returns at
+        queue time, so daisy saw every worker as instantly dead, could never reap the
+        real job (terminating the long-gone sbatch client), and leaked workers until
+        walltime. ``srun`` also ties the job to the client: cancelling/killing the driver
+        cancels the job steps with it, so worker jobs cannot outlive the run. Note that
+        ``srun`` inside an existing slurm allocation starts a step WITHIN that
+        allocation rather than submitting a new job -- drivers that themselves run as
+        slurm jobs must request resources for their workers up front.
 
         Args:
-            command (str): The command to be executed within the Slurm job.
+            command (list[str]): The worker command to run inside the slurm job.
             num_cpus (int, optional): Number of CPU cores per task. Defaults to 1.
             num_gpus (int, optional): Number of GPUs required. Defaults to 0.
             memory (int, optional): Memory allocation (in MB) for the job. Defaults
-                to 25600.
+                to 15564.
             constraint (str, optional): Constraint specification for job
                 execution. Defaults to "".
             queue (str, optional): Name of the Slurm partition (queue) to submit the
                 job. Defaults to "".
-            execute (bool, optional): Whether to execute the command or just return
-                the command. Defaults to False.
-            expand (bool, optional): Returns a string if True, and a list if False.
-                Defaults to True.
             job_name (str, optional): Name assigned to the Slurm job. Defaults to "".
-            array_size (int, optional): If greater than 1, submits a job array of
-                this size. Defaults to 1.
-            array_limit (int | None, optional): Limits the number of
-                simultaneously running tasks in the job array. Defaults to None.
-            log_file (str | None, optional): Path for standard output logging.
+            log_file (str | Path | None, optional): Path for standard output logging.
                 Defaults to None.
-            error_file (str | None, optional): Path for standard error logging.
+            error_file (str | Path | None, optional): Path for standard error logging.
                 Defaults to None.
-            flags (list[str] | None, optional): Additional sbatch flags as a
+            flags (list[str] | None, optional): Additional srun flags as a
                 list. Defaults to None.
 
         Returns:
-            str | list[str] | None: Depending on `execute` and `expand`,
-                returns the job ID (if executed), the constructed command as a string or
-                list, or None if an error occurred.
+            list[str]: The srun command, ready for ``Worker.run``.
         """
 
         # TODO: raises exception on failure. Maybe handle this gracefully?
-        self.is_sbatch_available()
+        self.is_srun_available()
 
-        if execute:
-            logging.info(
-                f"Scheduling job on {num_cpus} CPUs, {num_gpus} GPUs with {memory} MB on queue {queue}"
-            )
+        run_command = ["srun"]
 
-        log = f"--output={log_file}" if log_file else "--output=%x_%j.log"
-        error = f"--error={error_file}" if error_file else "--error=%x_%j.err"
-
-        use_gpus = f"--gpus={num_gpus}" if num_gpus > 0 else ""
-        use_constraint = (
-            f"--constraint={constraint}" if constraint and constraint != "None" else ""
-        )
-        job_name_cmd = f"--job-name={job_name}" if job_name else ""
-
-        # Initialize the command list with the base sbatch command
-        run_command = ["sbatch"]
-
-        # --parsable makes sbatch print ONLY the job id (optionally "<id>;<cluster>") so the
-        # caller can capture it and later scancel the job (worker teardown / leak fix).
-        if parsable:
-            run_command.append("--parsable")
-
-        # Job array handling
-        if array_size > 1:
-            array_cmd = (
-                f"--array=1-{array_size}{f'%{array_limit}' if array_limit else ''}"
-            )
-            run_command.append(array_cmd)
-
-        # Append job name, CPU, GPU, memory, queue, and constraint constraints to the command
-        if job_name_cmd:
-            run_command.append(job_name_cmd)
+        if job_name:
+            run_command.append(f"--job-name={job_name}")
         run_command.append(f"--cpus-per-task={num_cpus}")
-        if use_gpus:
-            run_command.append(use_gpus)
+        if num_gpus > 0:
+            run_command.append(f"--gpus={num_gpus}")
         run_command.append(f"--mem={memory}")
         if queue:
             run_command.append(f"--partition={queue}")
-        if use_constraint:
-            run_command.append(use_constraint)
+        if constraint and constraint != "None":
+            run_command.append(f"--constraint={constraint}")
 
-        # Append log and error file paths to the command
-        run_command.append(log)
-        run_command.append(error)
+        run_command.append(f"--output={log_file}" if log_file else "--output=%x_%j.log")
+        run_command.append(
+            f"--error={error_file}" if error_file else "--error=%x_%j.err"
+        )
 
-        # Append additional flags if provided
         if flags:
             run_command.extend(flags)
 
-        # Append the command to be executed within the job
-        run_command.append(f"--wrap={command}")
+        # srun takes the worker command directly (no sbatch-style --wrap)
+        run_command.extend(command)
 
         return run_command
 
@@ -294,6 +178,7 @@ class LSFWorker(Worker):
 
         return self.get_lsf_command(
             command=cmd,
+            job_name=task_name,  # name the worker after its task (identifiable in bjobs)
             queue=self.queue,
             num_cpus=self.num_cpus,
             num_gpus=self.num_gpus,
@@ -321,18 +206,26 @@ class LSFWorker(Worker):
         num_cpus: int = 1,
         num_gpus: int = 0,
         queue: str = "",
+        job_name: str = "",
         log_file: str | None = None,
         error_file: str | None = None,
     ) -> list[str]:
         """
-        Prepares and optionally executes a command on an LSF cluster,
+        Build the ``bsub -K`` line that runs one worker as an LSF job.
+
+        ``-K`` makes bsub submit AND block until the job finishes, which is daisy v2's
+        spawn contract (see ``Worker.run``) -- a plain ``bsub`` returns at queue time,
+        so daisy saw every worker as instantly dead and the real job leaked until
+        walltime (same fire-and-forget bug as slurm's ``sbatch``, fixed there with
+        ``srun``).
 
         Args:
-            command (str): The command to be executed within the LSF job.
+            command (list[str]): The command to be executed within the LSF job.
             num_cpus (int, optional): Number of CPU cores per task. Defaults to 1.
             num_gpus (int, optional): Number of GPUs required. Defaults to 0.
             queue (str, optional): Name of the LSF queue to submit the job.
                 Defaults to "".
+            job_name (str, optional): Name assigned to the LSF job. Defaults to "".
             log_file (str | None, optional): Path for standard output logging.
                 Defaults to None.
             error_file (str | None, optional): Path for standard error logging.
@@ -343,8 +236,11 @@ class LSFWorker(Worker):
         log = ["-o", str(log_file)] if log_file is not None else []
         error = ["-e", str(error_file)] if error_file is not None else []
 
-        run_command = ["bsub"]
+        # -K: submit and wait for the job to complete (the blocking-spawn contract)
+        run_command = ["bsub", "-K"]
 
+        if job_name:
+            run_command.extend(["-J", job_name])
         run_command.extend(["-n", str(num_cpus)])
         if num_gpus > 0:
             run_command.extend(["-num-gpus", str(num_gpus)])

@@ -12,8 +12,8 @@ from volara.datasets import Labels, Raw
 from volara.workers import LocalWorker, LSFWorker, SlurmWorker
 
 slurm_available = pytest.mark.skipif(
-    shutil.which("sbatch") is None or os.environ.get("VOLARA_SLURM_TEST_QUEUE") is None,
-    reason="sbatch not found or VOLARA_SLURM_TEST_QUEUE not set",
+    shutil.which("srun") is None or os.environ.get("VOLARA_SLURM_TEST_QUEUE") is None,
+    reason="srun not found or VOLARA_SLURM_TEST_QUEUE not set",
 )
 lsf_available = pytest.mark.skipif(
     shutil.which("bsub") is None or os.environ.get("VOLARA_LSF_TEST_QUEUE") is None,
@@ -265,7 +265,9 @@ def test_lambda_task_init_out_false_skips_prepare_and_drop(tmp_path):
     # init() should not recreate or overwrite the output
     task.init()
     result_shape = task.out_data.array("r").shape
-    assert result_shape == (20, 20), "init_out=False should not recreate the output array"
+    assert result_shape == (20, 20), (
+        "init_out=False should not recreate the output array"
+    )
 
     # drop_artifacts() should not remove the output
     task.drop_artifacts()
