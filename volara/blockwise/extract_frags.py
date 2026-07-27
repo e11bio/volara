@@ -117,6 +117,13 @@ class ExtractFrags(BlockwiseTask):
     then subtracted from the shift. This is useful if increased fragmentation of
     the supervoxels is desired.
     """
+    max_seed_decay_distance: int | None = None
+    """
+    If using seeds and `seed_eps` is set, optionally cap the seed distance
+    transform used for affinity decay. This prevents the decay from growing
+    without bound deep inside large objects, which can otherwise lead to
+    unlabeled (`0`) interiors. If None, no cap is applied.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -272,7 +279,12 @@ class ExtractFrags(BlockwiseTask):
 
             if self.seed_eps is not None:
                 D = distance_transform_edt(seeds == 0)
+
+                if self.max_seed_decay_distance is not None:
+                    D = np.minimum(D, self.max_seed_decay_distance)
+
                 shift -= self.seed_eps * D
+
         else:
             seeds = None
 
@@ -344,6 +356,7 @@ class ExtractFrags(BlockwiseTask):
 
             # ensure unique IDs
             id_bump = block.block_id[1] * self.num_voxels_in_block
+
             fragments_data[fragments_data > 0] += id_bump
 
         with benchmark_logger.trace("Write Fragments"):
