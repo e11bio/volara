@@ -20,7 +20,6 @@ needs a slurm install (run those with ``-m slurm``); none currently do.
 
 import os
 import stat
-import subprocess as sp
 
 import pytest
 

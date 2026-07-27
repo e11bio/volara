@@ -8,8 +8,13 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
 from pydantic import Field
-from scipy.ndimage import gaussian_filter, label, maximum_filter, measurements
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import (
+    distance_transform_edt,
+    gaussian_filter,
+    label,
+    maximum_filter,
+    measurements,
+)
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
 
