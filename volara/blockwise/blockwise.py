@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import subprocess
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -261,11 +262,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 # daisy v2 runs this spawn function in a THREAD and expects it to
                 # BLOCK for the worker's lifetime -- a spawn fn that returns early
                 # is treated as a dead worker and respawned (up to
-                # max_worker_restarts). worker_config.run blocks for the worker's
-                # lifetime (and, for cluster backends, babysits + reaps the
-                # submitted job); a bare subprocess.run(sbatch) fire-and-forgot the
-                # slurm job and would trip the v2 respawn loop. See Worker.run.
-                return worker_config.run(cmd)
+                # max_worker_restarts). get_command therefore builds a blocking
+                # submission on every backend (local child process, srun, bsub -K);
+                # a fire-and-forget submit (bare sbatch/bsub) would trip the v2
+                # respawn loop and leak the real cluster job.
+                return subprocess.run(cmd)
 
             return run_worker
 
@@ -515,25 +516,15 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]
-            try:
-                if multiprocessing:
-                    # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
-                    # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
-                    # states workaround is no longer needed.
-                    return daisy.Server().run_blockwise(tasks)
-                # Serial path: module-level run_blockwise returns a bool unless
-                # return_states=True (see daisy._runner), so request the states map to
-                # keep the same {task_id: TaskState} contract as the distributed path.
-                return daisy.run_blockwise(
-                    tasks, multiprocessing=False, return_states=True
-                )
-            finally:
-                # Teardown sweep: reap any cluster worker jobs that outlived the run. daisy has
-                # already stopped its pools and every block is terminal here, so a name-scoped
-                # scancel cannot touch in-flight work. Workers are named after the task, so the
-                # sweep is scoped to this task's jobs. No-op for local workers. See Worker.cleanup.
-                if self.worker_config is not None:
-                    self.worker_config.cleanup(self.task_name)
+            if multiprocessing:
+                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
+                # states workaround is no longer needed.
+                return daisy.Server().run_blockwise(tasks)
+            # Serial path: module-level run_blockwise returns a bool unless
+            # return_states=True (see daisy._runner), so request the states map to
+            # keep the same {task_id: TaskState} contract as the distributed path.
+            return daisy.run_blockwise(tasks, multiprocessing=False, return_states=True)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """

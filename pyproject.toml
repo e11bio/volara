@@ -109,8 +109,8 @@ lint.select = ["F", "W", "I001"]
 
 [tool.pytest.ini_options]
 markers = [
-    "slurm: test requires a real slurm installation (sbatch/scancel/squeue on PATH). Deselected by default; run with `-m slurm`.",
+    "slurm: test requires a real slurm installation (srun on PATH). Deselected by default; run with `-m slurm`.",
 ]
-# Skip slurm-gated tests unless explicitly requested. The worker-teardown tests spoof the
-# slurm binaries via PATH shims and so are NOT marked slurm -- they run everywhere.
+# Skip slurm-gated tests unless explicitly requested. The worker tests spoof the
+# cluster binaries via PATH shims and so are NOT marked slurm -- they run everywhere.
 addopts = "-m 'not slurm'"
