@@ -1,18 +1,16 @@
 """Workers must satisfy daisy v2's blocking-spawn contract.
 
 daisy v2's worker accounting (``max_workers``, the start budget, abandonment) tracks the
-spawn-function call: while the spawned worker command is running, that worker slot counts
-as alive; when it returns, the slot is considered dead and eligible for replacement (see
-daisy's MIGRATION.md, "blocking-spawn contract"). volara previously fire-and-forgot
-``sbatch`` (the client exits the instant the job is queued), so daisy could never reap
-the real slurm job and any worker that did not cleanly self-exit leaked until walltime,
-piling up across stages (the observed ~99-node worker storm, reaped by hand with
-``scancel --name``).
+spawn-function call: while ``Worker.run`` is running, that worker slot counts as alive;
+when it returns, the slot is considered dead and eligible for replacement (see daisy's
+MIGRATION.md, "blocking-spawn contract"). volara previously fire-and-forgot ``sbatch``
+(the client exits the instant the job is queued), so daisy could never reap the real
+slurm job and any worker that did not cleanly self-exit leaked until walltime, piling up
+across stages (the observed ~99-node worker storm, reaped by hand with ``scancel --name``).
 
-The fix is to make every backend's submission command ITSELF block for the worker's
-lifetime -- ``run_worker`` stays a plain ``subprocess.run(cmd)``: a child process
-locally, ``srun`` on slurm (which also ties the job to the client: cancelling the driver
-cancels the steps), and ``bsub -K`` on LSF.
+The fix is to make every backend's submission command itself block for the worker's
+lifetime: a plain child process locally, ``srun`` on slurm (which also ties the job to
+the client: cancelling the driver cancels the steps), and ``bsub -K`` on LSF.
 
 These tests need NO real cluster: fake ``srun``/``bsub`` executables are prepended to
 ``PATH`` so the availability probes succeed and command construction runs for real. A
@@ -22,6 +20,7 @@ needs a slurm install (run those with ``-m slurm``); none currently do.
 
 import os
 import stat
+import subprocess as sp
 
 import pytest
 
@@ -45,6 +44,21 @@ def cluster_shims(tmp_path, monkeypatch):
         script.write_text(f"#!/usr/bin/env bash\n{body}\n")
         script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_run_blocks_for_the_workers_lifetime(tmp_path):
+    """Worker.run must not return until the worker command has finished (daisy treats
+    an early return as a dead worker and respawns, up to max_worker_restarts)."""
+    marker = tmp_path / "worker_finished"
+    workers.LocalWorker().run(["bash", "-c", f"sleep 0.2 && touch '{marker}'"])
+    assert marker.exists(), "run() returned before the worker command completed"
+
+
+def test_run_raises_on_worker_failure():
+    """A non-zero worker exit must raise so daisy records it as a dirty worker exit
+    (counted against max_worker_restarts) instead of a silent clean death."""
+    with pytest.raises(sp.CalledProcessError):
+        workers.LocalWorker().run(["bash", "-c", "exit 3"])
 
 
 def test_slurm_command_is_blocking_srun(cluster_shims):
