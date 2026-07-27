@@ -26,19 +26,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _to_daisy_roi(roi: Roi) -> daisy.Roi:
-    """Convert a ``funlib.geometry.Roi`` into a native ``daisy.Roi``.
-
-    daisy v2's ``Roi``/``Coordinate`` are Rust-backed and are NOT interchangeable
-    with ``funlib.geometry``'s (see daisy's MIGRATION.md). The ``daisy.v1_compat``
-    ``Task`` shim already coerces its ``total_roi``/``read_roi``/``write_roi`` kwargs,
-    but the raw ``daisy.Block`` constructor does not -- so we convert explicitly at
-    every daisy boundary to be robust regardless of which surface is imported."""
-    return daisy.Roi(
-        tuple(int(x) for x in roi.offset), tuple(int(x) for x in roi.shape)
-    )
-
-
 class BlockwiseTask(StrictBaseModel, ABC):
     roi: PydanticRoi | None = None
     """
@@ -184,11 +171,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         whole blockwise job.
         """
         read_roi = roi if context is None else roi.grow(context, context)
-        # daisy.Block is the raw Rust ctor (NOT shimmed by v1_compat): funlib Rois
-        # must be converted to native daisy.Rois here.
-        block = daisy.Block(
-            _to_daisy_roi(roi), _to_daisy_roi(read_roi), _to_daisy_roi(roi)
-        )
+        block = daisy.Block(roi, read_roi, roi)
         process_block = self.process_block_func()
         process_block(block)
 
@@ -405,14 +388,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             task = daisy.Task(
                 self.task_name,
-                # Convert funlib Rois to native daisy.Rois at the daisy boundary
-                # (see _to_daisy_roi). v1_compat's Task shim also coerces these, but
-                # converting here keeps the boundary explicit and surface-agnostic.
-                total_roi=_to_daisy_roi(self.write_roi.grow(context_low, context_high)),
-                read_roi=_to_daisy_roi(
-                    self.block_write_roi.grow(context_low, context_high)
-                ),
-                write_roi=_to_daisy_roi(self.block_write_roi),
+                total_roi=self.write_roi.grow(context_low, context_high),
+                read_roi=self.block_write_roi.grow(context_low, context_high),
+                write_roi=self.block_write_roi,
                 process_function=process_func,
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
