@@ -63,12 +63,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
     """
     block_timeout: float | None = None
     """
-    Per-block timeout in seconds. daisy v2 always applies a timeout (there is no
-    "unlimited" option); leaving this ``None`` preserves daisy 1.x's effectively
-    unbounded behaviour by mapping to a large finite value (24h). Set an explicit
-    (positive) value to have daisy reclaim a stuck block's worker sooner. Note that
-    thread/spawn workers cannot be preempted by the timeout (the reclaimed block's
-    thread keeps running); the timeout only unblocks the scheduler.
+    Per-block timeout in seconds. ``None`` (the default) delegates to daisy's
+    default (600s). daisy v2 always enforces a timeout -- there is no "unlimited"
+    option -- so blocks should be sized to process well within it; a task whose
+    single block legitimately runs long (e.g. the global mutex watershed) must set
+    an explicit large value instead (see ``GraphMWS``). When a block exceeds the
+    timeout daisy reclaims it and retries under ``max_retries``.
     """
 
     def __hash__(self):
