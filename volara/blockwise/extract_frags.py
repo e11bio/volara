@@ -21,6 +21,12 @@ from .blockwise import BlockwiseTask
 
 logger = logging.getLogger(__file__)
 
+# Module-level generator so the affinity noise can be made reproducible for
+# benchmarking / testing (`extract_frags._rng = np.random.default_rng(seed)`).
+# The previous code called the unseeded global `np.random.randn`, which made
+# fragment output non-reproducible run to run with no way to pin it.
+_rng = np.random.default_rng()
+
 
 class ExtractFrags(BlockwiseTask):
     """
@@ -113,6 +119,27 @@ class ExtractFrags(BlockwiseTask):
     the supervoxels is desired.
     """
 
+    optimized: bool = False
+    """
+    Use the optimized implementations of the affinity-shift construction, the
+    fragment filter, and the fragment centroids. Produces the same fragments and
+    node attributes as the original code, just faster and with a much smaller
+    memory footprint:
+
+    - noise generated directly into `shift`, affinities folded in in place, and
+      the redundant `.astype(np.float64)` copy dropped -- the original allocated
+      up to six full (C, Z, Y, X) float64 volumes per block, this holds two
+    - per-fragment mean affinity and centroids via `np.bincount` instead of
+      `scipy.ndimage.mean` / `center_of_mass`, which rescan the whole volume per
+      label
+
+    Note the optimized path draws noise from the module-level `_rng`, which can
+    be seeded (`extract_frags._rng = np.random.default_rng(0)`); the original
+    path uses the unseeded global `np.random` and cannot be made reproducible.
+
+    Defaults to False to the original behavior. Set True to compare.
+    """
+
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
     _out_array_dtype: np.dtype = np.dtype(np.uint64)
@@ -170,22 +197,52 @@ class ExtractFrags(BlockwiseTask):
         )
 
     def filter_avg_fragments(self, affs, fragments_data, filter_value):
-        # tmp (think about this)
-        average_affs = np.mean(affs[0:3], axis=0)
+        # Average over the direct-neighbour offsets only. Those are the first
+        # `ndim` entries of the neighborhood (one per axis), so take the slice
+        # from the neighborhood's dimensionality rather than hardcoding 3 --
+        # otherwise a 2D neighborhood averages a long-range channel in here.
+        ndim = len(self.neighborhood[0])
+        average_affs = np.mean(affs[0:ndim], axis=0)
 
-        filtered_fragments = []
+        if self.optimized:
+            # Per-fragment mean affinity via unique + bincount instead of
+            # scipy.ndimage.measurements.mean with an index array, which rescans
+            # the whole volume per label. Same values, same order (np.unique is
+            # sorted), one pass.
+            fragment_ids, inverse = np.unique(fragments_data, return_inverse=True)
+            # numpy >= 2.0 returns `inverse` shaped like the input rather than
+            # flat, so ravel explicitly rather than rely on the version default.
+            inverse = inverse.reshape(-1)
+            counts = np.bincount(inverse)
+            sums = np.bincount(inverse, weights=average_affs.reshape(-1))
+            means = sums / counts
+            filtered_fragments = fragment_ids[means < filter_value].astype(
+                fragments_data.dtype
+            )
+        else:
+            filtered_fragments = []
+            fragment_ids = np.unique(fragments_data)
+            for fragment, mean in zip(
+                fragment_ids,
+                measurements.mean(average_affs, fragments_data, fragment_ids),
+            ):
+                if mean < filter_value:
+                    filtered_fragments.append(fragment)
+            filtered_fragments = np.array(
+                filtered_fragments, dtype=fragments_data.dtype
+            )
 
-        fragment_ids = np.unique(fragments_data)
+        if filtered_fragments.size == 0:
+            # Nothing to drop -- skip the full-volume relabel pass, which would
+            # otherwise be an identity copy of the whole block.
+            return fragments_data
 
-        for fragment, mean in zip(
-            fragment_ids, measurements.mean(average_affs, fragments_data, fragment_ids)
-        ):
-            if mean < filter_value:
-                filtered_fragments.append(fragment)
-
-        filtered_fragments = np.array(filtered_fragments, dtype=fragments_data.dtype)
         replace = np.zeros_like(filtered_fragments)
-        replace_values(fragments_data, filtered_fragments, replace)
+
+        # `replace_values` builds and returns a new array; it does NOT mutate
+        # `fragments_data`. Discarding this return made `filter_fragments` a
+        # silent no-op.
+        return replace_values(fragments_data, filtered_fragments, replace)
 
     def get_fragments(self, affs_data):
         fragments_data = self.compute_fragments(affs_data)
@@ -196,7 +253,9 @@ class ExtractFrags(BlockwiseTask):
 
         # filter fragments
         if self.filter_fragments > 0:
-            self.filter_avg_fragments(affs_data, fragments_data, self.filter_fragments)
+            fragments_data = self.filter_avg_fragments(
+                affs_data, fragments_data, self.filter_fragments
+            )
 
         # remove small debris
         if self.remove_debris > 0:
@@ -231,15 +290,26 @@ class ExtractFrags(BlockwiseTask):
         else:
             sigma = None
 
-        # add some random noise to affs (this is particularly necessary if your affs are
-        #  stored as uint8 or similar)
-        # If you have many affinities of the exact same value the order they are processed
-        # in may be fifo, so you can get annoying streaks.
+        # add some random noise to affs (this is particularly necessary if your
+        # affs are stored as uint8 or similar). If you have many affinities of
+        # the exact same value the order they are processed in may be fifo, so
+        # you can get annoying streaks.
 
-        shift = np.zeros_like(affs_data)
-
-        if self.noise_eps is not None:
-            shift += np.random.randn(*affs_data.shape) * self.noise_eps
+        if self.optimized and self.noise_eps is not None:
+            # Generate the noise straight into `shift` instead of
+            # `zeros_like` + `randn(*shape) * eps` + `+=`, which allocated three
+            # full (C, Z, Y, X) float64 volumes (~2.2 GB each at full context)
+            # to end up with one.
+            shift = np.empty_like(affs_data)
+            if shift.dtype in (np.float32, np.float64):
+                _rng.standard_normal(shift.shape, dtype=shift.dtype, out=shift)
+            else:
+                shift[:] = _rng.standard_normal(shift.shape)
+            shift *= self.noise_eps
+        else:
+            shift = np.zeros_like(affs_data)
+            if self.noise_eps is not None:
+                shift += np.random.randn(*affs_data.shape) * self.noise_eps
 
         #######################
 
@@ -271,8 +341,19 @@ class ExtractFrags(BlockwiseTask):
         else:
             seeds = None
 
+        if self.optimized:
+            # `shift` is our own temporary, so fold the affinities into it in
+            # place rather than allocating `affs_data + shift` and copying that
+            # again via `.astype(np.float64)` (which copies even when already
+            # float64). `affs_data` itself must survive -- filter_avg_fragments
+            # still reads it.
+            shift += affs_data
+            agglom_input = shift.astype(np.float64, copy=False)
+        else:
+            agglom_input = (affs_data + shift).astype(np.float64)
+
         fragments_data = mws.agglom(
-            (affs_data + shift).astype(np.float64),
+            agglom_input,
             offsets=self.neighborhood,
             strides=self.strides,
             seeds=seeds,
@@ -349,20 +430,44 @@ class ExtractFrags(BlockwiseTask):
             return
 
         with benchmark_logger.trace("Compute Fragment Centers"):
-            fragment_ids, counts = np.unique(fragments_data, return_counts=True)
-            logger.info("Found %d fragments", len(fragment_ids))
-            fragment_ids, counts = zip(
-                *[(f, c) for f, c in zip(fragment_ids, counts) if f > 0]
-            )
-            centers_of_masses = measurements.center_of_mass(
-                np.ones_like(fragments_data), fragments_data, fragment_ids
-            )
+            if self.optimized:
+                # A single np.unique plus one bincount per axis replaces both the
+                # separate np.unique(return_counts=True) and
+                # scipy center_of_mass(ones_like(...), ...), which rescanned the
+                # whole volume per label. Identical centroids and sizes.
+                fragment_ids, inverse = np.unique(fragments_data, return_inverse=True)
+                inverse = inverse.reshape(-1)  # numpy >= 2.0 keeps the input shape
+                counts = np.bincount(inverse)
+                logger.info("Found %d fragments", len(fragment_ids))
+
+                centers_of_masses = np.empty(
+                    (fragment_ids.size, fragments_data.ndim), dtype=np.float64
+                )
+                for d in range(fragments_data.ndim):
+                    bcast_shape = [1] * fragments_data.ndim
+                    bcast_shape[d] = fragments_data.shape[d]
+                    coord = np.broadcast_to(
+                        np.arange(fragments_data.shape[d]).reshape(bcast_shape),
+                        fragments_data.shape,
+                    )
+                    centers_of_masses[:, d] = (
+                        np.bincount(inverse, weights=coord.reshape(-1)) / counts
+                    )
+            else:
+                fragment_ids, counts = np.unique(fragments_data, return_counts=True)
+                logger.info("Found %d fragments", len(fragment_ids))
+                fragment_ids, counts = zip(
+                    *[(f, c) for f, c in zip(fragment_ids, counts) if f > 0]
+                )
+                centers_of_masses = measurements.center_of_mass(
+                    np.ones_like(fragments_data), fragments_data, fragment_ids
+                )
 
             fragment_centers = {
-                fragment_id: {
+                int(fragment_id): {
                     "center": block.write_roi.get_offset()
                     + affs.voxel_size * Coordinate(center),
-                    "size": count,
+                    "size": int(count),
                 }
                 for fragment_id, center, count in zip(
                     fragment_ids, centers_of_masses, counts
