@@ -1,6 +1,5 @@
 import logging
 import multiprocessing
-import subprocess
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
