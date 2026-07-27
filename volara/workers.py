@@ -191,7 +191,6 @@ class LSFWorker(Worker):
         return self.get_lsf_command(
             command=cmd,
             job_name=task_name,  # name the worker after its task (identifiable in bjobs)
-            job_name=task_name,  # name the worker after its task (identifiable in bjobs)
             queue=self.queue,
             num_cpus=self.num_cpus,
             num_gpus=self.num_gpus,
