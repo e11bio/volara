@@ -24,6 +24,7 @@ dependencies = [
     "daisy>=2",
     "funlib.geometry>=0.3",
     "funlib.persistence>=0.7.0",
+    "funlib.math",
     "mwatershed>=0.5.2",
     "pydantic>=2.6.3",
     "numba>=0.59.0",

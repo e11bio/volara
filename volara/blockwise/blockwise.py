@@ -25,17 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# daisy v2 removed the "no timeout" option: ``Task(timeout=None)`` now means the
-# built-in default (~600s) rather than 1.x's "never time out", and non-positive
-# values raise ``ValueError`` (see daisy's MIGRATION.md). Blocks that legitimately
-# run longer than the default -- e.g. in-process GPU descriptor / SOFIMA-flow steps
-# -- would be reclaimed and abandoned mid-run. To preserve 1.x behaviour we map an
-# unset ``block_timeout`` to this large-but-finite sentinel (24h), which never trips
-# on a real block yet still lets daisy eventually reclaim a genuinely hung worker
-# (strictly safer than 1.x, which waited forever). Override per task via
-# ``block_timeout`` when reclaim-on-hang is wanted sooner.
-_V1_COMPAT_NO_TIMEOUT = 24.0 * 60.0 * 60.0
-
 
 def _to_daisy_roi(roi: Roi) -> daisy.Roi:
     """Convert a ``funlib.geometry.Roi`` into a native ``daisy.Roi``.
@@ -419,9 +408,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 # Convert funlib Rois to native daisy.Rois at the daisy boundary
                 # (see _to_daisy_roi). v1_compat's Task shim also coerces these, but
                 # converting here keeps the boundary explicit and surface-agnostic.
-                total_roi=_to_daisy_roi(
-                    self.write_roi.grow(context_low, context_high)
-                ),
+                total_roi=_to_daisy_roi(self.write_roi.grow(context_low, context_high)),
                 read_roi=_to_daisy_roi(
                     self.block_write_roi.grow(context_low, context_high)
                 ),
@@ -429,19 +416,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 process_function=process_func,
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
-                # daisy v2 renamed num_workers -> max_workers (v1_compat still
-                # shims num_workers with a DeprecationWarning).
                 max_workers=self.num_workers,
                 check_function=self.check_block_func(),
                 max_retries=2,
-                # daisy v2 has no "no timeout": None -> the ~600s default. Map an
-                # unset block_timeout to a large finite sentinel to keep 1.x's
-                # unbounded semantics (see _V1_COMPAT_NO_TIMEOUT).
-                timeout=(
-                    self.block_timeout
-                    if self.block_timeout is not None
-                    else _V1_COMPAT_NO_TIMEOUT
-                ),
+                timeout=self.block_timeout,
                 upstream_tasks=(
                     (
                         upstream_tasks
