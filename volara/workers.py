@@ -34,6 +34,17 @@ class Worker(StrictBaseModel, ABC):
         both this call and the driver (see SlurmWorker.run)."""
         sp.run(cmd)
 
+    def cleanup(self, task_name: str) -> None:
+        """Reap any workers for ``task_name`` that outlived the run. Called when a task's
+        ``run_blockwise`` returns (after daisy has stopped its worker pools and every block
+        is terminal, so nothing is in flight to corrupt). Base/local: no-op -- local worker
+        child processes are already gone. Cluster backends (slurm/lsf) submit INDEPENDENT
+        jobs that are NOT children of this process, so daisy's ``terminate()`` cannot reap
+        them; they override ``cleanup`` to scancel/bkill any lingering jobs by name (see
+        SlurmWorker.cleanup). Safety net ON TOP of the per-worker reap in ``run``: it catches
+        workers daisy respawned to maintain a pool for a since-finished task, or that
+        orphaned from their launcher after the run finished."""
+
 
 class SlurmWorker(Worker):
     queue: str
@@ -121,6 +132,19 @@ class SlurmWorker(Worker):
             sp.run(["scancel", job_id], capture_output=True)  # no-op if the job already exited
             if prev_handler is not None:
                 signal.signal(signal.SIGTERM, prev_handler)
+
+    def cleanup(self, task_name: str) -> None:
+        """scancel every worker job named after this task. Workers are submitted with
+        ``--job-name=<task_name>`` (see get_command), so this reaps ANY that survived the run --
+        workers that finished connecting after their run_blockwise server had already shut down
+        and so never received ``block is None`` to self-exit, or workers daisy respawned to
+        maintain a pool for a since-finished task. These leaked until walltime and piled up across
+        stages (the observed ~99-node worker storm); daisy's per-worker ``terminate()`` cannot reap
+        them because the sbatch client it launched exited the instant the job was queued. Called on
+        run_blockwise teardown, after every block is terminal and daisy has stopped its pools, so a
+        name-scoped scancel cannot interrupt in-flight work. A no-op if nothing matches. This is the
+        automation of the manual ``scancel --name`` operators were running by hand."""
+        sp.run(["scancel", "--name", task_name], capture_output=True)
 
     def is_sbatch_available(self) -> bool:
         try:

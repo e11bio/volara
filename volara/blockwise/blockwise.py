@@ -515,15 +515,25 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]
-            if multiprocessing:
-                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
-                # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
-                # states workaround is no longer needed.
-                return daisy.Server().run_blockwise(tasks)
-            # Serial path: module-level run_blockwise returns a bool unless
-            # return_states=True (see daisy._runner), so request the states map to
-            # keep the same {task_id: TaskState} contract as the distributed path.
-            return daisy.run_blockwise(tasks, multiprocessing=False, return_states=True)
+            try:
+                if multiprocessing:
+                    # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                    # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
+                    # states workaround is no longer needed.
+                    return daisy.Server().run_blockwise(tasks)
+                # Serial path: module-level run_blockwise returns a bool unless
+                # return_states=True (see daisy._runner), so request the states map to
+                # keep the same {task_id: TaskState} contract as the distributed path.
+                return daisy.run_blockwise(
+                    tasks, multiprocessing=False, return_states=True
+                )
+            finally:
+                # Teardown sweep: reap any cluster worker jobs that outlived the run. daisy has
+                # already stopped its pools and every block is terminal here, so a name-scoped
+                # scancel cannot touch in-flight work. Workers are named after the task, so the
+                # sweep is scoped to this task's jobs. No-op for local workers. See Worker.cleanup.
+                if self.worker_config is not None:
+                    self.worker_config.cleanup(self.task_name)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """

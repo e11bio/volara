@@ -97,3 +97,49 @@ def test_dbs(db_type: str, tmp_path):
         db.open("r")
 
     graph_provider = db.open("w")
+
+
+@pytest.mark.parametrize(
+    "db_type",
+    [
+        "sqlite",
+        pytest.param(
+            "postgresql",
+            marks=pytest.mark.skipif(
+                not psql_is_available(),
+                reason="PostgreSQL is not available",
+            ),
+        ),
+    ],
+)
+def test_drop_does_not_create(db_type: str, tmp_path):
+    """drop()/drop_edges() on a database that was never created must be a no-op and
+    must NOT bring the database into existence (regression for PR#33 review: a fresh
+    Postgres DB used to be created by drop() via open('w'))."""
+    db: DB
+    if db_type == "sqlite":
+        db = SQLite(
+            node_attrs={"color": 3},
+            edge_attrs={"y_aff": "float"},
+            ndim=2,
+            path=tmp_path / "never_created.sqlite",
+        )
+    else:
+        db = PostgreSQL(
+            node_attrs={"color": 3},
+            edge_attrs={"y_aff": "float"},
+            ndim=2,
+            name="volara_pytest_never_created",
+        )
+
+    # Sanity: the DB does not exist yet.
+    with pytest.raises(RuntimeError):
+        db.open("r")
+
+    # Dropping a non-existent DB is a successful no-op...
+    db.drop_edges()
+    db.drop()
+
+    # ...and must not have created it.
+    with pytest.raises(RuntimeError):
+        db.open("r")
