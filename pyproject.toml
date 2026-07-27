@@ -21,7 +21,8 @@ dependencies = [
     "click>=8.0",
     # daisy v2 (Rust rewrite) -- pinned to the git v2.0 branch via
     # [tool.uv.sources] below until 2.0.0 is published to PyPI.
-    "daisy>=2",
+    # "daisy>=2",
+    "daisy @ git+https://github.com/funkelab/daisy@v2.0",
     "funlib.geometry>=0.3",
     "funlib.persistence>=0.7.0",
     "funlib.math",
