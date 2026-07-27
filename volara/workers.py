@@ -219,7 +219,6 @@ class LSFWorker(Worker):
         num_gpus: int = 0,
         queue: str = "",
         job_name: str = "",
-        job_name: str = "",
         log_file: str | None = None,
         error_file: str | None = None,
     ) -> list[str]:

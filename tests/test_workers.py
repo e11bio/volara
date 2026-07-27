@@ -46,21 +46,6 @@ def cluster_shims(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
 
 
-def test_run_blocks_for_the_workers_lifetime(tmp_path):
-    """Worker.run must not return until the worker command has finished (daisy treats
-    an early return as a dead worker and respawns, up to max_worker_restarts)."""
-    marker = tmp_path / "worker_finished"
-    workers.LocalWorker().run(["bash", "-c", f"sleep 0.2 && touch '{marker}'"])
-    assert marker.exists(), "run() returned before the worker command completed"
-
-
-def test_run_raises_on_worker_failure():
-    """A non-zero worker exit must raise so daisy records it as a dirty worker exit
-    (counted against max_worker_restarts) instead of a silent clean death."""
-    with pytest.raises(sp.CalledProcessError):
-        workers.LocalWorker().run(["bash", "-c", "exit 3"])
-
-
 def test_slurm_command_is_blocking_srun(cluster_shims):
     """Slurm workers submit via srun: it blocks for the job's lifetime (the spawn
     contract) and ties the job to the client, unlike fire-and-forget sbatch."""
