@@ -5,7 +5,6 @@ from typing import Annotated, Callable, Generator, Literal
 
 import networkx as nx
 import numpy as np
-import scipy.ndimage
 from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
@@ -76,21 +75,6 @@ class AffAgglom(BlockwiseTask):
     We don't have read write conflicts in this task and can compute
     every block independently in an arbitrary order.
     """
-    optimized: bool = False
-    """
-    Use the optimized implementations of the fragment relabel and the affinity
-    counting. Produces the same edges and weights as the original code, just
-    faster (measured 7.6x on the relabel, 40x on the counting):
-
-    - relabel via `np.unique(return_inverse=True)` instead of a full-array scan
-      per fragment (O(n_frags * n_voxels))
-    - affinity counting over only the boundary voxels, with an integer cantor
-      pairing and `np.bincount`, instead of full-volume float64 pairings handed
-      to `scipy.ndimage.mean` / `sum_labels`
-
-    Defaults to False so the original behavior is what you get unless you ask
-    for it. Set True to compare.
-    """
 
     @property
     def task_name(self) -> str:
@@ -122,37 +106,27 @@ class AffAgglom(BlockwiseTask):
         benchmark_logger = self.get_benchmark_logger()
 
         with benchmark_logger.trace("Preprocess fragments"):
-            # Both branches relabel fragments to a dense 1..k range so the cantor
-            # pairings in count_affs stay small, and produce the same mapping.
-            if self.optimized:
-                # np.unique(return_inverse=True) IS this relabel, done in C.
-                unique_vals, inverse = np.unique(frags, return_inverse=True)
-                # 0 sorts first, so when background is present inverse already
-                # maps 0 -> 0 and fragments -> 1..k in the same order the loop
-                # below produces. When the block has NO background, inverse would
-                # map the lowest fragment id to 0 and silently turn it into
-                # background, so shift by one in that case.
-                has_background = unique_vals.size > 0 and unique_vals[0] == 0
-                frags = inverse.reshape(frags.shape)
-                if not has_background:
-                    frags = frags + 1
-                frags = frags.astype(np.uint64)
+            # Relabel fragments to a dense 1..k range so the cantor pairings in
+            # count_affs stay small. np.unique(return_inverse=True) is this
+            # relabel, done in C, rather than one full-array scan per fragment
+            # (which was O(n_frags * n_voxels)).
+            unique_vals, inverse = np.unique(frags, return_inverse=True)
 
-                first_seq = 0 if has_background else 1
-                rev_mapping = {
-                    seq + first_seq: int(orig) for seq, orig in enumerate(unique_vals)
-                }
-                num_frags = unique_vals.size - (1 if has_background else 0)
-            else:
-                # Original: one full-array scan per fragment, O(n_frags * n_vox).
-                fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
-                num_frags = len(fragment_ids)
-                frag_mapping = {
-                    old: seq for seq, old in zip(range(1, num_frags + 1), fragment_ids)
-                }
-                rev_mapping = {v: k for k, v in frag_mapping.items()}
-                for old, seq in frag_mapping.items():
-                    frags[frags == old] = seq
+            # 0 sorts first, so when background is present `inverse` already maps
+            # 0 -> 0 and fragments -> 1..k. When the block has NO background,
+            # `inverse` would map the lowest fragment id to 0 and silently turn it
+            # into background, so shift by one in that case.
+            has_background = unique_vals.size > 0 and unique_vals[0] == 0
+            frags = inverse.reshape(frags.shape)
+            if not has_background:
+                frags = frags + 1
+            frags = frags.astype(np.uint64)
+
+            first_seq = 0 if has_background else 1
+            rev_mapping = {
+                seq + first_seq: int(orig) for seq, orig in enumerate(unique_vals)
+            }
+            num_frags = unique_vals.size - (1 if has_background else 0)
 
             if num_frags == 0:
                 return
@@ -171,32 +145,7 @@ class AffAgglom(BlockwiseTask):
             )
             return base_slice, offset_slice
 
-        def count_affs_original(
-            fragments: np.ndarray, affinities: np.ndarray, offset: Coordinate
-        ) -> dict[int, tuple[float, float]]:
-            base_slice, offset_slice = slices(offset)
-            base_frags = fragments[base_slice]
-            base_affinities = affinities[base_slice]
-            offset_frags = fragments[offset_slice]
-
-            mask = (offset_frags != base_frags) * (offset_frags > 0) * (base_frags > 0)
-
-            # cantor pairing function
-            # 1/2 (k1 + k2)(k1 + k2 + 1) + k2
-            k1, k2 = (
-                np.min([offset_frags, base_frags], axis=0),
-                np.max([offset_frags, base_frags], axis=0),
-            )
-            cantor_pairings = ((k1 + k2) * (k1 + k2 + 1) / 2 + k2) * mask
-            cantor_ids = np.array([x for x in np.unique(cantor_pairings) if x != 0])
-            scores = scipy.ndimage.mean(base_affinities, cantor_pairings, cantor_ids)
-            counts = scipy.ndimage.sum_labels(mask, cantor_pairings, cantor_ids)
-            return {
-                cantor_id: (mean_score, count)
-                for cantor_id, mean_score, count in zip(cantor_ids, scores, counts)
-            }
-
-        def count_affs_optimized(
+        def count_affs(
             fragments: np.ndarray, affinities: np.ndarray, offset: Coordinate
         ) -> dict[int, tuple[float, float]]:
             base_slice, offset_slice = slices(offset)
@@ -207,11 +156,10 @@ class AffAgglom(BlockwiseTask):
             mask = (offset_frags != base_frags) & (offset_frags > 0) & (base_frags > 0)
 
             # Only voxels on a boundary between two distinct fragments carry an
-            # edge -- typically a few percent of the block. Select them first and
-            # do all the arithmetic on that small array, instead of computing
+            # edge - typically a few percent of the block. Select them first and
+            # do all the arithmetic on that small array, rather than computing
             # full-volume cantor pairings and handing them to
-            # scipy.ndimage.mean/sum_labels (which then rescan every voxel; that
-            # pair alone was ~85% of this function).
+            # scipy.ndimage.mean/sum_labels (which then rescan every voxel
             u_frags = offset_frags[mask].astype(np.uint64)
             v_frags = base_frags[mask].astype(np.uint64)
             if u_frags.size == 0:
@@ -219,7 +167,7 @@ class AffAgglom(BlockwiseTask):
 
             # cantor pairing function, in integers:
             # 1/2 (k1 + k2)(k1 + k2 + 1) + k2
-            # Kept in uint64 rather than float64 -- the ids are exact here,
+            # Kept in uint64 rather than float64 - the ids are exact here,
             # whereas float64 silently collides once the pairing exceeds 2**53.
             k1 = np.minimum(u_frags, v_frags)
             k2 = np.maximum(u_frags, v_frags)
@@ -235,8 +183,6 @@ class AffAgglom(BlockwiseTask):
                 int(cantor_id): (float(total / count), float(count))
                 for cantor_id, total, count in zip(cantor_ids, sums, counts)
             }
-
-        count_affs = count_affs_optimized if self.optimized else count_affs_original
 
         with benchmark_logger.trace("Count affinities"):
             for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
