@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from funlib.geometry import Coordinate
 
 from volara.blockwise import ExtractFrags
@@ -63,3 +64,73 @@ def test_extract_frags_basic(affs_2d, block_2d, tmp_path):
     for _, attrs in graph.nodes(data=True):
         assert "position" in attrs
         assert "size" in attrs
+
+
+# ---------------------------------------------------------------------------
+# bulk_write
+#
+# bulk_write=True is not just a faster INSERT. The block skips the
+# `rag_provider[write_roi]` read and starts from a bare `nx.Graph()`, then writes
+# via `bulk_write_graph` inside a `bulk_write_mode` context that drops and
+# rebuilds the node position index. The speedup only shows at volumes far past
+# unit-test scale, so what is pinned here is what must not drift: the rows that
+# end up in the database.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "block_size, context",
+    [
+        (Coordinate(20, 20), Coordinate(0, 0)),
+        (Coordinate(10, 10), Coordinate(2, 2)),
+        (Coordinate(5, 20), Coordinate(2, 0)),
+    ],
+    ids=["single_block", "four_blocks_with_context", "row_blocks"],
+)
+def test_extract_frags_bulk_matches_nonbulk(bulk, block_size, context):
+    """Same fragments and the same node rows either way.
+
+    Node attribution is unambiguous in both modes -- `bulk_write_nodes` still
+    filters on the node position, and the centroids are computed inside write_roi
+    -- so these must agree exactly, not merely as sets.
+    """
+    plain_db = bulk.db("plain")
+    plain_frags = bulk.extract_frags(plain_db, "plain", False, block_size, context)
+
+    bulk_db = bulk.db("bulk")
+    bulk_frags = bulk.extract_frags(bulk_db, "bulk", True, block_size, context)
+
+    np.testing.assert_array_equal(bulk_frags, plain_frags)
+
+    plain_nodes = bulk.nodes(plain_db)
+    assert len(plain_nodes) > 0, "no nodes written -- comparison would be vacuous"
+    assert bulk.nodes(bulk_db) == plain_nodes
+
+
+def test_extract_frags_bulk_writes_every_fragment(bulk):
+    """Every non-zero fragment in the output volume gets a node row.
+
+    Bulk mode starts from a bare graph instead of reading the RAG back, so a
+    filter mistake would silently under-write nodes rather than raise.
+    """
+    db = bulk.db("coverage")
+    frags = bulk.extract_frags(
+        db, "coverage", True, Coordinate(10, 10), Coordinate(2, 2)
+    )
+
+    assert set(bulk.nodes(db)) == {int(i) for i in np.unique(frags) if i != 0}
+
+
+def test_extract_frags_bulk_rebuilds_position_index(bulk):
+    """Bulk mode drops the node position index and must put it back, or every
+    later roi-restricted read degrades to a full table scan."""
+    db = bulk.db("index")
+    bulk.extract_frags(db, "index", True, Coordinate(10, 10), Coordinate(2, 2))
+
+    indexes = {
+        row[0]
+        for row in db.open("r")
+        .cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
+        .fetchall()
+    }
+    assert "pos_index" in indexes
