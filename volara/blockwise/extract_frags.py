@@ -1,9 +1,10 @@
 import logging
-from contextlib import contextmanager
-from typing import Annotated, Literal
+from contextlib import contextmanager, nullcontext
+from typing import Annotated, Iterator, Literal
 
 import daisy
 import mwatershed as mws
+import networkx as nx
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
@@ -118,6 +119,13 @@ class ExtractFrags(BlockwiseTask):
     transform used for affinity decay. This prevents the decay from growing
     without bound deep inside large objects, which can otherwise lead to
     unlabeled (`0`) interiors. If None, no cap is applied.
+    """
+
+    bulk_write: bool = False
+    """
+    Whether to bulk-write to database (false by default). This removes/rebuilds
+    indexes, and sets other useful flags for writing large amounts of data
+    quickly, which can be useful for large runs to prevent database bottlenecks.
     """
 
     fit: Literal["shrink"] = "shrink"
@@ -384,7 +392,13 @@ class ExtractFrags(BlockwiseTask):
             }
 
         with benchmark_logger.trace("Update RAG"):
-            rag = rag_provider[block.write_roi]
+            if self.bulk_write:
+                # since we drop indexes, the read_graph query has to check each
+                # node for containment which grows with cost as the db grows
+                rag = nx.Graph()
+            else:
+                rag = rag_provider[block.write_roi]
+                assert len(rag) == 0, "RAG should be empty"
 
             for node, data in fragment_centers.items():
                 # centers
@@ -396,10 +410,23 @@ class ExtractFrags(BlockwiseTask):
 
                 rag.add_node(int(node), **node_attrs)
 
-            rag_provider.write_graph(
-                rag,
-                block.write_roi,
+            if self.bulk_write:
+                rag_provider.bulk_write_graph(
+                    rag,
+                    block.write_roi,
+                )
+            else:
+                rag_provider.write_graph(
+                    rag,
+                    block.write_roi,
+                )
+
+    def _task_context(self, worker):
+        if self.bulk_write:
+            return self.db.open("r+").bulk_write_mode(
+                worker=worker, node_writes=True, edge_writes=False
             )
+        return nullcontext()
 
     @contextmanager
     def process_block_func(self):
@@ -418,4 +445,19 @@ class ExtractFrags(BlockwiseTask):
                 mask=mask,
             )
 
-        yield process_block
+        with self._task_context(worker=True):
+            yield process_block
+
+    @contextmanager
+    def task(
+        self,
+        upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
+        multiprocessing: bool = True,
+    ) -> Iterator[daisy.Task]:
+
+        # temporary workaround since bulk_write_mode needs to modify the db
+        self.init()
+
+        with self._task_context(worker=False):
+            with super().task(upstream_tasks, multiprocessing) as task:
+                yield task

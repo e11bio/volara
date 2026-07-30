@@ -1,8 +1,9 @@
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from itertools import chain
-from typing import Annotated, Callable, Generator, Literal
+from typing import Annotated, Callable, Generator, Iterator, Literal
 
+import daisy
 import networkx as nx
 import numpy as np
 import scipy.ndimage
@@ -67,6 +68,14 @@ class AffAgglom(BlockwiseTask):
         }
 
     """
+
+    bulk_write: bool = False
+    """
+    Whether to bulk-write to database (false by default). This removes/rebuilds
+    indexes, and sets other useful flags for writing large amounts of data
+    quickly, which can be useful for large runs to prevent database bottlenecks.
+    """
+
     fit: Literal["shrink"] = "shrink"
     """
     The boundary behavior for our daisy task.
@@ -214,7 +223,17 @@ class AffAgglom(BlockwiseTask):
 
         with benchmark_logger.trace("Read data in block"):
             frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
-            rag = rag_provider[block.read_roi]
+
+            if self.bulk_write:
+                rag = nx.Graph()
+            else:
+                rag = rag_provider[block.read_roi]
+                # Note: cannot assert rag.number_of_edges() == 0 — read_roi
+                # extends into neighboring blocks' write_rois (non-zero
+                # context, read_write_conflict=False), so once any neighbor
+                # commits its edges they show up here through the context
+                # overlap. The downstream write_graph(write_roi) filter is
+                # what keeps each edge attributed to a single block.
 
             affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
@@ -229,7 +248,33 @@ class AffAgglom(BlockwiseTask):
             )
 
         with benchmark_logger.trace("Write RAG edges"):
-            rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+            if self.bulk_write:
+                # In bulk mode the rag's nodes are bare (auto-created by
+                # add_edge), so funlib's bulk_write_edges roi/position
+                # filter would drop every edge — every node looks like
+                # "no position". Filter here by fragment id instead: emit
+                # edge (u, v) iff min(u, v) has voxels in block.write_roi.
+                # Fragments that straddle block boundaries may be emitted
+                # by more than one block; INSERT OR IGNORE in the bulk
+                # insert keeps the first writer's row.
+                write_frags_data = frags.to_ndarray(block.write_roi, fill_value=0)
+                home_ids = {int(i) for i in np.unique(write_frags_data) if i != 0}
+                filtered = nx.Graph()
+                for u, v, data in rag.edges(data=True):
+                    if min(int(u), int(v)) in home_ids:
+                        filtered.add_edge(u, v, **data)
+                rag_provider.bulk_write_edges(
+                    filtered.nodes, filtered.edges, roi=None
+                )
+            else:
+                rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+
+    def _task_context(self, worker):
+        if self.bulk_write:
+            return self.db.open("r+").bulk_write_mode(
+                worker=worker, node_writes=False, edge_writes=True
+            )
+        return nullcontext()
 
     def init(self) -> None:
         self.db.init()
@@ -248,4 +293,19 @@ class AffAgglom(BlockwiseTask):
                 rag_provider,
             )
 
-        yield process_block
+        with self._task_context(worker=True):
+            yield process_block
+
+    @contextmanager
+    def task(
+        self,
+        upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
+        multiprocessing: bool = True,
+    ) -> Iterator[daisy.Task]:
+
+        # temporary workaround since bulk_write_mode needs to modify the db
+        self.init()
+
+        with self._task_context(worker=False):
+            with super().task(upstream_tasks, multiprocessing) as task:
+                yield task

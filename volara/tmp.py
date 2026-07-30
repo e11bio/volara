@@ -102,3 +102,58 @@ def replace_values(arr, src, dst):
         relabeled_arr[i] = label_map.get(arr[i], arr[i])
 
     return relabeled_arr.reshape(shape)
+
+
+def prepare_mapping(src, dst):
+    src = np.asarray(src, dtype=np.uint64)
+    dst = np.asarray(dst, dtype=np.uint64)
+
+    order = np.argsort(src)
+
+    return (
+        np.ascontiguousarray(src[order]),
+        np.ascontiguousarray(dst[order]),
+    )
+
+
+def filter_mapping_to_block(in_frags, src_sorted, dst_sorted):
+    block_ids = np.unique(in_frags)
+
+    idx = np.searchsorted(src_sorted, block_ids)
+
+    valid = idx < src_sorted.size
+    idx = idx[valid]
+    block_ids = block_ids[valid]
+
+    matched = src_sorted[idx] == block_ids
+
+    return (
+        np.ascontiguousarray(src_sorted[idx[matched]]),
+        np.ascontiguousarray(dst_sorted[idx[matched]]),
+    )
+
+
+@numba.njit(parallel=True)
+def replace_values_sorted(arr, src_sorted, dst_sorted):
+    shape = arr.shape
+    flat = arr.ravel()
+    out = np.empty_like(flat)
+
+    for i in numba.prange(flat.size):
+        v = flat[i]
+        j = np.searchsorted(src_sorted, v)
+
+        if j < src_sorted.size and src_sorted[j] == v:
+            out[i] = dst_sorted[j]
+        else:
+            out[i] = v
+
+    return out.reshape(shape)
+
+
+def warmup_replace_values_sorted():
+    _ = replace_values_sorted(
+        np.zeros((4, 4, 4), dtype=np.uint64),
+        np.array([0], dtype=np.uint64),
+        np.array([0], dtype=np.uint64),
+    )
