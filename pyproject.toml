@@ -24,6 +24,7 @@ dependencies = [
     "funlib.persistence>=0.7.0",
     "mwatershed>=0.5.2",
     "pydantic>=2.6.3",
+    "numpy>=2.0",
     "numba>=0.59.0",
     # llvmlite (numba dep) dropped macOS x86_64 wheels after 0.45; avoid source builds
     "llvmlite<0.46,!=0.44.*; platform_machine == 'x86_64' and sys_platform == 'darwin'",
