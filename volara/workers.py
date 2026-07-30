@@ -97,11 +97,9 @@ class SlurmWorker(Worker):
 
         Args:
             command (list[str]): The worker command to run inside the slurm job.
-            command (list[str]): The worker command to run inside the slurm job.
             num_cpus (int, optional): Number of CPU cores per task. Defaults to 1.
             num_gpus (int, optional): Number of GPUs required. Defaults to 0.
             memory (int, optional): Memory allocation (in MB) for the job. Defaults
-                to 15564.
                 to 15564.
             constraint (str, optional): Constraint specification for job
                 execution. Defaults to "".
@@ -109,12 +107,9 @@ class SlurmWorker(Worker):
                 job. Defaults to "".
             job_name (str, optional): Name assigned to the Slurm job. Defaults to "".
             log_file (str | Path | None, optional): Path for standard output logging.
-            log_file (str | Path | None, optional): Path for standard output logging.
                 Defaults to None.
             error_file (str | Path | None, optional): Path for standard error logging.
-            error_file (str | Path | None, optional): Path for standard error logging.
                 Defaults to None.
-            flags (list[str] | None, optional): Additional srun flags as a
             flags (list[str] | None, optional): Additional srun flags as a
                 list. Defaults to None.
 
@@ -129,15 +124,7 @@ class SlurmWorker(Worker):
 
         if job_name:
             run_command.append(f"--job-name={job_name}")
-        self.is_srun_available()
-
-        run_command = ["srun"]
-
-        if job_name:
-            run_command.append(f"--job-name={job_name}")
         run_command.append(f"--cpus-per-task={num_cpus}")
-        if num_gpus > 0:
-            run_command.append(f"--gpus={num_gpus}")
         if num_gpus > 0:
             run_command.append(f"--gpus={num_gpus}")
         run_command.append(f"--mem={memory}")
@@ -145,13 +132,6 @@ class SlurmWorker(Worker):
             run_command.append(f"--partition={queue}")
         if constraint and constraint != "None":
             run_command.append(f"--constraint={constraint}")
-        if constraint and constraint != "None":
-            run_command.append(f"--constraint={constraint}")
-
-        run_command.append(f"--output={log_file}" if log_file else "--output=%x_%j.log")
-        run_command.append(
-            f"--error={error_file}" if error_file else "--error=%x_%j.err"
-        )
 
         run_command.append(f"--output={log_file}" if log_file else "--output=%x_%j.log")
         run_command.append(
@@ -161,8 +141,6 @@ class SlurmWorker(Worker):
         if flags:
             run_command.extend(flags)
 
-        # srun takes the worker command directly (no sbatch-style --wrap)
-        run_command.extend(command)
         # srun takes the worker command directly (no sbatch-style --wrap)
         run_command.extend(command)
 
@@ -233,12 +211,10 @@ class LSFWorker(Worker):
 
         Args:
             command (list[str]): The command to be executed within the LSF job.
-            command (list[str]): The command to be executed within the LSF job.
             num_cpus (int, optional): Number of CPU cores per task. Defaults to 1.
             num_gpus (int, optional): Number of GPUs required. Defaults to 0.
             queue (str, optional): Name of the LSF queue to submit the job.
                 Defaults to "".
-            job_name (str, optional): Name assigned to the LSF job. Defaults to "".
             job_name (str, optional): Name assigned to the LSF job. Defaults to "".
             log_file (str | None, optional): Path for standard output logging.
                 Defaults to None.
@@ -252,11 +228,7 @@ class LSFWorker(Worker):
 
         # -K: submit and wait for the job to complete (the blocking-spawn contract)
         run_command = ["bsub", "-K"]
-        # -K: submit and wait for the job to complete (the blocking-spawn contract)
-        run_command = ["bsub", "-K"]
 
-        if job_name:
-            run_command.extend(["-J", job_name])
         if job_name:
             run_command.extend(["-J", job_name])
         run_command.extend(["-n", str(num_cpus)])
