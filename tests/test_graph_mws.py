@@ -1,8 +1,12 @@
+import sqlite3
+
+import networkx as nx
 import numpy as np
 import pytest
-from funlib.geometry import Roi
+from funlib.geometry import Coordinate, Roi
 
-from volara.blockwise import GraphMWS
+from volara.blockwise import GraphMWS, IterativeGraphMWS
+from volara.dbs import SQLite
 from volara.lut import LUT
 
 
@@ -50,3 +54,101 @@ def test_graph_mws_merge_split(sqlite_db_2d, block_2d, tmp_path, y_bias):
     # score = 1*0 + bias. Positive bias -> positive edge -> merge (1 seg).
     # Negative bias -> negative edge -> split (2 segs).
     assert len(np.unique(segments)) == 1 + (y_bias < 0)
+
+
+# ---------------------------------------------------------------------------
+# IterativeGraphMWS
+#
+# One round of a recursive coarsening: each block clusters its own region and
+# writes the resulting super-fragments (plus size-weighted agglomerated edges)
+# into `segments_db`, emitting a per-round LUT.
+#
+# Segment NODES are owned by the block whose write_roi holds their position, but
+# segment EDGES are not: `write_edges` filters on min(u, v)'s position, so an
+# edge between segments owned by two different blocks would be dropped by both.
+# `write_graph(..., both_sides=True)` used to cover this and no longer exists;
+# writing edges unfiltered is the replacement. `test_..._cross_block_edge` is
+# the regression guard for that - it is the assertion that fails if the edge
+# write is narrowed back to write_roi.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def chain_frags_db(tmp_path):
+    """4 fragments in a line along z, spanning two 200-unit blocks.
+
+    Strong affinity within each block, weak across the block boundary, so the
+    expected outcome is two segments (1+2, 3+4) joined by one cross-block edge.
+    """
+    db = SQLite(
+        path=tmp_path / "frags.sqlite",
+        edge_attrs={"adj_weight": "float", "adj_weight__size": "float"},
+    )
+    provider = db.open("w")
+    graph = nx.Graph()
+    for node, z in [(1, 50), (2, 150), (3, 250), (4, 350)]:
+        graph.add_node(node, position=(z, 50, 50), size=100, filtered=False)
+    for u, v, weight in [(1, 2, 0.9), (2, 3, 0.2), (3, 4, 0.9)]:
+        graph.add_edge(u, v, adj_weight=weight, adj_weight__size=10.0, distance=100.0)
+    provider.write_graph(graph)
+    return db
+
+
+def _run_iterative(frags_db, tmp_path):
+    seg_db = SQLite(
+        path=tmp_path / "segs.sqlite",
+        edge_attrs={"adj_weight": "float", "adj_weight__size": "float"},
+    )
+    task = IterativeGraphMWS(
+        fragments_db=frags_db,
+        segments_db=seg_db,
+        lut=LUT(path=tmp_path / "lut.npz"),
+        weights={"adj_weight": (1.0, -0.4)},
+        roi=(Coordinate(0, 0, 0), Coordinate(400, 100, 100)),
+        block_size=Coordinate(200, 100, 100),
+    )
+    task.init()
+    task.run_blockwise(multiprocessing=False)
+    return task, seg_db
+
+
+def test_iterative_graph_mws_runs_and_writes_segments(chain_frags_db, tmp_path):
+    """Every fragment lands in the LUT and super-fragment nodes are persisted."""
+    task, seg_db = _run_iterative(chain_frags_db, tmp_path)
+
+    lut = task.lut.load()
+    assert lut is not None
+    assert sorted(int(f) for f in lut[0]) == [1, 2, 3, 4]
+
+    con = sqlite3.connect(seg_db.path)
+    nodes = con.execute("SELECT id, size FROM nodes ORDER BY id").fetchall()
+    con.close()
+    # 1+2 and 3+4 merge; the 0.2 edge scores 0.2-0.4 < 0 and splits.
+    assert len(nodes) == 2
+    assert [size for _, size in nodes] == [200, 200]
+
+
+def test_iterative_graph_mws_writes_cross_block_edge(chain_frags_db, tmp_path):
+    """The edge between two differently-owned segments must survive the write.
+
+    Regression guard for the removal of `write_graph(..., both_sides=True)`:
+    filtering edge writes by write_roi drops this edge entirely.
+    """
+    _, seg_db = _run_iterative(chain_frags_db, tmp_path)
+
+    con = sqlite3.connect(seg_db.path)
+    edges = con.execute("SELECT u, v, adj_weight FROM edges").fetchall()
+    segment_ids = {row[0] for row in con.execute("SELECT id FROM nodes")}
+    con.close()
+
+    # Deliberately not asserting *which* ids: scores here are 0.5, 0.5, -0.2, and
+    # the tie between the two 0.5s means the cluster representative depends on
+    # edge read order, which in turn depends on block execution order (the
+    # neighbour-LUT reads make blocks order-dependent). What must hold is that
+    # the edge survives the write at all - it is zero-length without the
+    # unfiltered `write_edges`.
+    assert edges, "cross-block segment edge was dropped by the write"
+    for u, v, weight in edges:
+        assert u in segment_ids and v in segment_ids
+        assert u != v
+        assert weight == pytest.approx(0.2)

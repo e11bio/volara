@@ -264,3 +264,61 @@ def test_relabel_task_blockwise_matches_single_block(labels_2d, tmp_path):
         task.seg_data.array("r")[:],
         replace_values(frags_data.astype(np.uint64), src, dst),
     )
+
+
+# ---------------------------------------------------------------------------
+# multi-round LUTs
+#
+# A recursive/iterative clustering emits one LUT per round: round N maps its own
+# ids onto round N+1's. `Relabel` accepts the list and composes them with
+# `LUTS.load_iterated`, so the caller doesn't have to flatten them by hand.
+# ---------------------------------------------------------------------------
+
+
+def test_relabel_composes_a_list_of_luts(labels_2d, block_2d, tmp_path):
+    """Two rounds, [1,2,3,4]->[10,20,30,40]->[100,100,300,300], compose."""
+    frags_path, frags_data = labels_2d
+    seg_path = tmp_path / "test.zarr" / "seg"
+
+    round_0 = LUT(path=tmp_path / "lut_0.npz")
+    round_0.save(np.array([[1, 2, 3, 4], [10, 20, 30, 40]]))
+    round_1 = LUT(path=tmp_path / "lut_1.npz")
+    round_1.save(np.array([[10, 20, 30, 40], [100, 100, 300, 300]]))
+
+    task = Relabel(
+        frags_data=Labels(store=frags_path),
+        seg_data=Labels(store=seg_path),
+        lut=[round_0, round_1],
+        block_size=Coordinate(10, 10),
+    )
+    task.init()
+    with task.process_block_func() as process_block:
+        process_block(block_2d)
+
+    result = task.seg_data.array("r")[:]
+    expected = np.zeros_like(frags_data, dtype=np.uint64)
+    for frag_id, seg_id in [(1, 100), (2, 100), (3, 300), (4, 300)]:
+        expected[frags_data == frag_id] = seg_id
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_relabel_single_lut_in_a_list_matches_bare_lut(labels_2d, block_2d, tmp_path):
+    """A one-element list is the same as passing the LUT directly."""
+    frags_path, _ = labels_2d
+    lut = LUT(path=tmp_path / "lut.npz")
+    lut.save(np.array([[1, 2, 3, 4], [10, 20, 30, 40]]))
+
+    results = []
+    for i, spec in enumerate([lut, [lut]]):
+        task = Relabel(
+            frags_data=Labels(store=frags_path),
+            seg_data=Labels(store=tmp_path / "test.zarr" / f"seg_{i}"),
+            lut=spec,
+            block_size=Coordinate(10, 10),
+        )
+        task.init()
+        with task.process_block_func() as process_block:
+            process_block(block_2d)
+        results.append(task.seg_data.array("r")[:])
+
+    np.testing.assert_array_equal(results[0], results[1])
