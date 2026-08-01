@@ -4,7 +4,7 @@ from typing import Literal
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
-from volara.lut import LUT
+from volara.lut import LUT, LUTS
 from volara.tmp import (
     filter_mapping_to_block,
     prepare_mapping,
@@ -32,7 +32,7 @@ class Relabel(BlockwiseTask):
     """
     The segments dataset to which we write the relabeled segment IDs.
     """
-    lut: LUT
+    lut: LUT | list[LUT]
     """
     The path to the lookup table (LUT) that maps fragment IDs to segment IDs.
     """
@@ -116,7 +116,15 @@ class Relabel(BlockwiseTask):
         frags = self.frags_data.array("r")
         segs = self.seg_data.array("r+")
 
-        mapping = self.lut.load()
+        # A list of LUTs is one per round of a recursive/iterative clustering:
+        # round N maps its own fragment ids onto round N+1's. `load_iterated`
+        # composes them in order, so the result maps original fragments to final
+        # segments. Composed once here, not per block.
+        if isinstance(self.lut, list):
+            mapping = LUTS(luts=self.lut).load_iterated()
+        else:
+            mapping = self.lut.load()
+        assert mapping is not None, f"Unable to load LUT(s) from {self.lut}"
         src_sorted, dst_sorted = prepare_mapping(mapping[0], mapping[1])
 
         warmup_replace_values_sorted()

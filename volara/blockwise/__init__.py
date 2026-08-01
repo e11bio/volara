@@ -11,6 +11,7 @@ from .distance_agglom import (
 )
 from .extract_frags import ExtractFrags as ExtractFrags
 from .graph_mws import GraphMWS as GraphMWS
+from .graph_mws import IterativeGraphMWS as IterativeGraphMWS
 from .intensity_correction import CLAHE as CLAHE
 from .lambda_task import LambdaTask as LambdaTask
 from .register import ApplyShift as ApplyShift
@@ -73,6 +74,7 @@ __all__ = [
     "DistanceAgglom",
     "ExtractFrags",
     "GraphMWS",
+    "IterativeGraphMWS",
     "Relabel",
     "SeededExtractFrags",
     "Threshold",

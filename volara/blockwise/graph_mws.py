@@ -501,13 +501,16 @@ class IterativeGraphMWS(BlockwiseTask):
                         **agglomerated_edge_attrs,
                     )
 
-                out_rag_provider.write_graph(out_graph, block.write_roi)
-                raise NotImplementedError(
-                    """
-                    both sides was removed. For reading it was replaced with `read_on_v`. It has
-                    not been added to write_graph. Check if this is necessary
-                    """
-                )
+                # Nodes are owned by the block whose write_roi contains their
+                # position. Edges are not: `write_edges` filters on min(u, v)'s
+                # position only, so a segment edge whose lower-id endpoint lives
+                # in a neighbouring block would be dropped by both blocks. The
+                # `both_sides=True` flag this used to pass no longer exists on
+                # `write_graph`; writing edges unfiltered is the equivalent, and
+                # duplicates are dropped by the (u, v) primary key. Same pattern
+                # as `GraphMWSExtractFragments` below.
+                out_rag_provider.write_nodes(out_graph.nodes, block.write_roi)
+                out_rag_provider.write_edges(out_graph.nodes, out_graph.edges)
 
             yield process_block
 
