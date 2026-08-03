@@ -255,17 +255,25 @@ class PostgreSQL(DB):
     def drop(self) -> None:
         try:
             db = self.open("r+")
-            db._drop_tables()
-            db._create_tables()
-        except RuntimeError:
-            # DB doesn't exist yet
-            pass
+        except RuntimeError as e:
+            # A fresh database has no schema/metadata yet, so open('r+') (a read mode)
+            # raises "metadata does not exist". There is nothing to drop, so this is a
+            # successful no-op -- drop() must NEVER bring a database into existence
+            # (DB.init() is the only creator). Re-raise anything else so real failures
+            # (e.g. a broken connection) aren't silently swallowed.
+            if "metadata does not exist" in str(e):
+                return
+            raise
+        db._drop_tables()
+        db._create_tables()
 
     def drop_edges(self) -> None:
         try:
             db = self.open("r+")
-            db._drop_edges()
-            db._create_tables()
-        except RuntimeError:
-            # DB doesn't exist yet
-            pass
+        except RuntimeError as e:
+            # Fresh DB (no schema): nothing to drop, no-op. See drop() -- must not create.
+            if "metadata does not exist" in str(e):
+                return
+            raise
+        db._drop_edges()
+        db._create_tables()
