@@ -123,6 +123,26 @@ class _CallablePydanticAnnotation:
             serialization=core_schema.plain_serializer_function_ser_schema(to_b64),
         )
 
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        _schema: core_schema.CoreSchema,
+        _handler: Any,
+    ) -> dict[str, Any]:
+        # Without this, `model_json_schema()` raises PydanticInvalidForJsonSchema on any
+        # model with a PydanticCallable field: pydantic cannot derive a schema from the
+        # plain-validator-function core schema above. Declaring it explicitly is both
+        # correct and accurate -- the JSON form of a PydanticCallable IS a base64 string
+        # (see to_b64/from_b64) -- and it keeps every task/dataset model introspectable.
+        return {
+            "type": "string",
+            "format": "base64-cloudpickle",
+            "description": (
+                "A python callable, serialized with cloudpickle and base64-encoded. "
+                "Deserializing executes arbitrary code: only load configs you trust."
+            ),
+        }
+
 
 PydanticCallable = Annotated[Callable, _CallablePydanticAnnotation]
 
