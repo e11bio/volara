@@ -5,6 +5,7 @@ import pytest
 import yaml
 import zarr
 from funlib.geometry import Coordinate
+from funlib.persistence import prepare_ds
 from pydantic import ValidationError
 
 from volara.datasets import LSD, Affs, Labels, Raw
@@ -227,3 +228,37 @@ def test_attrs_labels_lsd():
 
     lsd = LSD(store="dummy")
     assert lsd.attrs == {"lsds": True}
+
+
+def test_list_channels_keep_the_array_writeable(tmp_path):
+    """List-based `channels` must use a native slice op, not a callable.
+
+    funlib.persistence marks an array unwriteable as soon as a custom callable lazy
+    op is applied, so selecting channels with `lambda d: d[channels]` silently makes
+    every OUTPUT dataset unwritable -- the write then fails at block-process time,
+    not at config time.
+
+    pytest tests/test_dataset.py::test_list_channels_keep_the_array_writeable
+    """
+    store = tmp_path / "d.zarr" / "labels"
+    prepare_ds(
+        store,
+        shape=(5, 4, 8, 8),
+        offset=(0, 0, 0),
+        voxel_size=Coordinate(1, 1, 1),
+        axis_names=["c^", "z", "y", "x"],
+        dtype=np.uint8,
+        mode="w",
+    )[:] = np.arange(5 * 4 * 8 * 8, dtype=np.uint8).reshape(5, 4, 8, 8)
+
+    arr = Labels(store=store, channels=[[0, 2]]).array(mode="a")
+
+    # Correct selection...
+    expected = np.arange(5 * 4 * 8 * 8, dtype=np.uint8).reshape(5, 4, 8, 8)[[0, 2]]
+    assert arr.shape == expected.shape
+    np.testing.assert_array_equal(arr[:], expected)
+
+    # ...and still writeable, which a callable lazy op would have prevented.
+    assert arr.is_writeable
+    arr[:] = np.zeros_like(expected)
+    np.testing.assert_array_equal(arr[:], np.zeros_like(expected))
