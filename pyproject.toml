@@ -49,13 +49,14 @@ dev = [
 docs = [
     "autodoc_pydantic>=2.0",
     "sphinx-autodoc-typehints>=2.0",
-    "sphinx-material>=0.0.36",
     "sphinx-click>=6.0",
     "myst-parser>=4.0",
     "jupyter-sphinx>=0.5",
     "matplotlib>=3.0",
+    # pooch is currently unused, but deliberately retained: it is the intended
+    # mechanism for fetching the CREMI sample at docs-build time instead of
+    # tracking it in git (see issue #49). Do not sweep it as "unused".
     "pooch>=1.8",
-    "wget>=3.2",
     "funlib-show-neuroglancer>=0.2",
     "nbsphinx>=0.9.7",
     "jupytext>=1.16.7",
