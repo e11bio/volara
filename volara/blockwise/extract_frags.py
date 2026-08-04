@@ -16,7 +16,7 @@ from skimage.morphology import remove_small_objects
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
-from ..tmp import replace_values
+from ..segment_utils import replace_values
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 

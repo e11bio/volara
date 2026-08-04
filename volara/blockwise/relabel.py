@@ -5,7 +5,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 
 from volara.lut import LUT
-from volara.tmp import (
+from volara.segment_utils import (
     filter_mapping_to_block,
     prepare_mapping,
     replace_values_sorted,

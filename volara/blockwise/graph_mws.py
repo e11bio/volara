@@ -13,7 +13,7 @@ from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 
 from volara.lut import LUT, LUTS
-from volara.tmp import replace_values
+from volara.segment_utils import replace_values
 
 from ..dbs import PostgreSQL, SQLite
 from ..utils import PydanticCoordinate

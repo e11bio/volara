@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from volara.tmp import replace_values
+from volara.segment_utils import replace_values
 
 from .utils import StrictBaseModel
 

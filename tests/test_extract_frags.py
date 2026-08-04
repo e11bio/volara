@@ -18,7 +18,7 @@ from scipy import ndimage
 from volara.blockwise import ExtractFrags
 from volara.datasets import Affs, Labels
 from volara.dbs import SQLite
-from volara.tmp import replace_values
+from volara.segment_utils import replace_values
 
 
 def make_task(affs_path, tmp_path, **kwargs) -> ExtractFrags:
