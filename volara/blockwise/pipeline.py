@@ -163,6 +163,11 @@ class Pipeline:
                 _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
                 server.run_blockwise(all_tasks)
 
-    def drop(self):
+    def drop(self, drop_outputs: bool = True):
+        """
+        Drop every task in the pipeline. ``drop_outputs`` is forwarded to
+        :meth:`BlockwiseTask.drop`; pass ``False`` to reset only the block-done
+        caches and logs and keep the tasks' outputs.
+        """
         for task in self.task_graph.nodes():
-            task.drop()
+            task.drop(drop_outputs=drop_outputs)
