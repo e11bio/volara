@@ -71,6 +71,42 @@ def test_drop_removes_meta_dir(tmp_path):
     assert not t.meta_dir.exists()
 
 
+DROP_ARTIFACTS_CALLS: list[str] = []
+
+
+class RecordingTask(DummyTask):
+    """DummyTask that records every ``drop_artifacts`` call."""
+
+    def drop_artifacts(self):
+        DROP_ARTIFACTS_CALLS.append(self.task_name)
+
+
+def test_drop_calls_drop_artifacts_by_default(tmp_path):
+    """drop() is a full reset: meta dir removed and outputs dropped."""
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    DROP_ARTIFACTS_CALLS.clear()
+    t = RecordingTask()
+    t.meta_dir.mkdir(parents=True)
+    t.drop()
+    assert not t.meta_dir.exists()
+    assert DROP_ARTIFACTS_CALLS == [t.task_name]
+
+
+def test_drop_outputs_false_skips_drop_artifacts(tmp_path):
+    """drop(drop_outputs=False) clears the meta dir but keeps the outputs."""
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    DROP_ARTIFACTS_CALLS.clear()
+    t = RecordingTask()
+    t.meta_dir.mkdir(parents=True)
+    t.drop(drop_outputs=False)
+    assert not t.meta_dir.exists()
+    assert DROP_ARTIFACTS_CALLS == []
+
+
 def test_init_block_array(tmp_path):
     from volara.logging import set_log_basedir
 
