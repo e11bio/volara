@@ -107,7 +107,6 @@ class Pipeline:
         try:
             with ExitStack() as stack:
                 task_map: dict[BlockwiseTask, daisy.Task] = {}
-                sinks = []
                 for node in node_ordering:
                     upstream_tasks = [
                         task_map[upstream]
@@ -118,8 +117,6 @@ class Pipeline:
                     )
                     task = stack.enter_context(task)
                     task_map[node] = task
-                    if spoof_graph.out_degree(node) == 0:
-                        sinks.append(task)
 
                 all_tasks = list(task_map.values())
 
@@ -146,7 +143,6 @@ class Pipeline:
             )
 
             task_map: dict[BlockwiseTask, daisy.Task] = {}
-            sinks = []
             for node in node_ordering:
                 upstream_tasks = [
                     task_map[upstream]
@@ -157,8 +153,6 @@ class Pipeline:
                 )
                 task = stack.enter_context(task)
                 task_map[node] = task
-                if self.task_graph.out_degree(node) == 0:
-                    sinks.append(task)
 
             all_tasks = list(task_map.values())
 
