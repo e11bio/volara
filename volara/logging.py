@@ -9,20 +9,18 @@ daisy.logging.set_log_basedir(LOG_BASEDIR)
 
 def set_log_basedir(path: Path | str):
     """Set the base directory for logging (indivudal worker logs and detailed
-    task summaries). If set to ``None``, all logging will be shown on the
-    command line (which can get very messy).
+    task summaries). ``None`` is not a valid log directory and raises
+    ``TypeError``.
 
     Default is ``./volara_logs``.
     """
+    # Note: this coercion is what rejects ``None`` - ``Path(None)`` raises
+    # ``TypeError``, so the value below is always a real path.
     path = Path(path)
 
     global LOG_BASEDIR
 
-    if path is not None:
-        LOG_BASEDIR = Path(path)
-    else:
-        raise NotImplementedError("None is not a valid log directory")
-        LOG_BASEDIR = None
+    LOG_BASEDIR = path
 
     daisy.logging.set_log_basedir(LOG_BASEDIR)
 

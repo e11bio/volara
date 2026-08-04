@@ -6,7 +6,7 @@ from funlib.geometry import Coordinate, Roi
 from volara.blockwise import Relabel
 from volara.datasets import Labels
 from volara.lut import LUT
-from volara.tmp import (
+from volara.segment_utils import (
     filter_mapping_to_block,
     prepare_mapping,
     replace_values,

@@ -107,7 +107,6 @@ class Pipeline:
         try:
             with ExitStack() as stack:
                 task_map: dict[BlockwiseTask, daisy.Task] = {}
-                sinks = []
                 for node in node_ordering:
                     upstream_tasks = [
                         task_map[upstream]
@@ -118,8 +117,6 @@ class Pipeline:
                     )
                     task = stack.enter_context(task)
                     task_map[node] = task
-                    if spoof_graph.out_degree(node) == 0:
-                        sinks.append(task)
 
                 all_tasks = list(task_map.values())
 
@@ -155,7 +152,6 @@ class Pipeline:
             )
 
             task_map: dict[BlockwiseTask, daisy.Task] = {}
-            sinks = []
             for node in node_ordering:
                 upstream_tasks = [
                     task_map[upstream]
@@ -166,8 +162,6 @@ class Pipeline:
                 )
                 task = stack.enter_context(task)
                 task_map[node] = task
-                if self.task_graph.out_degree(node) == 0:
-                    sinks.append(task)
 
             all_tasks = list(task_map.values())
 
@@ -184,6 +178,11 @@ class Pipeline:
                 _cl_monitor = daisy.cl_monitor.CLMonitor(server)  # type: ignore[unresolved-attribute]
                 return server.run_blockwise(all_tasks)
 
-    def drop(self):
+    def drop(self, drop_outputs: bool = True):
+        """
+        Drop every task in the pipeline. ``drop_outputs`` is forwarded to
+        :meth:`BlockwiseTask.drop`; pass ``False`` to reset only the block-done
+        caches and logs and keep the tasks' outputs.
+        """
         for task in self.task_graph.nodes():
-            task.drop()
+            task.drop(drop_outputs=drop_outputs)

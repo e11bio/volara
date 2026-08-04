@@ -23,7 +23,7 @@ Tutorial
     from skimage import data
     from skimage.filters import gaussian
 
-    from volara.tmp import seg_to_affgraph
+    from volara.segment_utils import seg_to_affgraph
 
     # Download the data
     cell_data = (data.cells3d().transpose((1, 0, 2, 3)) / 256).astype(np.uint8)

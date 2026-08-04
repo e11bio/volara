@@ -16,7 +16,7 @@ from skimage.morphology import remove_small_objects
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
-from ..tmp import replace_values
+from ..segment_utils import replace_values
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -223,9 +223,12 @@ class ExtractFrags(BlockwiseTask):
     def get_fragments(self, affs_data):
         fragments_data = self.compute_fragments(affs_data)
 
-        # # mask fragments if provided
-        # if mask is not None:
-        #     fragments_data *= mask_data.astype(np.uint64)
+        # TODO: also mask out the fragments themselves when a mask is provided.
+        # `process_block` currently applies the mask to the affinities before
+        # fragments are computed, so masked-out regions are only indirectly
+        # suppressed. Zeroing the fragments here (and skipping fully-masked
+        # blocks outright) is part of the generalized masking support tracked in
+        # https://github.com/e11bio/volara/issues/9
 
         # filter fragments
         if self.filter_fragments > 0:
