@@ -116,6 +116,9 @@ def benchmark_run(
     trace_dir = benchmark_dir / "traces"
     if trace_dir.exists():
         rmtree(trace_dir)
+    # The cached handle in _process_trace_file points into the directory just removed. A second
+    # benchmark() in one interpreter would hit that cache, skip the mkdir, and fail to append.
+    _reset_trace_file()
 
     previous_log_basedir = get_log_basedir()
     log_basedir = benchmark_dir if relocate_logs else previous_log_basedir
@@ -184,10 +187,19 @@ def _process_trace_file(trace_dir: Path) -> Path:
 
     pid = os.getpid()
     if _trace_file is None or _trace_pid != pid or _trace_file.parent != trace_dir:
-        trace_dir.mkdir(parents=True, exist_ok=True)
         _trace_file = trace_dir / f"{pid}-{uuid.uuid4().hex[:8]}{TRACE_SUFFIX}"
         _trace_pid = pid
+    # Unconditional: the directory can be removed under a live cache entry (benchmark_run wipes it
+    # at the start of every run), and a cache hit must still hand back a writable path.
+    trace_dir.mkdir(parents=True, exist_ok=True)
     return _trace_file
+
+
+def _reset_trace_file() -> None:
+    """Forget this process's cached trace file, so the next write mints a fresh one."""
+    global _trace_file, _trace_pid
+    _trace_file = None
+    _trace_pid = None
 
 
 def read_traces(trace_dir: Path) -> list[dict]:

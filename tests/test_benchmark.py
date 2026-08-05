@@ -88,6 +88,38 @@ def test_benchmark_records_traces(tiny_task):
         assert "Process Block" in report.read_text()
 
 
+def test_benchmark_twice_in_one_process(tiny_task):
+    """Two benchmark() calls in one interpreter must both work.
+
+    Regression test: ``benchmark_run`` wipes ``volara_benchmark_logs/traces`` at the start of every
+    run, but ``_process_trace_file`` caches its handle on ``(pid, trace_dir)``. On a second call
+    both still matched, so the cache hit skipped the ``mkdir`` and returned a path whose directory
+    had just been removed — the first append raised ``FileNotFoundError`` and the report came back
+    empty. Every other test gets a fresh ``tmp_path`` cwd, so none of them hit the cache.
+
+    pytest tests/test_benchmark.py::test_benchmark_twice_in_one_process
+    """
+    tiny_task().benchmark(multiprocessing=False)
+    first = traced_operations()
+    assert len(first) > 0, "the first benchmark() recorded nothing"
+
+    # same interpreter, same cwd -> same (pid, trace_dir) cache key as the run above
+    tiny_task().benchmark(multiprocessing=False)
+    second = traced_operations()
+
+    assert len(second) > 0, "the second benchmark() in one process recorded nothing"
+    assert "init" in {operation for _, operation in second}
+
+    # The report must be this run's, written fresh -- the bug left the trace directory missing, so
+    # print_report found nothing and said "No benchmark data available".
+    report = Path("volara_benchmark_report") / "time.csv"
+    assert report.exists() and report.read_text().strip(), "the second run wrote no report"
+
+    # Not asserted: that both runs record the same operations. They do not, and correctly so -- the
+    # first run marks the blocks done, so the second honours that cache and skips them. That is
+    # `test_benchmark_runs_the_task_for_real`'s territory, not this test's.
+
+
 def test_benchmark_runs_the_task_for_real(tiny_task):
     """The default benchmark path is an ordinary run, not a dry run.
 
