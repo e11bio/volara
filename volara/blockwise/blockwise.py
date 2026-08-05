@@ -19,7 +19,12 @@ from volara.logging import get_log_basedir, set_log_basedir
 
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
-from .benchmark import BenchmarkLogger
+from .benchmark import (
+    BenchmarkLogger,
+    benchmark_run,
+    get_benchmark_dir,
+    get_benchmark_log_basedir,
+)
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
@@ -257,6 +262,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Start our workers and run through every block until a task
         is complete.
         """
+        benchmark_log_basedir = get_benchmark_log_basedir()
+        if benchmark_log_basedir is not None:
+            # A benchmark run may relocate the log basedir, and with it this
+            # task's meta dir and block-done array. Adopt it before anything
+            # resolves a path off it -- daisy's worker context cannot be relied
+            # on to carry it (see BENCHMARK_LOG_BASEDIR_ENV_VAR).
+            set_log_basedir(benchmark_log_basedir)
+
         benchmark_logger = self.get_benchmark_logger()
         with ExitStack() as stack:
             with benchmark_logger.trace("Process Block Setup"):
@@ -265,11 +278,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
             def worker_loop():
                 worker_benchmark_logger = self.get_benchmark_logger()
                 client = daisy.Client()
-                # TODO: this shouldn't be necessary, daisy should be doing this for us
-                try:
-                    set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
-                except KeyError as e:
-                    raise ValueError(client.context) from e
+                if benchmark_log_basedir is None:
+                    # TODO: this shouldn't be necessary, daisy should be doing
+                    # this for us
+                    try:
+                        set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
+                    except KeyError as e:
+                        raise ValueError(client.context) from e
                 mark_block_done = self.mark_block_done_func()
 
                 while True:
@@ -408,9 +423,17 @@ class BlockwiseTask(StrictBaseModel, ABC):
             yield task
 
     def get_benchmark_logger(self) -> BenchmarkLogger:
-        _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        """
+        The logger every ``trace``/``log`` call in this codebase goes through.
+
+        Returns a live logger only while a :meth:`benchmark` run is in progress
+        (signalled by ``VOLARA_BENCHMARK_DIR``, which ``benchmarking()`` exports
+        so that worker processes see it too). Outside of a benchmark run
+        ``get_benchmark_dir()`` is ``None`` and every ``trace``/``log`` becomes a
+        no-op -- ordinary ``run_blockwise`` executions stay untraced.
+        """
         return BenchmarkLogger(
-            None,
+            get_benchmark_dir(),
             task=self.task_name,
         )
 
@@ -428,48 +451,48 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 data[name] = value
         return self.__class__(**data)
 
-    def benchmark(self, multiprocessing: bool = True) -> dict:
+    def benchmark(
+        self,
+        multiprocessing: bool = True,
+        spoof: bool = False,
+        out_dir: Path | None = None,
+    ) -> dict:
         """
-        A helper function for benchmarking and debugging a blockwise task or pipeline.
+        Run this task with tracing switched on and write a timing, memory and
+        io report.
 
-        Used as a "dry run" of `run_blockwise` without saving any outputs.
+        By default this is an ordinary :meth:`run_blockwise` with tracing added:
+        real outputs, real block done dataset, already-completed blocks still
+        skipped. That is the common case -- benchmarking a job as it runs
+        normally, the first time.
 
-        - Will not skip blocks that have already been processed. You can benchmark a task
-            that has already been run.
-        - Will not save any run artifacts such as block done datasets, output datasets,
-            graph nodes or edges, or look up tables. The only thing that will be saved are the
-            worker logs and a timing report.
+        Args:
+            spoof: run against spoofed outputs instead, dropping every artifact
+                afterwards, so that a task which has already run (or is running)
+                can be benchmarked without disturbing the data it produced. No
+                block is skipped in this mode: the spoofed task has its own,
+                empty, block done dataset.
+            out_dir: where to write the report. Defaults to
+                ``./volara_benchmark_report``.
         """
-        from volara.logging import set_log_basedir
+        with benchmark_run(out_dir=out_dir, relocate_logs=spoof):
+            run_self = (
+                self.spoof(Path("volara_benchmark_logs/spoof")) if spoof else self
+            )
 
-        log_basedir = get_log_basedir()
-        set_log_basedir("volara_benchmark_logs")
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
-        if benchmark_db_path.exists():
-            benchmark_db_path.unlink()
-        benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
-        benchmark_logger._init_db()
+            try:
+                with run_self.task(multiprocessing=multiprocessing) as task:
+                    tasks = [task]
+                    if multiprocessing:
+                        result = daisy.run_blockwise(tasks)  # noqa
+                    else:
+                        server = daisy.SerialServer()
+                        _cl_monitor = CLMonitor(server)
+                        result = server.run_blockwise(tasks)
 
-        spoof_dir = Path("volara_benchmark_logs/spoof")
-        debug_self = self.spoof(spoof_dir)
-
-        try:
-            with debug_self.task(multiprocessing=multiprocessing) as task:
-                tasks = [task]
-                if multiprocessing:
-                    result = daisy.run_blockwise(tasks)  # noqa
-                else:
-                    server = daisy.SerialServer()
-                    _cl_monitor = CLMonitor(server)
-                    result = server.run_blockwise(tasks)
-
-        except Exception as e:
-            raise e
-
-        finally:
-            debug_self.drop()
-            benchmark_logger.print_report()
-            set_log_basedir(log_basedir)
+            finally:
+                if spoof:
+                    run_self.drop()
 
         return result
 
