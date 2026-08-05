@@ -244,7 +244,7 @@ def test_list_channels_keep_the_array_writeable(tmp_path):
     prepare_ds(
         store,
         shape=(5, 4, 8, 8),
-        offset=(0, 0, 0),
+        offset=Coordinate(0, 0, 0),
         voxel_size=Coordinate(1, 1, 1),
         axis_names=["c^", "z", "y", "x"],
         dtype=np.uint8,
