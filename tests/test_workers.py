@@ -47,7 +47,13 @@ def cluster_shims(tmp_path, monkeypatch):
 
 def test_slurm_command_is_blocking_srun(cluster_shims):
     """Slurm workers submit via srun: it blocks for the job's lifetime (the spawn
-    contract) and ties the job to the client, unlike fire-and-forget sbatch."""
+    contract) and ties the job to the client, unlike fire-and-forget sbatch.
+
+    Asserted as full-argv equality, not membership: a repeated flag or a repeated
+    trailing worker command is invisible to ``in``/suffix checks, and a doubled
+    worker command is exactly what click rejects with "Got unexpected extra
+    arguments" -- killing every block of every stage.
+    """
     w = workers.SlurmWorker(queue="gpu-q", num_gpus=1, num_cpus=4)
     cmd = w.get_slurm_command(
         command=["volara-cli", "blockwise-worker", "-c", "c.json"],
@@ -56,26 +62,52 @@ def test_slurm_command_is_blocking_srun(cluster_shims):
         num_gpus=1,
         num_cpus=4,
     )
-    assert cmd[0] == "srun", cmd
-    assert "--job-name=mytask" in cmd, cmd
-    assert "--partition=gpu-q" in cmd, cmd
-    assert "--gpus=1" in cmd and "--cpus-per-task=4" in cmd, cmd
     # the worker command rides along as argv (srun has no sbatch-style --wrap)
-    assert cmd[-4:] == ["volara-cli", "blockwise-worker", "-c", "c.json"], cmd
+    assert cmd == [
+        "srun",
+        "--job-name=mytask",
+        "--cpus-per-task=4",
+        "--gpus=1",
+        "--mem=15564",
+        "--partition=gpu-q",
+        "--output=%x_%j.log",
+        "--error=%x_%j.err",
+        "volara-cli",
+        "blockwise-worker",
+        "-c",
+        "c.json",
+    ], cmd
+    assert cmd.count("blockwise-worker") == 1, cmd
     assert not any(a == "sbatch" or a.startswith("--wrap") for a in cmd), cmd
 
 
 def test_lsf_command_is_blocking_bsub(cluster_shims):
-    """LSF workers submit via bsub -K (submit and wait for completion)."""
+    """LSF workers submit via bsub -K (submit and wait for completion).
+
+    Full-argv equality for the same reason as the slurm case above.
+    """
     w = workers.LSFWorker(queue="gpu-q")
     cmd = w.get_lsf_command(
         command=["volara-cli", "blockwise-worker", "-c", "c.json"],
         job_name="mytask",
         queue="gpu-q",
     )
-    assert cmd[:2] == ["bsub", "-K"], cmd
-    assert "-J" in cmd and cmd[cmd.index("-J") + 1] == "mytask", cmd
-    assert cmd[-4:] == ["volara-cli", "blockwise-worker", "-c", "c.json"], cmd
+    assert cmd == [
+        "bsub",
+        "-K",
+        "-J",
+        "mytask",
+        "-n",
+        "1",
+        "-q",
+        "gpu-q",
+        "volara-cli",
+        "blockwise-worker",
+        "-c",
+        "c.json",
+    ], cmd
+    assert cmd.count("blockwise-worker") == 1, cmd
+    assert cmd.count("-J") == 1, cmd
 
 
 def test_get_command_names_job_after_task(cluster_shims, monkeypatch, tmp_path):
