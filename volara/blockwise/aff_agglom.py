@@ -1,11 +1,11 @@
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from itertools import chain
-from typing import Annotated, Callable, Generator, Literal
+from typing import Annotated, Callable, Generator, Iterator, Literal
 
+import daisy
 import networkx as nx
 import numpy as np
-import scipy.ndimage
 from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
@@ -67,6 +67,14 @@ class AffAgglom(BlockwiseTask):
         }
 
     """
+
+    bulk_write: bool = False
+    """
+    Whether to bulk-write to database (false by default). This removes/rebuilds
+    indexes, and sets other useful flags for writing large amounts of data
+    quickly, which can be useful for large runs to prevent database bottlenecks.
+    """
+
     fit: Literal["shrink"] = "shrink"
     """
     The boundary behavior for our daisy task.
@@ -107,16 +115,29 @@ class AffAgglom(BlockwiseTask):
         benchmark_logger = self.get_benchmark_logger()
 
         with benchmark_logger.trace("Preprocess fragments"):
-            fragment_ids = [int(x) for x in np.unique(frags) if x != 0]
-            num_frags = len(fragment_ids)
-            frag_mapping = {
-                old: seq for seq, old in zip(range(1, num_frags + 1), fragment_ids)
-            }
-            rev_mapping = {v: k for k, v in frag_mapping.items()}
-            for old, seq in frag_mapping.items():
-                frags[frags == old] = seq
+            # Relabel fragments to a dense 1..k range so the cantor pairings in
+            # count_affs stay small. np.unique(return_inverse=True) is this
+            # relabel, done in C, rather than one full-array scan per fragment
+            # (which was O(n_frags * n_voxels)).
+            unique_vals, inverse = np.unique(frags, return_inverse=True)
 
-            if len(fragment_ids) == 0:
+            # 0 sorts first, so when background is present `inverse` already maps
+            # 0 -> 0 and fragments -> 1..k. When the block has NO background,
+            # `inverse` would map the lowest fragment id to 0 and silently turn it
+            # into background, so shift by one in that case.
+            has_background = unique_vals.size > 0 and unique_vals[0] == 0
+            frags = inverse.reshape(frags.shape)
+            if not has_background:
+                frags = frags + 1
+            frags = frags.astype(np.uint64)
+
+            first_seq = 0 if has_background else 1
+            rev_mapping = {
+                seq + first_seq: int(orig) for seq, orig in enumerate(unique_vals)
+            }
+            num_frags = unique_vals.size - (1 if has_background else 0)
+
+            if num_frags == 0:
                 return
 
             neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
@@ -124,60 +145,53 @@ class AffAgglom(BlockwiseTask):
             # affs_data.neighborhood cannot be None, assert called to make mypy happy
             assert self.affs_data.neighborhood is not None
 
+        def slices(offset: Coordinate):
+            base_slice = tuple(
+                slice(-m if m < 0 else None, -m if m > 0 else None) for m in offset
+            )
+            offset_slice = tuple(
+                slice(m if m > 0 else None, m if m < 0 else None) for m in offset
+            )
+            return base_slice, offset_slice
+
         def count_affs(
             fragments: np.ndarray, affinities: np.ndarray, offset: Coordinate
         ) -> dict[int, tuple[float, float]]:
-            base_frags = frags[
-                tuple(
-                    slice(-m if m < 0 else None, -m if m > 0 else None) for m in offset
-                )
-            ]
-            base_affinities = affinities[
-                tuple(
-                    slice(-m if m < 0 else None, -m if m > 0 else None) for m in offset
-                )
-            ]
-            offset_frags = fragments[
-                tuple(slice(m if m > 0 else None, m if m < 0 else None) for m in offset)
-            ]
+            base_slice, offset_slice = slices(offset)
+            base_frags = fragments[base_slice]
+            base_affinities = affinities[base_slice]
+            offset_frags = fragments[offset_slice]
 
-            mask = (offset_frags != base_frags) * (offset_frags > 0) * (base_frags > 0)
+            mask = (offset_frags != base_frags) & (offset_frags > 0) & (base_frags > 0)
 
-            # cantor pairing function
+            # Only voxels on a boundary between two distinct fragments carry an
+            # edge - typically a few percent of the block. Select them first and
+            # do all the arithmetic on that small array, rather than computing
+            # full-volume cantor pairings and handing them to
+            # scipy.ndimage.mean/sum_labels (which then rescan every voxel
+            u_frags = offset_frags[mask].astype(np.uint64)
+            v_frags = base_frags[mask].astype(np.uint64)
+            if u_frags.size == 0:
+                return {}
+
+            # cantor pairing function, in integers:
             # 1/2 (k1 + k2)(k1 + k2 + 1) + k2
-            k1, k2 = (
-                np.min(
-                    [
-                        offset_frags,
-                        base_frags,
-                    ],
-                    axis=0,
-                ),
-                np.max(
-                    [
-                        offset_frags,
-                        base_frags,
-                    ],
-                    axis=0,
-                ),
-            )
-            cantor_pairings = ((k1 + k2) * (k1 + k2 + 1) / 2 + k2) * mask
-            cantor_ids = np.array([x for x in np.unique(cantor_pairings) if x != 0])
-            scores = scipy.ndimage.mean(
-                base_affinities,
-                cantor_pairings,
-                cantor_ids,
-            )
-            counts = scipy.ndimage.sum_labels(
-                mask,
-                cantor_pairings,
-                cantor_ids,
-            )
-            mapping = {
-                cantor_id: (mean_score, count)
-                for cantor_id, mean_score, count in zip(cantor_ids, scores, counts)
+            # Kept in uint64 rather than float64 - the ids are exact here,
+            # whereas float64 silently collides once the pairing exceeds 2**53.
+            k1 = np.minimum(u_frags, v_frags)
+            k2 = np.maximum(u_frags, v_frags)
+            k_sum = k1 + k2
+            cantor_pairings = (k_sum * (k_sum + 1)) // 2 + k2
+
+            cantor_ids, inverse = np.unique(cantor_pairings, return_inverse=True)
+            weights = base_affinities[mask]
+            counts = np.bincount(inverse)
+            sums = np.bincount(inverse, weights=weights)
+
+            return {
+                int(cantor_id): (float(total / count), float(count))
+                for cantor_id, total, count in zip(cantor_ids, sums, counts)
             }
-            return mapping
 
         with benchmark_logger.trace("Count affinities"):
             for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
@@ -214,7 +228,17 @@ class AffAgglom(BlockwiseTask):
 
         with benchmark_logger.trace("Read data in block"):
             frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
-            rag = rag_provider[block.read_roi]
+
+            if self.bulk_write:
+                rag = nx.Graph()
+            else:
+                rag = rag_provider[block.read_roi]
+                # Note: cannot assert rag.number_of_edges() == 0 — read_roi
+                # extends into neighboring blocks' write_rois (non-zero
+                # context, read_write_conflict=False), so once any neighbor
+                # commits its edges they show up here through the context
+                # overlap. The downstream write_graph(write_roi) filter is
+                # what keeps each edge attributed to a single block.
 
             affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
@@ -229,7 +253,31 @@ class AffAgglom(BlockwiseTask):
             )
 
         with benchmark_logger.trace("Write RAG edges"):
-            rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+            if self.bulk_write:
+                # In bulk mode the rag's nodes are bare (auto-created by
+                # add_edge), so funlib's bulk_write_edges roi/position
+                # filter would drop every edge — every node looks like
+                # "no position". Filter here by fragment id instead: emit
+                # edge (u, v) iff min(u, v) has voxels in block.write_roi.
+                # Fragments that straddle block boundaries may be emitted
+                # by more than one block; INSERT OR IGNORE in the bulk
+                # insert keeps the first writer's row.
+                write_frags_data = frags.to_ndarray(block.write_roi, fill_value=0)
+                home_ids = {int(i) for i in np.unique(write_frags_data) if i != 0}
+                filtered = nx.Graph()
+                for u, v, data in rag.edges(data=True):
+                    if min(int(u), int(v)) in home_ids:
+                        filtered.add_edge(u, v, **data)
+                rag_provider.bulk_write_edges(filtered.nodes, filtered.edges, roi=None)
+            else:
+                rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+
+    def _task_context(self, worker):
+        if self.bulk_write:
+            return self.db.open("r+").bulk_write_mode(
+                worker=worker, node_writes=False, edge_writes=True
+            )
+        return nullcontext()
 
     def init(self) -> None:
         self.db.init()
@@ -248,4 +296,19 @@ class AffAgglom(BlockwiseTask):
                 rag_provider,
             )
 
-        yield process_block
+        with self._task_context(worker=True):
+            yield process_block
+
+    @contextmanager
+    def task(
+        self,
+        upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
+        multiprocessing: bool = True,
+    ) -> Iterator[daisy.Task]:
+
+        # temporary workaround since bulk_write_mode needs to modify the db
+        self.init()
+
+        with self._task_context(worker=False):
+            with super().task(upstream_tasks, multiprocessing) as task:
+                yield task

@@ -175,16 +175,26 @@ class BlockwiseTask(StrictBaseModel, ABC):
         process_block = self.process_block_func()
         process_block(block)
 
-    def drop(self, drop_outputs: bool = False) -> None:
+    def drop(self, drop_outputs: bool = True) -> None:
         """
         A helper function to drop any artifacts produced by a task
         and return to a state identical to before having executed the
         task.
+
+        Args:
+            drop_outputs: whether to also delete this task's outputs via
+                :meth:`drop_artifacts`. ``True`` (the default) is the full reset
+                described above, and is what ``drop()`` has always done. Pass
+                ``False`` to clear only the meta directory -- the worker logs and
+                the block-done cache -- which forces every block to be recomputed
+                on the next run while leaving the existing outputs (datasets, dbs,
+                luts) in place to be overwritten block by block.
         """
         # reset the blocks_done ds so that the task is rerun
         if self.meta_dir.exists():
             rmtree(self.meta_dir)
-        self.drop_artifacts()
+        if drop_outputs:
+            self.drop_artifacts()
 
     def check_block_func(self):
         """

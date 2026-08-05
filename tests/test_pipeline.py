@@ -77,3 +77,36 @@ def test_pipeline_drop(zarr_2d, tmp_path):
     pipeline.drop()
     assert not mask1_path.exists()
     assert not mask2_path.exists()
+
+
+def test_pipeline_drop_outputs_false(zarr_2d, tmp_path):
+    """Pipeline.drop forwards drop_outputs to every task."""
+    raw_path, _ = zarr_2d
+    mask1_path = tmp_path / "test.zarr" / "mask1"
+    mask2_path = tmp_path / "test.zarr" / "mask2"
+
+    task1 = Threshold(
+        in_data=Raw(store=raw_path),
+        mask=Labels(store=mask1_path),
+        threshold=0.5,
+        block_size=Coordinate(10, 10),
+    )
+    task2 = Threshold(
+        in_data=Raw(store=raw_path),
+        mask=Labels(store=mask2_path),
+        threshold=0.3,
+        block_size=Coordinate(10, 10),
+    )
+
+    for task in (task1, task2):
+        task.init()
+        task.init_block_array()
+    assert mask1_path.exists()
+    assert mask2_path.exists()
+
+    pipeline = task1 + task2
+    pipeline.drop(drop_outputs=False)
+    assert mask1_path.exists()
+    assert mask2_path.exists()
+    assert not task1.meta_dir.exists()
+    assert not task2.meta_dir.exists()

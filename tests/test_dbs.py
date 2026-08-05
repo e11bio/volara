@@ -143,3 +143,38 @@ def test_drop_does_not_create(db_type: str, tmp_path):
     # ...and must not have created it.
     with pytest.raises(RuntimeError):
         db.open("r")
+
+
+def test_drop_reraises_real_failures(monkeypatch):
+    """A real connection failure must NOT be swallowed by drop()/drop_edges().
+
+    Needs no live Postgres: the change is in the ``except`` clause, so we make
+    ``open()`` raise. Before the fix both methods caught every ``RuntimeError``,
+    so a refused connection was indistinguishable from a fresh database and the
+    drop silently "succeeded".
+
+    pytest tests/test_dbs.py::test_drop_reraises_real_failures
+    """
+    db = PostgreSQL(
+        node_attrs={"color": 3},
+        edge_attrs={"y_aff": "float"},
+        ndim=2,
+        name="volara_pytest_never_created",
+    )
+
+    def refused(*args, **kwargs):
+        raise RuntimeError("could not connect to server: Connection refused")
+
+    monkeypatch.setattr(PostgreSQL, "open", refused)
+    with pytest.raises(RuntimeError, match="Connection refused"):
+        db.drop()
+    with pytest.raises(RuntimeError, match="Connection refused"):
+        db.drop_edges()
+
+    # ...while a genuinely fresh database stays a silent no-op.
+    def fresh(*args, **kwargs):
+        raise RuntimeError("metadata does not exist")
+
+    monkeypatch.setattr(PostgreSQL, "open", fresh)
+    db.drop()
+    db.drop_edges()

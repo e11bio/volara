@@ -5,7 +5,12 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 
 from volara.lut import LUT
-from volara.tmp import replace_values
+from volara.segment_utils import (
+    filter_mapping_to_block,
+    prepare_mapping,
+    replace_values_sorted,
+    warmup_replace_values_sorted,
+)
 
 from ..datasets import Dataset, Labels
 from ..utils import PydanticCoordinate
@@ -83,12 +88,26 @@ class Relabel(BlockwiseTask):
             dtype=self._out_array_dtype,
         )
 
-    def map_block(self, block, frags, segs, mapping):
+    def map_block(self, block, frags, segs, src_sorted, dst_sorted):
         benchmark_logger = self.get_benchmark_logger()
+
         with benchmark_logger.trace("Read Frags"):
-            in_frags = frags.to_ndarray(block.write_roi)
+            in_frags = np.ascontiguousarray(frags.to_ndarray(block.write_roi))
+
+        with benchmark_logger.trace("Filter Mapping"):
+            block_src, block_dst = filter_mapping_to_block(
+                in_frags,
+                src_sorted,
+                dst_sorted,
+            )
+
         with benchmark_logger.trace("Relabel"):
-            out_segs = replace_values(in_frags, mapping[0], mapping[1])
+            out_segs = replace_values_sorted(
+                in_frags,
+                block_src,
+                block_dst,
+            )
+
         with benchmark_logger.trace("Write Segments"):
             segs[block.write_roi] = out_segs
 
@@ -97,8 +116,12 @@ class Relabel(BlockwiseTask):
         frags = self.frags_data.array("r")
         segs = self.seg_data.array("r+")
 
+        mapping = self.lut.load()
+        src_sorted, dst_sorted = prepare_mapping(mapping[0], mapping[1])
+
+        warmup_replace_values_sorted()
+
         def process_block(block):
-            mapping = self.lut.load()
-            self.map_block(block, frags, segs, mapping)
+            self.map_block(block, frags, segs, src_sorted, dst_sorted)
 
         yield process_block

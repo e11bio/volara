@@ -70,6 +70,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/build/
 
 # PyBuilder
 .pybuilder/
@@ -162,7 +163,6 @@ cython_debug/
 #.idea/=
 
 .vscode
-docs/source/_build
 volara_logs
 uv.lock
 *.zarr

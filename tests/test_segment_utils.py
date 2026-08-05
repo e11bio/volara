@@ -1,6 +1,6 @@
 import numpy as np
 
-from volara.tmp import replace_values, seg_to_affgraph
+from volara.segment_utils import replace_values, seg_to_affgraph
 
 
 def test_seg_to_affgraph_2d():

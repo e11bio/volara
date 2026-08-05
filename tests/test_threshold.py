@@ -23,6 +23,32 @@ def test_threshold_init_and_drop(zarr_2d, tmp_path):
     assert not mask_path.exists()
 
 
+def test_threshold_drop_outputs_false_keeps_output(zarr_2d, tmp_path):
+    """drop(drop_outputs=False) resets the block-done cache but keeps the output.
+
+    drop() with the default (True) still deletes it.
+    """
+    raw_path, _ = zarr_2d
+    mask_path = tmp_path / "test.zarr" / "mask"
+    task = Threshold(
+        in_data=Raw(store=raw_path),
+        mask=Labels(store=mask_path),
+        threshold=0.5,
+        block_size=Coordinate(10, 10),
+    )
+    task.init()
+    task.init_block_array()
+    assert mask_path.exists()
+    assert task.block_ds.exists()
+
+    task.drop(drop_outputs=False)
+    assert mask_path.exists(), "drop_outputs=False must not delete the output"
+    assert not task.meta_dir.exists()
+
+    task.drop()
+    assert not mask_path.exists()
+
+
 def test_threshold_basic(zarr_2d, block_2d, tmp_path):
     """Threshold at 0.5 produces correct binary mask."""
     raw_path, data = zarr_2d
