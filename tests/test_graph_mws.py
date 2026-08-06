@@ -1,5 +1,6 @@
 import sqlite3
 
+import daisy
 import networkx as nx
 import numpy as np
 import pytest
@@ -54,6 +55,141 @@ def test_graph_mws_merge_split(sqlite_db_2d, block_2d, tmp_path, y_bias):
     # score = 1*0 + bias. Positive bias -> positive edge -> merge (1 seg).
     # Negative bias -> negative edge -> split (2 segs).
     assert len(np.unique(segments)) == 1 + (y_bias < 0)
+
+
+# ---------------------------------------------------------------------------
+# optimized flag
+#
+# The optimized path must produce the same segmentation, not merely a similar
+# one. Note it cannot produce the same LUT *array*: mws.cluster names each
+# segment after an arbitrary member of the cluster and that choice varies
+# between calls, so these compare the induced partition instead.
+# ---------------------------------------------------------------------------
+
+
+def _partition(lut):
+    """Fragment groupings, ignoring which member names each group."""
+    groups = {}
+    for frag, seg in zip(lut[0], lut[1]):
+        groups.setdefault(int(seg), set()).add(int(frag))
+    return frozenset(frozenset(g) for g in groups.values())
+
+
+@pytest.fixture()
+def tied_scores_db(tmp_path):
+    """A graph where the order tied edges arrive in changes the segmentation.
+
+    Skipping networkx is only safe if the optimized path reproduces networkx's
+    edge order, so the guard needs a graph that can actually tell the two orders
+    apart. Three nodes: 1-2 and 2-3 both score +0.5, and a stronger mutex
+    between 1 and 3 (-1.0) is processed first, so whichever tied edge comes next
+    merges and blocks the other. Reading rows in DB order yields {1},{2,3};
+    networkx's order yields {1,2},{3}.
+
+    Rows are inserted directly because the insertion order is the whole point,
+    and `write_graph` would reorder them.
+    """
+    db = SQLite(path=tmp_path / "tied.sqlite", edge_attrs={"adj_weight": "float"})
+    db.open("w")
+    con = sqlite3.connect(tmp_path / "tied.sqlite")
+    con.executemany(
+        "INSERT INTO nodes (id,position_0,position_1,position_2,size,filtered) "
+        "VALUES (?,?,?,?,?,?)",
+        [(i, i * 10.0, 50.0, 50.0, 100, 0) for i in (1, 2, 3)],
+    )
+    con.executemany(
+        "INSERT INTO edges (u,v,distance,adj_weight) VALUES (?,?,?,?)",
+        [(2, 3, 1.0, 0.75), (1, 2, 1.0, 0.75), (1, 3, 1.0, 0.0)],
+    )
+    con.commit()
+    con.close()
+    return db
+
+
+# score = 2*adj - 1, so 0.75 -> +0.5 (twice, a tie) and 0.0 -> -1.0 (the mutex)
+TIED_WEIGHTS = {"adj_weight": (2.0, -1.0)}
+TIED_ROI = Roi((0, 0, 0), (100, 100, 100))
+
+
+@pytest.mark.parametrize("bounded_read", [True, False])
+@pytest.mark.parametrize("edge_per_attr", [True, False])
+def test_graph_mws_optimized_matches_original(
+    tied_scores_db, tmp_path, bounded_read, edge_per_attr
+):
+    """optimized=True gives the same fragment groupings as optimized=False."""
+    roi = TIED_ROI
+    block = daisy.Block(total_roi=roi, read_roi=roi, write_roi=roi)
+
+    partitions = {}
+    for optimized in (False, True):
+        task = GraphMWS(
+            db=tied_scores_db,
+            lut=LUT(path=tmp_path / f"lut_{optimized}.npz"),
+            roi=roi,
+            weights=TIED_WEIGHTS,
+            bounded_read=bounded_read,
+            edge_per_attr=edge_per_attr,
+            optimized=optimized,
+        )
+        with task.process_block_func() as process_block:
+            process_block(block)
+        loaded = task.lut.load()
+        assert loaded is not None
+        partitions[optimized] = _partition(loaded)
+
+    assert partitions[False] == partitions[True]
+    # the fixture is only a guard if the two possible orders really do differ
+    assert partitions[False] == frozenset({frozenset({1, 2}), frozenset({3})})
+
+
+def test_graph_mws_optimized_drops_edges_from_lut(tied_scores_db, tmp_path):
+    """The optimized save omits the edge list nothing reads back."""
+    roi = TIED_ROI
+    block = daisy.Block(total_roi=roi, read_roi=roi, write_roi=roi)
+
+    keys = {}
+    for optimized in (False, True):
+        task = GraphMWS(
+            db=tied_scores_db,
+            lut=LUT(path=tmp_path / f"lut_{optimized}.npz"),
+            roi=roi,
+            weights=TIED_WEIGHTS,
+            optimized=optimized,
+        )
+        with task.process_block_func() as process_block:
+            process_block(block)
+        keys[optimized] = set(np.load(task.lut.file).keys())
+
+    assert "edges" in keys[False]
+    assert keys[True] == {"fragment_segment_lut"}
+
+
+def test_graph_mws_optimized_still_reads_nodes_for_starting_lut(
+    tied_scores_db, tmp_path
+):
+    """starting_lut needs graph.nodes, so that path keeps the graph read."""
+    roi = TIED_ROI
+    block = daisy.Block(total_roi=roi, read_roi=roi, write_roi=roi)
+
+    starting = LUT(path=tmp_path / "starting.npz")
+    # force 1 and 3 together, which the -1.0 mutex between them would not
+    starting.save(np.array([[1, 2, 3], [1, 2, 1]]))
+
+    task = GraphMWS(
+        db=tied_scores_db,
+        lut=LUT(path=tmp_path / "lut.npz"),
+        roi=roi,
+        weights=TIED_WEIGHTS,
+        starting_lut=starting,
+        optimized=True,
+    )
+    with task.process_block_func() as process_block:
+        process_block(block)
+
+    loaded = task.lut.load()
+    assert loaded is not None
+    groups = _partition(loaded)
+    assert any({1, 3} <= g for g in groups), "starting_lut merge was not preserved"
 
 
 # ---------------------------------------------------------------------------

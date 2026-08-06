@@ -25,6 +25,76 @@ DB = Annotated[
 ]
 
 
+def _edge_arrays(n_edges, records, weights):
+    """Edge endpoints and weighted scores as numpy columns.
+
+    `records` yields `(u, v, edge_attrs)`. Scores are interleaved per edge
+    (edge 0's attributes, then edge 1's, ...) so they come out in the same order
+    the plain-Python path appends them; NaN marks an attribute the edge lacks.
+    """
+    n_attrs = len(weights)
+    u = np.empty(n_edges, dtype=np.int64)
+    v = np.empty(n_edges, dtype=np.int64)
+    scores = np.full(n_edges * n_attrs, np.nan)
+    weight_items = list(weights.items())
+
+    for i, (node_u, node_v, edge_attrs) in enumerate(records):
+        u[i] = node_u
+        v[i] = node_v
+        base = i * n_attrs
+        for j, (attr, (weight, bias)) in enumerate(weight_items):
+            value = edge_attrs.get(attr)
+            if value is not None:
+                scores[base + j] = weight * value + bias
+
+    return u, v, scores
+
+
+def _nx_edge_order(node_ids, u, v):
+    """Reorder edge rows the way `networkx.Graph.edges()` would yield them.
+
+    Skipping the graph is only safe if we hand `mws.cluster` the same edge order
+    it would have got, since a stable sort leaves tied scores in input order.
+    networkx groups edges under whichever endpoint it saw first, so this is a
+    stable sort on that endpoint's position in the node table. Returns the
+    permutation and, per edge, whether `u` was the endpoint seen first.
+    """
+    n_nodes = len(node_ids)
+    if n_nodes == 0:
+        # Every endpoint was auto-created by add_edges_from, so insertion order
+        # is edge order and nothing needs reordering.
+        return np.arange(len(u)), np.ones(len(u), dtype=bool)
+
+    by_id = np.argsort(node_ids, kind="stable")
+    sorted_ids = node_ids[by_id]
+
+    def rank(ids):
+        idx = np.clip(np.searchsorted(sorted_ids, ids), 0, n_nodes - 1)
+        # Nodes missing from the table are created when their edge is added, so
+        # they sort after every listed node.
+        return np.where(sorted_ids[idx] == ids, by_id[idx], n_nodes)
+
+    rank_u, rank_v = rank(u), rank(v)
+    u_first = rank_u <= rank_v
+    order = np.argsort(np.where(u_first, rank_u, rank_v), kind="stable")
+    return order, u_first
+
+
+def _mws_edges(u, v, scores, n_attrs, edge_per_attr):
+    """Sort scored edges into the `[(positive, u, v), ...]` mws.cluster wants."""
+    if edge_per_attr:
+        u = np.repeat(u, n_attrs)
+        v = np.repeat(v, n_attrs)
+        present = ~np.isnan(scores)
+        scores, u, v = scores[present], u[present], v[present]
+    else:
+        # nansum over an edge with no attributes gives 0.0, matching `sum([])`.
+        scores = np.nansum(scores.reshape(-1, n_attrs), axis=1)
+
+    order = np.argsort(-np.abs(scores), kind="stable")
+    return list(zip((scores[order] > 0).tolist(), u[order].tolist(), v[order].tolist()))
+
+
 class GraphMWS(BlockwiseTask):
     """
     Graph based execution of the MWS algorithm.
@@ -76,6 +146,38 @@ class GraphMWS(BlockwiseTask):
     Reading from the db can be made more efficient by not doing a spatial query
     and assuming we want all nodes and edges. If you don't want to process a
     sub volume of the graph setting this to false will speed up the read.
+    """
+    optimized: bool = False
+    """
+    Use the optimized read, edge preparation and LUT save. Same segmentation,
+    less time and memory: on a 1M fragment / 8.5M edge RAG this takes the task
+    from 116 s and 7.8 GB peak to 50 s and 3.8 GB. For reference `mws.cluster`
+    itself is only ~10 s of that, so nearly all of it is overhead around the
+    algorithm.
+
+    Three changes, in order of what they save:
+
+    - The saved LUT no longer carries a copy of the weighted edge list. Nothing
+      reads it back, and writing it is a third of the runtime (39.0 s -> 1.5 s,
+      and the file shrinks from 149 MB to 5.7 MB).
+    - When no node attributes are needed we read the edges directly instead of
+      building a `networkx` graph to iterate once. This is the memory win
+      (7.8 GB -> 3.8 GB); the read itself goes 44.2 s -> 31.8 s, part of which
+      pays for reconstructing networkx's edge order (see `_nx_edge_order`).
+    - The edge list is built with numpy rather than three passes of Python
+      (append loop, `sorted`, rebuild as tuples): 20.8 s -> 7.5 s.
+
+    The edge list handed to `mws.cluster` is byte-identical either way, so the
+    fragment groupings are too. That matters more than it looks: the sort is
+    stable and ~40% of scores tie on real data, so input order decides those
+    ties. See `_nx_edge_order` for how the original ordering is preserved
+    without the graph.
+
+    Note the LUT itself is not reproducible run to run, with or without this
+    flag: `mws.cluster` names each segment after an arbitrary member of the
+    cluster and that choice varies between calls. The grouping is stable, the
+    segment ids are not, so compare segmentations by their partition rather
+    than by comparing LUTs elementwise.
     """
 
     fit: Literal["shrink"] = "shrink"
@@ -134,27 +236,74 @@ class GraphMWS(BlockwiseTask):
                 if self.mean_attrs is not None
                 else []
             )
+            edge_attr_names = list(self.weights.keys())
+            # graph.nodes is only read by the starting_lut grouping and the
+            # mean_attrs aggregation below. Without either, the graph is built
+            # purely to iterate its edges once.
+            needs_nodes = self.mean_attrs is not None or starting_map is not None
+            graph = None
+
             with benchmark_logger.trace("Read graph"):
-                graph = rag_provider.read_graph(
-                    read_roi,
-                    node_attrs=node_attrs,
-                    edge_attrs=list(self.weights.keys()),
-                )
+                if self.optimized and not needs_nodes:
+                    edge_roi = read_roi
+                    if edge_roi is not None and all(s is None for s in edge_roi.shape):
+                        edge_roi = None
+                    nodes = rag_provider.read_nodes(read_roi, read_attrs=[])
+                    node_ids = np.fromiter(
+                        (n["id"] for n in nodes), dtype=np.int64, count=len(nodes)
+                    )
+                    del nodes
+                    rows = rag_provider.read_edges(
+                        roi=edge_roi, read_attrs=edge_attr_names
+                    )
+                    name_u, name_v = rag_provider.endpoint_names
+                    u, v, scores = _edge_arrays(
+                        len(rows),
+                        ((r[name_u], r[name_v], r) for r in rows),
+                        self.weights,
+                    )
+                    del rows
+                else:
+                    graph = rag_provider.read_graph(
+                        read_roi,
+                        node_attrs=node_attrs,
+                        edge_attrs=edge_attr_names,
+                    )
 
             with benchmark_logger.trace("Prepare MWS edges"):
-                edges = []
-
-                for u, v, edge_attrs in graph.edges(data=True):
-                    scores = [
-                        w * edge_attrs.get(attr, None) + b
-                        for attr, (w, b) in self.weights.items()
-                        if edge_attrs.get(attr, None) is not None
-                    ]
-                    if self.edge_per_attr:
-                        for score in scores:
-                            edges.append((score, u, v))
+                if self.optimized:
+                    n_attrs = len(self.weights)
+                    if graph is not None:
+                        u, v, scores = _edge_arrays(
+                            graph.number_of_edges(),
+                            graph.edges(data=True),
+                            self.weights,
+                        )
                     else:
-                        edges.append((sum(scores), u, v))
+                        # Put the rows in networkx's edge order, endpoints and
+                        # all, so ties break the same way they would have.
+                        order, u_first = _nx_edge_order(node_ids, u, v)
+                        u, v = (
+                            np.where(u_first, u, v)[order],
+                            np.where(u_first, v, u)[order],
+                        )
+                        scores = scores.reshape(-1, n_attrs)[order].reshape(-1)
+                    edges = _mws_edges(u, v, scores, n_attrs, self.edge_per_attr)
+                    del u, v, scores
+                else:
+                    edges = []
+
+                    for u, v, edge_attrs in graph.edges(data=True):
+                        scores = [
+                            w * edge_attrs.get(attr, None) + b
+                            for attr, (w, b) in self.weights.items()
+                            if edge_attrs.get(attr, None) is not None
+                        ]
+                        if self.edge_per_attr:
+                            for score in scores:
+                                edges.append((score, u, v))
+                        else:
+                            edges.append((sum(scores), u, v))
 
                 prefix_edges = []
                 if starting_map is not None:
@@ -166,12 +315,13 @@ class GraphMWS(BlockwiseTask):
                         for u, v in zip(pre_merged_ids, pre_merged_ids[1:]):
                             prefix_edges.append((True, u, v))
 
-                edges = sorted(
-                    edges,
-                    key=lambda edge: abs(edge[0]),
-                    reverse=True,
-                )
-                edges = [(bool(aff > 0), u, v) for aff, u, v in edges]
+                if not self.optimized:
+                    edges = sorted(
+                        edges,
+                        key=lambda edge: abs(edge[0]),
+                        reverse=True,
+                    )
+                    edges = [(bool(aff > 0), u, v) for aff, u, v in edges]
 
             with benchmark_logger.trace("Run MWS"):
                 # generate the look up table via mutex watershed clustering
@@ -186,7 +336,13 @@ class GraphMWS(BlockwiseTask):
             lut = np.array([inputs, outputs])
 
             with benchmark_logger.trace("Save LUT"):
-                self.lut.save(lut, edges=edges)
+                # `edges` goes into the npz next to the lut but nothing reads it
+                # back -- LUT.load() only returns fragment_segment_lut -- and on
+                # a large RAG compressing it dominates the save.
+                if self.optimized:
+                    self.lut.save(lut)
+                else:
+                    self.lut.save(lut, edges=edges)
 
             if self.mean_attrs is not None:
                 with benchmark_logger.trace("Agglomerate Mean Attrs"):
