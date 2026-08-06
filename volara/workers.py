@@ -1,5 +1,6 @@
 import logging
 import subprocess as sp
+import sys
 from abc import ABC
 from pathlib import Path
 
@@ -17,12 +18,31 @@ class Worker(StrictBaseModel, ABC):
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = [
-            "volara-cli",
+            self.volara_cli(),
             "blockwise-worker",
             "-c",
             str(config_path),
         ]
         return cmd
+
+    @staticmethod
+    def volara_cli() -> str:
+        """Absolute path to the ``volara-cli`` beside the RUNNING interpreter, falling
+        back to a bare ``volara-cli`` when there is none.
+
+        A bare name resolves against the WORKER's ``PATH``, which is not the driver's:
+        a scheduler starts the job in a fresh login shell, so it can pick up a
+        different environment entirely -- typically a base conda env whose volara is
+        stale and missing task entry-points. The worker then fails task-union
+        validation and the driver waits forever for a worker that can never succeed.
+        Resolving against ``sys.executable`` makes the worker environment independent
+        of the job's ``PATH`` and conda activation.
+
+        The fallback keeps unusual layouts working (a zipapp, a shim on PATH, an
+        interpreter whose scripts live elsewhere): if there is no sibling CLI, emit the
+        bare name and let PATH decide, exactly as before."""
+        candidate = Path(sys.executable).parent / "volara-cli"
+        return str(candidate) if candidate.is_file() else "volara-cli"
 
 
 class SlurmWorker(Worker):
