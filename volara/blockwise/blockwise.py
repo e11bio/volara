@@ -256,10 +256,15 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 # BLOCK for the worker's lifetime -- a spawn fn that returns early
                 # is treated as a dead worker and respawned (up to
                 # max_worker_restarts). get_command therefore builds a blocking
-                # submission on every backend (local child process, srun, bsub -K);
-                # a fire-and-forget submit (bare sbatch/bsub) would trip the v2
-                # respawn loop and leak the real cluster job.
-                return subprocess.run(cmd)
+                # submission on every backend (local child process, sbatch --wait,
+                # bsub -K); a fire-and-forget submit (bare sbatch/bsub) would trip
+                # the v2 respawn loop and leak the real cluster job.
+                #
+                # Worker.run, not subprocess.run directly: a scheduler job outlives
+                # the client that submitted it, so the backend owns teardown as well
+                # as submission (SlurmWorker.run cancels its job by id on the way
+                # out). The default implementation IS subprocess.run.
+                return worker_config.run(cmd)
 
             return run_worker
 

@@ -1,4 +1,6 @@
 import logging
+import re
+import shlex
 import subprocess as sp
 from abc import ABC
 from pathlib import Path
@@ -24,11 +26,31 @@ class Worker(StrictBaseModel, ABC):
         ]
         return cmd
 
+    def run(self, cmd: list[str]) -> sp.CompletedProcess:
+        """Execute one worker submission and BLOCK until that worker exits.
+
+        daisy v2 runs the spawn function in a thread and reads its return as the
+        worker's death (MIGRATION.md, "blocking-spawn contract"), so this must not
+        return early. Backends override it when submitting and owning the process are
+        not the same thing: a scheduler job outlives the client that submitted it, so
+        it must be cleaned up explicitly (see :meth:`SlurmWorker.run`)."""
+        return sp.run(cmd)
+
 
 class SlurmWorker(Worker):
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
+
+    time_limit: str | None = None
+    """Walltime for each worker job (``--time``), e.g. ``"4:00:00"``.
+
+    Strongly recommended. A worker is an independent slurm job, so it outlives its
+    submitting client; :meth:`run` cancels it on every ordinary exit path, but a
+    SIGKILLed driver runs no cleanup at all and then this is the ONLY bound. Do not
+    assume the cluster provides one -- a partition may be ``DefaultTime=NONE`` /
+    ``MaxTime=UNLIMITED``, in which case an escaped worker runs forever.
+    """
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
@@ -50,22 +72,67 @@ class SlurmWorker(Worker):
             num_cpus=self.num_cpus,
             log_file=log_file,
             error_file=log_error,
+            time_limit=self.time_limit,
         )
 
-    def is_srun_available(self) -> bool:
+    _JOB_ID = re.compile(r"Submitted batch job (\d+)")
+
+    def run(self, cmd: list[str]) -> sp.CompletedProcess:
+        """Submit one worker with ``sbatch --wait`` and block until the job ends,
+        cancelling it on the way out.
+
+        ``--wait`` gives the blocking-spawn contract natively -- it returns only when
+        the job terminates, and with the job's own exit status -- so no polling wrapper
+        is needed. What it does NOT give is any tie between the job and this client:
+        an independent slurm job survives its submitter, and MEASURED, neither SIGTERM
+        nor SIGKILL of ``sbatch --wait`` cancels it. So the job id is read off sbatch's
+        first line of stdout and ``scancel``-ed in ``finally`` -- on normal exit (a
+        no-op, the job is already gone), on exception, and on ``KeyboardInterrupt``.
+
+        Cancelling BY ID, not by ``--name``: task names are not unique across
+        concurrent runs, so a name-based reap would cancel another run's workers.
+
+        The one path this cannot cover is a SIGKILLed driver, which runs no cleanup at
+        all; :attr:`time_limit` is the bound there."""
+        job_id: str | None = None
+        proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=None, text=True)
+        try:
+            # sbatch prints "Submitted batch job N" immediately, then --wait holds the
+            # pipe open for the job's lifetime -- so read the one line, do NOT drain.
+            first = proc.stdout.readline() if proc.stdout else ""
+            match = self._JOB_ID.search(first or "")
+            if match:
+                job_id = match.group(1)
+                logger.debug("submitted slurm worker job %s", job_id)
+            else:
+                logger.warning(
+                    "could not parse a slurm job id from sbatch output %r; this worker "
+                    "cannot be cancelled on teardown and will run until its time limit",
+                    first,
+                )
+            returncode = proc.wait()
+            return sp.CompletedProcess(cmd, returncode, stdout=first)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            if job_id is not None:
+                # Already-finished jobs are the normal case; scancel is a no-op there.
+                sp.run(["scancel", job_id], capture_output=True, check=False)
+
+    def is_sbatch_available(self) -> bool:
         try:
             _result = sp.run(
-                ["srun", "--version"], capture_output=True, text=True, check=True
+                ["sbatch", "--version"], capture_output=True, text=True, check=True
             )
             # successful, return True
             return True
         except sp.CalledProcessError as e:
             # errors in the subprocess
-            raise RuntimeError(f"srun failed to execute: {e}") from e
+            raise RuntimeError(f"sbatch failed to execute: {e}") from e
         except FileNotFoundError:
-            # srun is not found in the system's PATH
+            # sbatch is not found in the system's PATH
             raise EnvironmentError(
-                "srun is not installed or not in PATH. Either install slurm on your cluster, or run locally."
+                "sbatch is not installed or not in PATH. Either install slurm on your cluster, or run locally."
             )
 
     def get_slurm_command(
@@ -80,20 +147,30 @@ class SlurmWorker(Worker):
         log_file: str | Path | None = None,
         error_file: str | Path | None = None,
         flags: list[str] | None = None,
+        time_limit: str | None = None,
     ) -> list[str]:
         """
-        Build the ``srun`` line that runs one worker as a slurm job.
+        Build the ``sbatch --wait`` line that runs one worker as its own slurm job.
 
-        ``srun`` rather than ``sbatch``: it submits AND blocks for the job's lifetime,
-        which is daisy v2's spawn contract (MIGRATION.md, "blocking-spawn contract") --
-        ``sbatch`` returns at queue time, so daisy saw every worker as instantly dead,
-        could never reap the real job (terminating the long-gone sbatch client), and
-        leaked workers until walltime. ``srun`` also ties the job to the client:
-        cancelling/killing the driver cancels the job steps with it, so worker jobs
-        cannot outlive the run. Note that ``srun`` inside an existing slurm allocation
-        starts a step WITHIN that allocation rather than submitting a new job --
-        drivers that themselves run as slurm jobs must request resources for their
-        workers up front.
+        ``--wait`` is what makes this satisfy daisy v2's spawn contract (MIGRATION.md,
+        "blocking-spawn contract"): it returns only when the job terminates, and with
+        the job's exit status. A BARE ``sbatch`` returns at queue time, which is the
+        old bug -- daisy saw every worker as instantly dead, respawned, and leaked the
+        real job. ``--wait`` fixes that without a polling wrapper.
+
+        Why not ``srun``: ``srun`` blocks too, and additionally ties the job to the
+        client. But inside an existing allocation it starts a job STEP rather than
+        submitting a new job, so a driver that is itself a slurm job -- the normal way
+        to obtain a GPU node -- can never place workers anywhere but its own
+        allocation, and ``queue``/``--partition`` is silently ignored for them.
+        Measured: a 32-CPU driver requesting 32 workers got ONE step of 8 task clones
+        sharing a single ``DAISY_CONTEXT``, and 623 "step creation still disabled"
+        retries from the workers that never started. That is not a tuning problem, it
+        is the whole fan-out, so ``sbatch --wait`` is the only slurm path.
+
+        The tie to the client is replaced by explicit cleanup: :meth:`SlurmWorker.run`
+        cancels the job by id on every ordinary exit path, and :attr:`time_limit`
+        bounds the one path it cannot cover (a SIGKILLed driver).
 
         Args:
             command (list[str]): The worker command to run inside the slurm job.
@@ -110,20 +187,27 @@ class SlurmWorker(Worker):
                 Defaults to None.
             error_file (str | Path | None, optional): Path for standard error logging.
                 Defaults to None.
-            flags (list[str] | None, optional): Additional srun flags as a
+            flags (list[str] | None, optional): Additional sbatch flags as a
                 list. Defaults to None.
+            time_limit (str | None, optional): Walltime per worker job (``--time``),
+                e.g. "4:00:00". Defaults to None (no limit requested -- see
+                :attr:`SlurmWorker.time_limit` for why you want one).
 
         Returns:
-            list[str]: The srun command, ready for ``subprocess.run``.
+            list[str]: The sbatch command, ready for :meth:`SlurmWorker.run`.
         """
 
         # TODO: raises exception on failure. Maybe handle this gracefully?
-        self.is_srun_available()
+        self.is_sbatch_available()
 
-        run_command = ["srun"]
+        run_command = ["sbatch", "--wait"]
 
         if job_name:
             run_command.append(f"--job-name={job_name}")
+        # ONE task per worker. Without it slurm derives ntasks from the allocation,
+        # which made a single submission expand into N identical clones sharing one
+        # DAISY_CONTEXT (hence one worker_id -- the race daisy warns about).
+        run_command.append("--ntasks=1")
         run_command.append(f"--cpus-per-task={num_cpus}")
         if num_gpus > 0:
             run_command.append(f"--gpus={num_gpus}")
@@ -138,11 +222,15 @@ class SlurmWorker(Worker):
             f"--error={error_file}" if error_file else "--error=%x_%j.err"
         )
 
+        if time_limit:
+            run_command.append(f"--time={time_limit}")
+
         if flags:
             run_command.extend(flags)
 
-        # srun takes the worker command directly (no sbatch-style --wrap)
-        run_command.extend(command)
+        # sbatch runs a batch SCRIPT, so the worker command is handed over as one
+        # shell string. shlex.join keeps arguments containing spaces intact.
+        run_command.append(f"--wrap={shlex.join(command)}")
 
         return run_command
 
@@ -206,8 +294,8 @@ class LSFWorker(Worker):
         ``-K`` makes bsub submit AND block until the job finishes, which is daisy v2's
         spawn contract (MIGRATION.md, "blocking-spawn contract") -- a plain ``bsub``
         returns at queue time, so daisy saw every worker as instantly dead and the
-        real job leaked until walltime (same fire-and-forget bug as slurm's
-        ``sbatch``, fixed there with ``srun``).
+        real job leaked until walltime (same fire-and-forget bug as a bare slurm
+        ``sbatch``, fixed there with ``sbatch --wait``).
 
         Args:
             command (list[str]): The command to be executed within the LSF job.
