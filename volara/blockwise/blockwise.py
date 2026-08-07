@@ -259,12 +259,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 # submission on every backend (local child process, sbatch --wait,
                 # bsub -K); a fire-and-forget submit (bare sbatch/bsub) would trip
                 # the v2 respawn loop and leak the real cluster job.
-                #
-                # Worker.run, not subprocess.run directly: a scheduler job outlives
-                # the client that submitted it, so the backend owns teardown as well
-                # as submission (SlurmWorker.run cancels its job by id on the way
-                # out). The default implementation IS subprocess.run.
-                return worker_config.run(cmd)
+                return subprocess.run(cmd)
 
             return run_worker
 

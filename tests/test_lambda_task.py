@@ -12,8 +12,8 @@ from volara.datasets import Labels, Raw
 from volara.workers import LocalWorker, LSFWorker, SlurmWorker
 
 slurm_available = pytest.mark.skipif(
-    shutil.which("srun") is None or os.environ.get("VOLARA_SLURM_TEST_QUEUE") is None,
-    reason="srun not found or VOLARA_SLURM_TEST_QUEUE not set",
+    shutil.which("sbatch") is None or os.environ.get("VOLARA_SLURM_TEST_QUEUE") is None,
+    reason="sbatch not found or VOLARA_SLURM_TEST_QUEUE not set",
 )
 lsf_available = pytest.mark.skipif(
     shutil.which("bsub") is None or os.environ.get("VOLARA_LSF_TEST_QUEUE") is None,

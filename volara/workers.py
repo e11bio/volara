@@ -1,5 +1,4 @@
 import logging
-import re
 import shlex
 import subprocess as sp
 from abc import ABC
@@ -26,31 +25,11 @@ class Worker(StrictBaseModel, ABC):
         ]
         return cmd
 
-    def run(self, cmd: list[str]) -> sp.CompletedProcess:
-        """Execute one worker submission and BLOCK until that worker exits.
-
-        daisy v2 runs the spawn function in a thread and reads its return as the
-        worker's death (MIGRATION.md, "blocking-spawn contract"), so this must not
-        return early. Backends override it when submitting and owning the process are
-        not the same thing: a scheduler job outlives the client that submitted it, so
-        it must be cleaned up explicitly (see :meth:`SlurmWorker.run`)."""
-        return sp.run(cmd)
-
 
 class SlurmWorker(Worker):
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
-
-    time_limit: str | None = None
-    """Walltime for each worker job (``--time``), e.g. ``"4:00:00"``.
-
-    Strongly recommended. A worker is an independent slurm job, so it outlives its
-    submitting client; :meth:`run` cancels it on every ordinary exit path, but a
-    SIGKILLed driver runs no cleanup at all and then this is the ONLY bound. Do not
-    assume the cluster provides one -- a partition may be ``DefaultTime=NONE`` /
-    ``MaxTime=UNLIMITED``, in which case an escaped worker runs forever.
-    """
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
@@ -72,52 +51,7 @@ class SlurmWorker(Worker):
             num_cpus=self.num_cpus,
             log_file=log_file,
             error_file=log_error,
-            time_limit=self.time_limit,
         )
-
-    _JOB_ID = re.compile(r"Submitted batch job (\d+)")
-
-    def run(self, cmd: list[str]) -> sp.CompletedProcess:
-        """Submit one worker with ``sbatch --wait`` and block until the job ends,
-        cancelling it on the way out.
-
-        ``--wait`` gives the blocking-spawn contract natively -- it returns only when
-        the job terminates, and with the job's own exit status -- so no polling wrapper
-        is needed. What it does NOT give is any tie between the job and this client:
-        an independent slurm job survives its submitter, and MEASURED, neither SIGTERM
-        nor SIGKILL of ``sbatch --wait`` cancels it. So the job id is read off sbatch's
-        first line of stdout and ``scancel``-ed in ``finally`` -- on normal exit (a
-        no-op, the job is already gone), on exception, and on ``KeyboardInterrupt``.
-
-        Cancelling BY ID, not by ``--name``: task names are not unique across
-        concurrent runs, so a name-based reap would cancel another run's workers.
-
-        The one path this cannot cover is a SIGKILLed driver, which runs no cleanup at
-        all; :attr:`time_limit` is the bound there."""
-        job_id: str | None = None
-        proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=None, text=True)
-        try:
-            # sbatch prints "Submitted batch job N" immediately, then --wait holds the
-            # pipe open for the job's lifetime -- so read the one line, do NOT drain.
-            first = proc.stdout.readline() if proc.stdout else ""
-            match = self._JOB_ID.search(first or "")
-            if match:
-                job_id = match.group(1)
-                logger.debug("submitted slurm worker job %s", job_id)
-            else:
-                logger.warning(
-                    "could not parse a slurm job id from sbatch output %r; this worker "
-                    "cannot be cancelled on teardown and will run until its time limit",
-                    first,
-                )
-            returncode = proc.wait()
-            return sp.CompletedProcess(cmd, returncode, stdout=first)
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-            if job_id is not None:
-                # Already-finished jobs are the normal case; scancel is a no-op there.
-                sp.run(["scancel", job_id], capture_output=True, check=False)
 
     def is_sbatch_available(self) -> bool:
         try:
@@ -147,7 +81,6 @@ class SlurmWorker(Worker):
         log_file: str | Path | None = None,
         error_file: str | Path | None = None,
         flags: list[str] | None = None,
-        time_limit: str | None = None,
     ) -> list[str]:
         """
         Build the ``sbatch --wait`` line that runs one worker as its own slurm job.
@@ -168,9 +101,16 @@ class SlurmWorker(Worker):
         retries from the workers that never started. That is not a tuning problem, it
         is the whole fan-out, so ``sbatch --wait`` is the only slurm path.
 
-        The tie to the client is replaced by explicit cleanup: :meth:`SlurmWorker.run`
-        cancels the job by id on every ordinary exit path, and :attr:`time_limit`
-        bounds the one path it cannot cover (a SIGKILLed driver).
+        KNOWN TRADE-OFF, accepted deliberately: what ``srun`` gave for free and this
+        does not is any tie between the job and its client. A worker is now an
+        independent slurm job, and MEASURED on a real cluster, neither ``SIGTERM`` nor
+        ``SIGKILL`` of the ``sbatch --wait`` client ends it -- only ``scancel`` does.
+        So a driver that dies abnormally leaves its workers running until the
+        partition's walltime, and there is no knob here to bound that: ``flags`` is not
+        threaded through :meth:`SlurmWorker.get_command`, so a configured worker cannot
+        yet request ``--time``. On a partition with ``DefaultTime=NONE`` /
+        ``MaxTime=UNLIMITED`` -- the ones measured here -- an escaped worker runs
+        forever, and must be reaped with ``scancel``.
 
         Args:
             command (list[str]): The worker command to run inside the slurm job.
@@ -189,12 +129,9 @@ class SlurmWorker(Worker):
                 Defaults to None.
             flags (list[str] | None, optional): Additional sbatch flags as a
                 list. Defaults to None.
-            time_limit (str | None, optional): Walltime per worker job (``--time``),
-                e.g. "4:00:00". Defaults to None (no limit requested -- see
-                :attr:`SlurmWorker.time_limit` for why you want one).
 
         Returns:
-            list[str]: The sbatch command, ready for :meth:`SlurmWorker.run`.
+            list[str]: The sbatch command, ready for ``subprocess.run``.
         """
 
         # TODO: raises exception on failure. Maybe handle this gracefully?
@@ -204,9 +141,11 @@ class SlurmWorker(Worker):
 
         if job_name:
             run_command.append(f"--job-name={job_name}")
-        # ONE task per worker. Without it slurm derives ntasks from the allocation,
-        # which made a single submission expand into N identical clones sharing one
-        # DAISY_CONTEXT (hence one worker_id -- the race daisy warns about).
+        # ONE task per worker, pinned explicitly. This is the failure the srun path
+        # hit: as a step inside an allocation, ntasks came from the allocation, so a
+        # single submission expanded into N identical clones sharing one
+        # DAISY_CONTEXT (hence one worker_id -- the race daisy warns about). sbatch
+        # defaults to 1, so this pins the invariant rather than fixing a live bug.
         run_command.append("--ntasks=1")
         run_command.append(f"--cpus-per-task={num_cpus}")
         if num_gpus > 0:
@@ -221,9 +160,6 @@ class SlurmWorker(Worker):
         run_command.append(
             f"--error={error_file}" if error_file else "--error=%x_%j.err"
         )
-
-        if time_limit:
-            run_command.append(f"--time={time_limit}")
 
         if flags:
             run_command.extend(flags)
