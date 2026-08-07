@@ -9,10 +9,12 @@ slurm job and any worker that did not cleanly self-exit leaked until walltime, p
 across stages (the observed ~99-node worker storm, reaped by hand with ``scancel --name``).
 
 The fix is to make every backend's submission command itself block for the worker's
-lifetime: a plain child process locally, ``srun`` on slurm (which also ties the job to
-the client: cancelling the driver cancels the steps), and ``bsub -K`` on LSF.
+lifetime: a plain child process locally, ``sbatch --wait`` on slurm, and ``bsub -K`` on
+LSF. Unlike ``srun``, ``sbatch --wait`` does NOT tie the job to the client -- see
+:meth:`SlurmWorker.get_slurm_command` for why that trade is made anyway, and for what
+it costs.
 
-These tests need NO real cluster: fake ``srun``/``bsub`` executables are prepended to
+These tests need NO real cluster: fake ``sbatch``/``bsub`` executables are prepended to
 ``PATH`` so the availability probes succeed and command construction runs for real. A
 ``slurm`` marker is registered in pyproject.toml for any future test that genuinely
 needs a slurm install (run those with ``-m slurm``); none currently do.
@@ -26,8 +28,8 @@ import pytest
 from volara import workers
 
 _BODIES = {
-    # is_srun_available() probes `srun --version`.
-    "srun": 'echo "slurm-wlm 21.08.0"; exit 0',
+    # is_sbatch_available() probes `sbatch --version`.
+    "sbatch": 'echo "slurm-wlm 21.08.0"; exit 0',
     # is_bsub_available() probes `bsub -V` (prints to stderr on real LSF).
     "bsub": 'echo "IBM Spectrum LSF 10.1"; exit 0',
 }
@@ -35,7 +37,7 @@ _BODIES = {
 
 @pytest.fixture()
 def cluster_shims(tmp_path, monkeypatch):
-    """Install fake srun/bsub on PATH so availability probes pass without a cluster."""
+    """Install fake sbatch/bsub on PATH so availability probes pass without a cluster."""
     bindir = tmp_path / "cluster_shim_bin"
     bindir.mkdir()
     for prog, body in _BODIES.items():
@@ -45,14 +47,18 @@ def cluster_shims(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
 
 
-def test_slurm_command_is_blocking_srun(cluster_shims):
-    """Slurm workers submit via srun: it blocks for the job's lifetime (the spawn
-    contract) and ties the job to the client, unlike fire-and-forget sbatch.
+def test_slurm_command_is_blocking_sbatch_wait(cluster_shims):
+    """Slurm workers submit via ``sbatch --wait``: it blocks for the job's lifetime
+    (the spawn contract) AND submits an independent job, so workers reach the
+    requested partition even when the driver is itself a slurm job.
+
+    ``srun`` also blocks, but inside an allocation it makes a job STEP -- confining
+    every worker to the driver's own nodes and silently ignoring ``--partition``.
 
     Asserted as full-argv equality, not membership: a repeated flag or a repeated
-    trailing worker command is invisible to ``in``/suffix checks, and a doubled
-    worker command is exactly what click rejects with "Got unexpected extra
-    arguments" -- killing every block of every stage.
+    worker command is invisible to ``in``/suffix checks, and a doubled worker command
+    is exactly what click rejects with "Got unexpected extra arguments" -- killing
+    every block of every stage.
     """
     w = workers.SlurmWorker(queue="gpu-q", num_gpus=1, num_cpus=4)
     cmd = w.get_slurm_command(
@@ -62,23 +68,45 @@ def test_slurm_command_is_blocking_srun(cluster_shims):
         num_gpus=1,
         num_cpus=4,
     )
-    # the worker command rides along as argv (srun has no sbatch-style --wrap)
     assert cmd == [
-        "srun",
+        "sbatch",
+        "--wait",
         "--job-name=mytask",
+        "--ntasks=1",
         "--cpus-per-task=4",
         "--gpus=1",
         "--mem=15564",
         "--partition=gpu-q",
         "--output=%x_%j.log",
         "--error=%x_%j.err",
-        "volara-cli",
-        "blockwise-worker",
-        "-c",
-        "c.json",
+        "--wrap=volara-cli blockwise-worker -c c.json",
     ], cmd
-    assert cmd.count("blockwise-worker") == 1, cmd
-    assert not any(a == "sbatch" or a.startswith("--wrap") for a in cmd), cmd
+    assert cmd.count("--wrap=volara-cli blockwise-worker -c c.json") == 1, cmd
+    assert "srun" not in cmd, cmd
+
+
+def test_ntasks_is_exactly_one(cluster_shims):
+    """One worker submission is exactly one task, pinned rather than inherited.
+
+    ``sbatch`` already defaults to one task, so this is an invariant lock, not a live
+    bug fix. It carries the measured failure it prevents: under the old ``srun`` path,
+    a step inside an allocation took ntasks FROM the allocation, so one submission
+    expanded into that many identical clones sharing a single DAISY_CONTEXT (hence one
+    worker_id, the race daisy warns about) while every later worker blocked on "step
+    creation still disabled" -- 32-CPU driver, num_cpus=4: one step, Tasks=8, 623
+    retries."""
+    cmd = workers.SlurmWorker(queue="q", num_cpus=4).get_slurm_command(
+        command=["volara-cli"], num_cpus=4
+    )
+    assert cmd.count("--ntasks=1") == 1, cmd
+
+
+def test_wrap_quotes_arguments_containing_spaces(cluster_shims):
+    """--wrap is a shell string, so a path with a space must survive as one arg."""
+    cmd = workers.SlurmWorker(queue="q").get_slurm_command(
+        command=["volara-cli", "-c", "/a path/c.json"]
+    )
+    assert cmd[-1] == "--wrap=volara-cli -c '/a path/c.json'", cmd
 
 
 def test_lsf_command_is_blocking_bsub(cluster_shims):
@@ -122,4 +150,5 @@ def test_get_command_names_job_after_task(cluster_shims, monkeypatch, tmp_path):
     )
 
     cmd = workers.SlurmWorker(queue="gpu-q").get_command(tmp_path / "c.json", "mytask")
-    assert cmd[0] == "srun" and "--job-name=mytask" in cmd, cmd
+    assert cmd[0] == "sbatch" and cmd[1] == "--wait", cmd
+    assert "--job-name=mytask" in cmd, cmd

@@ -256,9 +256,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 # BLOCK for the worker's lifetime -- a spawn fn that returns early
                 # is treated as a dead worker and respawned (up to
                 # max_worker_restarts). get_command therefore builds a blocking
-                # submission on every backend (local child process, srun, bsub -K);
-                # a fire-and-forget submit (bare sbatch/bsub) would trip the v2
-                # respawn loop and leak the real cluster job.
+                # submission on every backend (local child process, sbatch --wait,
+                # bsub -K); a fire-and-forget submit (bare sbatch/bsub) would trip
+                # the v2 respawn loop and leak the real cluster job.
                 return subprocess.run(cmd)
 
             return run_worker
