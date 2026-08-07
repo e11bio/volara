@@ -12,7 +12,9 @@ from volara.datasets import Affs, Labels, Raw
 from volara.dbs import SQLite
 from volara.lut import LUT
 
-os.chdir(Path(__file__).parent)
+# The CREMI volume this benchmark reads lives with the cremi example, not here,
+# and every store below is named relative to it.
+os.chdir(Path(__file__).parent.parent / "cremi")
 print(Path.cwd())
 
 raw = Raw(store="sample_A+_20160601.zarr/raw", scale_shift=(1 / 255, 0), writable=False)  # type: ignore[arg-type]
