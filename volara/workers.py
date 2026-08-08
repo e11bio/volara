@@ -30,6 +30,13 @@ class SlurmWorker(Worker):
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
+    # Memory per worker, MB. `get_slurm_command` has always taken a `memory=` argument, but
+    # `get_command` never passed one -- so EVERY SlurmWorker got the 15564 MB default and there was
+    # no way to ask for more. That silently caps what a blockwise task can do: a task whose block is
+    # large (e11bio/volara-surface's whole-face surface postprocess is one) cannot run on a worker at
+    # all, and forcing it onto the fan-out path just moves the computation to a SMALLER machine than
+    # the driver it came from. Default unchanged, so existing pipelines are unaffected.
+    memory: int = 15564
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
@@ -49,6 +56,7 @@ class SlurmWorker(Worker):
             queue=self.queue,
             num_gpus=self.num_gpus,
             num_cpus=self.num_cpus,
+            memory=self.memory,
             log_file=log_file,
             error_file=log_error,
         )

@@ -152,3 +152,45 @@ def test_get_command_names_job_after_task(cluster_shims, monkeypatch, tmp_path):
     cmd = workers.SlurmWorker(queue="gpu-q").get_command(tmp_path / "c.json", "mytask")
     assert cmd[0] == "sbatch" and cmd[1] == "--wait", cmd
     assert "--job-name=mytask" in cmd, cmd
+
+
+def test_get_command_requests_the_workers_configured_memory(
+    cluster_shims, monkeypatch, tmp_path
+):
+    """REGRESSION. `get_slurm_command` has always accepted `memory=`, but `get_command` -- the path
+    daisy actually spawns workers through -- never passed one, so EVERY SlurmWorker silently got the
+    15564 MB default with no way to ask for more.
+
+    That is not a tuning nicety: it caps what a blockwise task can do at all. A task whose block is
+    large cannot run on a worker, and pushing such a task onto the fan-out path moves the
+    computation to a machine SMALLER than the driver it came from. e11bio/volara-surface's
+    whole-face surface postprocess hit exactly this -- a 134 GiB computation dispatched to a 15.2 G
+    worker."""
+    import daisy
+
+    monkeypatch.setenv("DAISY_CONTEXT", "worker_id=0:task_id=mytask")
+    monkeypatch.setattr(
+        daisy.logging, "get_worker_log_basename", lambda wid, tid: tmp_path
+    )
+
+    cmd = workers.SlurmWorker(queue="q", memory=131072).get_command(
+        tmp_path / "c.json", "mytask"
+    )
+    assert "--mem=131072" in cmd, cmd
+    assert "--mem=15564" not in cmd, cmd
+
+
+def test_worker_memory_defaults_to_the_historical_value(
+    cluster_shims, monkeypatch, tmp_path
+):
+    """The new field must not change any existing pipeline: a worker that says nothing about memory
+    still asks for exactly what it asked for before."""
+    import daisy
+
+    monkeypatch.setenv("DAISY_CONTEXT", "worker_id=0:task_id=mytask")
+    monkeypatch.setattr(
+        daisy.logging, "get_worker_log_basename", lambda wid, tid: tmp_path
+    )
+
+    cmd = workers.SlurmWorker(queue="q").get_command(tmp_path / "c.json", "mytask")
+    assert "--mem=15564" in cmd, cmd
