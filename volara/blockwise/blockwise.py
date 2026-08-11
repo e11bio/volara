@@ -268,6 +268,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
             # task's meta dir and block-done array. Adopt it before anything
             # resolves a path off it -- daisy's worker context cannot be relied
             # on to carry it (see BENCHMARK_LOG_BASEDIR_ENV_VAR).
+            # This is early enough because it runs at the entry point of the only
+            # process that needs it: a freshly spawned worker (volara-cli
+            # blockwise-worker -> process_blocks), which never runs task()/init.
+            # init traces driver-side, where benchmark_run() has already set the
+            # basedir (and exported both env vars) before task() is entered.
             set_log_basedir(benchmark_log_basedir)
 
         benchmark_logger = self.get_benchmark_logger()
