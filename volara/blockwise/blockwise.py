@@ -391,7 +391,8 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
                 num_workers=self.num_workers,
-                check_function=self.check_block_func(),
+                # Under meta_dir so drop() still clears the done state.
+                tracking_path=str(self.meta_dir / "daisy_tracking"),
                 max_retries=2,
                 timeout=None,
                 upstream_tasks=(
