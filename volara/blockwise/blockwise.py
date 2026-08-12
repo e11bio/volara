@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import daisy
 import numpy as np
-from daisy.block import BlockStatus
-from daisy.cl_monitor import CLMonitor
+from daisy import BlockStatus
 from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
 from funlib.persistence import open_ds, prepare_ds
@@ -62,6 +61,15 @@ class BlockwiseTask(StrictBaseModel, ABC):
     """
     Whether blocks have read/write dependencies on neighborhing blocks requiring
     a specific ordering to the block processing to compute a seamless result.
+    """
+    block_timeout: float | None = None
+    """
+    Per-block timeout in seconds. ``None`` (the default) delegates to daisy's
+    default (600s). daisy v2 always enforces a timeout -- there is no "unlimited"
+    option -- so blocks should be sized to process well within it; a task whose
+    single block legitimately runs long (e.g. the global mutex watershed) must set
+    an explicit large value instead (see ``GraphMWS``). When a block exceeds the
+    timeout daisy reclaims it and retries under ``max_retries``.
     """
 
     def __hash__(self):
@@ -162,9 +170,8 @@ class BlockwiseTask(StrictBaseModel, ABC):
         A helper function to process a given roi without needing to start a
         whole blockwise job.
         """
-        block = daisy.Block(
-            roi, roi if context is None else roi.grow(context, context), roi
-        )
+        read_roi = roi if context is None else roi.grow(context, context)
+        block = daisy.Block(roi, read_roi, roi)
         process_block = self.process_block_func()
         process_block(block)
 
@@ -245,6 +252,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             def run_worker():
                 cmd = worker_config.get_command(config_file, self.task_name)
+                # daisy v2 runs this spawn function in a THREAD and expects it to
+                # BLOCK for the worker's lifetime -- a spawn fn that returns early
+                # is treated as a dead worker and respawned (up to
+                # max_worker_restarts). get_command therefore builds a blocking
+                # submission on every backend (local child process, sbatch --wait,
+                # bsub -K); a fire-and-forget submit (bare sbatch/bsub) would trip
+                # the v2 respawn loop and leak the real cluster job.
                 return subprocess.run(cmd)
 
             return run_worker
@@ -390,11 +404,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 process_function=process_func,
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
-                num_workers=self.num_workers,
+                max_workers=self.num_workers,
                 # Under meta_dir so drop() still clears the done state.
                 tracking_path=str(self.meta_dir / "daisy_tracking"),
                 max_retries=2,
-                timeout=None,
+                timeout=self.block_timeout,
                 upstream_tasks=(
                     (
                         upstream_tasks
@@ -458,11 +472,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
             with debug_self.task(multiprocessing=multiprocessing) as task:
                 tasks = [task]
                 if multiprocessing:
-                    result = daisy.run_blockwise(tasks)  # noqa
+                    # daisy v2 Server.run_blockwise returns the {task_id: TaskState} map.
+                    result = daisy.Server().run_blockwise(tasks)
                 else:
-                    server = daisy.SerialServer()
-                    _cl_monitor = CLMonitor(server)
-                    result = server.run_blockwise(tasks)
+                    result = daisy.run_blockwise(
+                        tasks, multiprocessing=False, return_states=True
+                    )
 
         except Exception as e:
             raise e
@@ -480,16 +495,25 @@ class BlockwiseTask(StrictBaseModel, ABC):
     ):
         """
         Execute this task blockwise.
+
+        Returns daisy's ``{task_id: TaskState}`` map for BOTH the multiprocessing and serial
+        paths. Previously the multiprocessing path went through ``daisy.run_blockwise``, which
+        collapses the states to a bool and, worse, reports ``True`` even when blocks failed
+        (``TaskState.is_done()`` counts failed/orphaned blocks as "done"). Returning the states
+        lets callers inspect ``failed_count`` / ``orphaned_count`` / ``is_done()`` and react to
+        an incomplete run instead of silently accepting a partial output.
         """
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]
             if multiprocessing:
-                result = daisy.run_blockwise(tasks)  # noqa
-            else:
-                server = daisy.SerialServer()
-                _cl_monitor = CLMonitor(server)
-                result = server.run_blockwise(tasks)
-            return result
+                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
+                # states workaround is no longer needed.
+                return daisy.Server().run_blockwise(tasks)
+            # Serial path: module-level run_blockwise returns a bool unless
+            # return_states=True (see daisy._runner), so request the states map to
+            # keep the same {task_id: TaskState} contract as the distributed path.
+            return daisy.run_blockwise(tasks, multiprocessing=False, return_states=True)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """
