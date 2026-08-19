@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence import Array
-from pydantic import Field
+from pydantic import Field, model_validator
 from scipy.ndimage import gaussian_filter, label, maximum_filter
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage.measure import label as relabel
@@ -103,8 +103,28 @@ class ExtractFrags(BlockwiseTask):
     """
     min_seed_distance: int | None = None
     """
-    Determines whether to use seeds for mutex or not (default). Controls the
-    size of the maximum filter footprint computed on the boundary distances
+    Seed with one spacing everywhere: the size of the maximum filter footprint
+    computed on the boundary distances, in voxels. Mutually exclusive with
+    `adaptive_seed_spacing`; set neither to skip seeding entirely.
+    """
+    adaptive_seed_spacing: float | None = None
+    """
+    Seed with a spacing that follows the local object size: each candidate's
+    suppression radius is this multiple of its own distance to the boundary, capped
+    at the block context. Candidates sit on the medial axis, where that distance is
+    the local radius, so `2.0` is roughly one seed per local diameter - large
+    objects get sparse seeds and a few large fragments, thin ones stay dense enough
+    to keep touching processes apart. Lower is finer everywhere. Mutually exclusive
+    with `min_seed_distance`.
+    """
+    boundary_mask_offsets: Literal["direct", "all"] | list[int] = "direct"
+    """
+    Which affinity offsets are averaged into the boundary mask that seeds are
+    placed in. `"direct"` uses the unit offsets, `"all"` the whole neighborhood,
+    or pass explicit indices into the neighborhood. Including long range offsets
+    erodes each object by roughly the offset size, which holds seeds away from
+    object boundaries but drops objects thinner than those offsets out of the
+    mask entirely, leaving them unseeded.
     """
     seed_eps: float | None = None
     """
@@ -131,6 +151,30 @@ class ExtractFrags(BlockwiseTask):
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
     _out_array_dtype: np.dtype = np.dtype(np.uint64)
+
+    @model_validator(mode="after")
+    def _one_seed_spacing_rule(self) -> "ExtractFrags":
+        if (
+            self.min_seed_distance is not None
+            and self.adaptive_seed_spacing is not None
+        ):
+            raise ValueError(
+                "`min_seed_distance` and `adaptive_seed_spacing` are two ways to set "
+                "the same thing - how far apart seeds go - so set one or the other. "
+                "Whichever is more restrictive at a voxel would simply win."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _boundary_mask_offsets_are_usable(self) -> "ExtractFrags":
+        channels = self.boundary_mask_channels
+        n = len(self.neighborhood)
+        if not channels or min(channels) < 0 or max(channels) >= n:
+            raise ValueError(
+                f"`boundary_mask_offsets={self.boundary_mask_offsets!r}` must select "
+                f"at least one offset from the {n}-offset neighborhood."
+            )
+        return self
 
     @property
     def neighborhood(self):
@@ -220,8 +264,12 @@ class ExtractFrags(BlockwiseTask):
         # silent no-op.
         return replace_values(fragments_data, filtered_fragments, replace)
 
-    def get_fragments(self, affs_data):
-        fragments_data = self.compute_fragments(affs_data)
+    def get_fragments(
+        self,
+        affs_data,
+        voxel_size: Coordinate | None = None,
+    ):
+        fragments_data = self.compute_fragments(affs_data, voxel_size=voxel_size)
 
         # TODO: also mask out the fragments themselves when a mask is provided.
         # `process_block` currently applies the mask to the affinities before
@@ -302,7 +350,108 @@ class ExtractFrags(BlockwiseTask):
 
         return seeds
 
-    def compute_fragments(self, affs_data, rng: np.random.Generator | None = None):
+    @property
+    def boundary_mask_channels(self) -> list[int]:
+        """
+        `boundary_mask_offsets` resolved to channel indices. The neighborhood is
+        assumed to list the direct neighbors first, then the long range offsets.
+        """
+        spec = self.boundary_mask_offsets
+        if spec == "all":
+            return list(range(len(self.neighborhood)))
+        if spec == "direct":
+            return list(range(len(self.neighborhood[0])))
+        return list(spec)
+
+    def _seed_candidates(self, boundary_distances, min_spacing, voxel_size):
+        """
+        Medial-axis voxels, thinned to one per `min_spacing` cell, deepest first.
+
+        Candidates are voxels rather than connected components: along a smooth
+        process the boundary distance is flat down the whole medial axis, so one
+        representative per component would put a single seed on a process of any
+        length, and the spacing would never be applied.
+        """
+        radius = np.maximum(1, np.rint(min_spacing / np.array(voxel_size))).astype(int)
+        grid = np.ogrid[tuple(slice(-r, r + 1) for r in radius)]
+        footprint = sum((g / r) ** 2 for g, r in zip(grid, radius)) <= 1.0
+        maxima = (
+            maximum_filter(boundary_distances, footprint=footprint)
+            == boundary_distances
+        ) & (boundary_distances > 0)
+
+        coords = np.array(np.nonzero(maxima))
+        if coords.shape[1] == 0:
+            return coords, np.zeros(0)
+
+        distances = boundary_distances[tuple(coords)]
+        order = np.argsort(-distances)
+        coords, distances = coords[:, order], distances[order]
+
+        # nothing closer together than min_spacing can survive the greedy pass, so
+        # keeping one candidate per cell only bounds the work
+        cell = np.maximum(1, np.floor(min_spacing / np.array(voxel_size))).astype(int)
+        cell_idx = coords.T // cell
+        keys = np.ravel_multi_index(cell_idx.T, cell_idx.max(axis=0) + 1)
+        _, first = np.unique(keys, return_index=True)
+        first.sort()
+        return coords[:, first], distances[first]
+
+    def get_adaptive_seeds(self, boundary_distances, voxel_size) -> np.ndarray:
+        """
+        Seeds whose spacing follows the local object size. `boundary_distances`
+        must be in world units, so the spacing is physical under anisotropy.
+
+        Suppression is greedy, deepest candidate first, dropping a candidate if an
+        accepted seed lies within *the candidate's own* spacing. Using the accepted
+        seed's larger spacing instead would let a soma swallow the seeds of every
+        thin process passing nearby.
+        """
+        # a noise guard, to reject sub-resolution maxima - not a tuning knob, since
+        # thin objects are already spaced by their own radius
+        floor = 2.0 * max(voxel_size)
+        # a spacing past the context would make seed placement depend on where the
+        # block boundaries happened to fall
+        cap = max(float(min(self.context * voxel_size)), floor)
+
+        coords, distances = self._seed_candidates(boundary_distances, floor, voxel_size)
+        seeds = np.zeros(boundary_distances.shape, dtype=np.uint64)
+        if coords.shape[1] == 0:
+            return seeds
+
+        positions = coords.T * np.array(voxel_size)
+        spacings_sq = np.clip(self.adaptive_seed_spacing * distances, floor, cap) ** 2
+
+        nearest = np.full(coords.shape[1], np.inf)
+        accepted = []
+        for i in range(coords.shape[1]):  # already sorted by descending distance
+            if nearest[i] < spacings_sq[i]:
+                continue
+            accepted.append(i)
+            offsets = positions - positions[i]
+            np.minimum(nearest, np.einsum("ij,ij->i", offsets, offsets), out=nearest)
+
+        logger.debug(
+            "adaptive seeding kept %d of %d candidates", len(accepted), coords.shape[1]
+        )
+        seeds[tuple(coords[:, accepted])] = np.arange(
+            1, len(accepted) + 1, dtype=np.uint64
+        )
+        return seeds
+
+    def boundary_mask(self, affs_data: np.ndarray) -> np.ndarray:
+        """
+        The object interiors that seeds may be placed in. See
+        `boundary_mask_offsets` for which offsets are averaged.
+        """
+        return np.mean(affs_data[self.boundary_mask_channels], axis=0) > 0.5
+
+    def compute_fragments(
+        self,
+        affs_data,
+        rng: np.random.Generator | None = None,
+        voxel_size: Coordinate | None = None,
+    ):
         """
         Mutex watershed on `affs_data`, returning the fragment labels.
 
@@ -352,14 +501,21 @@ class ExtractFrags(BlockwiseTask):
             (-1, *((1,) * (len(affs_data.shape) - 1)))
         )
 
-        if self.min_seed_distance is not None:
-            boundary_mask = np.mean(affs_data, axis=0) > 0.5
-            boundary_distances = distance_transform_edt(boundary_mask)
+        if self.min_seed_distance is not None or self.adaptive_seed_spacing is not None:
+            boundary_mask = self.boundary_mask(affs_data)
 
-            seeds = self.get_seeds(
-                boundary_distances,
-                min_seed_distance=self.min_seed_distance,
-            ).astype(np.uint64)
+            if self.adaptive_seed_spacing is not None:
+                if voxel_size is None:
+                    voxel_size = self.voxel_size
+                seeds = self.get_adaptive_seeds(
+                    distance_transform_edt(boundary_mask, sampling=tuple(voxel_size)),
+                    voxel_size,
+                )
+            else:
+                seeds = self.get_seeds(
+                    distance_transform_edt(boundary_mask),
+                    min_seed_distance=self.min_seed_distance,
+                ).astype(np.uint64)
 
             seeds[~boundary_mask] = 0
 
@@ -431,7 +587,7 @@ class ExtractFrags(BlockwiseTask):
                 affs_data *= mask_data
 
         with benchmark_logger.trace("Compute Fragments"):
-            fragments_data = self.get_fragments(affs_data)
+            fragments_data = self.get_fragments(affs_data, voxel_size=affs.voxel_size)
 
             fragments = Array(
                 fragments_data,
