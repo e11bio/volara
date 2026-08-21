@@ -30,6 +30,7 @@ class SlurmWorker(Worker):
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
+    memory: int = 15564
 
     def get_command(self, config_path: Path, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
@@ -49,6 +50,7 @@ class SlurmWorker(Worker):
             queue=self.queue,
             num_gpus=self.num_gpus,
             num_cpus=self.num_cpus,
+            memory=self.memory,
             log_file=log_file,
             error_file=log_error,
         )
