@@ -205,10 +205,6 @@ class Dataset(StrictBaseModel, ABC):
         if self.channels is not None:
             if isinstance(self.channels, list):
                 for channels in self.channels:
-                    # A native slice op, NOT `lambda d: d[channels]`: funlib.persistence
-                    # marks an array unwriteable as soon as a custom callable lazy op is
-                    # applied, and does not adjust the ROI/voxel_size for it. The trailing
-                    # comma makes this a 1-tuple index, i.e. select along the first axis.
                     arr.lazy_op(np.s_[channels,])
             else:
                 arr.lazy_op(np.s_[self.channels])
