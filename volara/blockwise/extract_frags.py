@@ -14,7 +14,6 @@ from scipy.ndimage import (
     gaussian_filter,
     label,
     maximum_filter,
-    measurements,
 )
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
