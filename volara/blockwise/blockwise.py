@@ -9,10 +9,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import daisy
 import numpy as np
-from daisy import BlockStatus
 from funlib.geometry import Coordinate, Roi
-from funlib.math import cantor_number
-from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import get_log_basedir, set_log_basedir
 
@@ -157,13 +154,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         return self.meta_dir / "config.json"
 
-    @property
-    def block_ds(self) -> Path:
-        """
-        The dataset that will be used to track which blocks have been
-        successfully completed.
-        """
-        return self.meta_dir / "blocks_done.zarr"
 
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
@@ -195,47 +185,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
             rmtree(self.meta_dir)
         if drop_outputs:
             self.drop_artifacts()
-
-    def check_block_func(self):
-        """
-        A function to check whether a block has been completed.
-        """
-
-        def check_block(block):
-            block_array = open_ds(self.block_ds, mode="r")
-            zarr_arr = block_array._source_data
-
-            coordinate = (
-                block.write_roi.offset - block_array.offset
-            ) / block_array.voxel_size
-
-            chunk_size = Coordinate(zarr_arr.chunks[-coordinate.dims :])
-            chunk_index = coordinate // chunk_size
-            chunk_key = "/".join(str(i) for i in chunk_index)
-            return (zarr_arr.store.root / "c" / chunk_key).exists()
-
-        return check_block
-
-    def mark_block_done_func(self):
-        """
-        A helper function to mark a block as completed so that it
-        can be skipped if we have to pause and resume processing later.
-        """
-
-        def write_check_block(block):
-            if not block.status == BlockStatus.FAILED:
-                # Unless the block is explicitly marked as failed, we assume
-                # successful processing if there was no error
-                block_array = open_ds(self.block_ds, mode="a")
-                write_roi = block.write_roi.intersect(block_array.roi)
-                write_roi.shape = block_array.voxel_size
-                block_array[write_roi] = np.full(
-                    write_roi.shape // block_array.voxel_size,
-                    fill_value=block.block_id[1] + 1,
-                )
-                block.status = BlockStatus.SUCCESS
-
-        return write_check_block
 
     def worker_func(self):
         """
@@ -284,8 +233,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
                 except KeyError as e:
                     raise ValueError(client.context) from e
-                mark_block_done = self.mark_block_done_func()
-
                 while True:
                     logger.info("getting block")
                     with ExitStack() as worker_stack:
@@ -298,8 +245,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
                         with benchmark_logger.trace("Process Block"):
                             process_block(block)
-                        with benchmark_logger.trace("Mark Block Done"):
-                            mark_block_done(block)
 
             if self.num_cache_workers is not None:
                 workers = [
@@ -316,47 +261,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
             else:
                 worker_loop()
 
-    def init_block_array(self):
-        """
-        Build the block done zarr for tracking completed blocks.
-        """
-        # prepare blocks done ds
-
-        def get_dtype(write_roi, write_size):
-            # need to factor in block offset, so use cantor number of last block
-            # + 1 to be safe
-            num_blocks = cantor_number(write_roi.shape / write_size + 1)
-
-            for dtype in [np.uint8, np.uint16, np.uint32, np.uint64]:
-                if num_blocks <= np.iinfo(dtype).max:
-                    return dtype
-            raise ValueError(
-                f"Number of blocks ({num_blocks}) is too large for available data types."
-            )
-
-        block_voxel_size = self.write_size
-
-        try:
-            prepare_ds(
-                self.block_ds,
-                shape=(self.write_roi.shape + block_voxel_size - 1) / block_voxel_size,
-                offset=self.write_roi.offset,
-                voxel_size=block_voxel_size,
-                chunk_shape=self.write_size / block_voxel_size,
-                dtype=get_dtype(self.write_roi, self.write_size),
-                mode="a",
-            )
-        except PermissionError as e:
-            # The dataset already exists but with different parameters.
-            existing_block_ds = open_ds(self.block_ds, mode="r")
-            error_msg = (
-                f"Trying to overwrite existing {self.block_ds} array with incompatible data:\n"
-                f"Shape (existing): {existing_block_ds.shape} vs (new) {self.write_roi.shape / block_voxel_size}\n"
-                f"Chunk Shape (existing): {existing_block_ds._source_data.chunks} vs (new) {self.write_size / block_voxel_size}\n"
-                f"Data Type (existing): {existing_block_ds.dtype} vs (new) {get_dtype(self.write_roi, self.write_size)}\n"
-            )
-            raise ValueError(error_msg) from e
-
     @contextmanager
     def task(
         self,
@@ -370,7 +274,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         benchmark_logger = self.get_benchmark_logger()
 
         with benchmark_logger.trace("init"):
-            self.init_block_array()
+            self.meta_dir.mkdir(parents=True, exist_ok=True)
             self.init()
 
             context = self.context_size
@@ -388,13 +292,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 with benchmark_logger.trace("Process Block Setup"):
                     process_block = stack.enter_context(process_block_func)
 
-                mark_block = self.mark_block_done_func()
-
                 def process_func(block):
                     with benchmark_logger.trace("Process Block"):
                         process_block(block)
-                    with benchmark_logger.trace("Mark Block Done"):
-                        mark_block(block)
 
             task = daisy.Task(
                 self.task_name,
@@ -405,7 +305,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
                 max_workers=self.num_workers,
-                check_function=self.check_block_func(),
+                tracking_path=str(self.meta_dir / "blocks_done"),
                 max_retries=2,
                 timeout=self.block_timeout,
                 upstream_tasks=(
