@@ -1,5 +1,6 @@
 import logging
 import time
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
@@ -12,6 +13,14 @@ from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from pydantic import Field
 
+from .ops import (
+    AnyDatasetOp,
+    OmeNormalize,
+    ReverseAxes,
+    ScaleShift,
+    SelectChannels,
+    StackWith,
+)
 from .utils import OpenMode, PydanticCoordinate, StrictBaseModel
 
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +41,23 @@ class Dataset(StrictBaseModel, ABC):
     axis_names: list[str] | None = None
     units: list[str] | None = None
     writable: bool = True
+
+    ops: list[AnyDatasetOp] | None = None
+    """
+    Lazy operations to apply, IN THE ORDER GIVEN.
+
+    Order changes the result, so it is stated rather than implied: `ome_normalize` indexes the
+    channel axis and must precede `select_channels`; `reverse_axes` names the collapsed array and
+    must follow it.
+
+    Declarative models rather than callables, because a blockwise worker rebuilds this from
+    `model_dump_json()` -- a `list[Callable]` cannot serialise, so it would apply in the driver and
+    not in the worker.
+
+    Supersedes `channels`, `flip`, `ome_norm`, `scale_shift` and `stack`, which remain for
+    compatibility and are deprecated. Setting both is refused: the two cannot express the same
+    ordering unambiguously.
+    """
 
     flip: list[int] | None = None
     """
@@ -214,38 +240,65 @@ class Dataset(StrictBaseModel, ABC):
             **self.zarr_kwargs,
         )
 
+        # Kept for external subclasses that override it. Deprecated: it applies before every op in
+        # `ops` with no way to interleave, which is the implicitness `ops` exists to remove.
         self.lazy_ops(arr)
 
-        if self.channels is not None:
-            if isinstance(self.channels, list):
-                for channels in self.channels:
-                    if isinstance(channels, list):
-                        arr.lazy_op(lambda d: d[channels])
-                    else:
-                        arr.lazy_op(np.s_[channels])
-            else:
-                arr.lazy_op(np.s_[self.channels])
-
-        if self.flip:
-            if mode != "r":
-                raise ValueError(
-                    f"Dataset {self.store} has flip={self.flip}, which is read-only; "
-                    f"cannot open in mode {mode!r}."
-                )
-            ndim = len(arr.shape)
-            bad = [a for a in self.flip if not 0 <= a < ndim]
-            if bad:
-                raise ValueError(
-                    f"flip={self.flip} has axes {bad} out of range for the {ndim}-D array "
-                    f"remaining after channels={self.channels}. flip indexes the FINAL array."
-                )
-            rev = set(self.flip)
-            arr.lazy_op(
-                tuple(
-                    slice(None, None, -1) if i in rev else slice(None) for i in range(ndim)
-                )
+        ops = self.resolved_ops()
+        if mode != "r" and any(isinstance(o, ReverseAxes) for o in ops):
+            raise ValueError(
+                f"Dataset {self.store} reverses axes, which is read-only; "
+                f"cannot open in mode {mode!r}."
             )
+        for op in ops:
+            op.apply(arr)
         return arr
+
+    def resolved_ops(self) -> list[AnyDatasetOp]:
+        """The op list to apply, from ``ops`` or derived from the deprecated keyword fields.
+
+        The derived order -- ome_norm, scale_shift, stack, channels, flip -- is exactly what
+        ``array()`` did before ``ops`` existed, so a dataset that sets neither behaves identically.
+        """
+        legacy = {
+            "ome_norm": self.ome_norm if hasattr(self, "ome_norm") else None,
+            "scale_shift": self.scale_shift if hasattr(self, "scale_shift") else None,
+            "stack": self.stack if hasattr(self, "stack") else None,
+            "channels": self.channels,
+            "flip": self.flip,
+        }
+        set_legacy = [k for k, v in legacy.items() if v not in (None, [])]
+        if self.ops is not None:
+            if set_legacy:
+                raise ValueError(
+                    f"Dataset {self.store} sets both `ops` and the deprecated {set_legacy}. They "
+                    f"cannot express one unambiguous order -- move the remaining ones into `ops`."
+                )
+            return list(self.ops)
+        if set_legacy:
+            warnings.warn(
+                f"Dataset keyword ops {set_legacy} are deprecated; pass `ops=[...]` instead, which "
+                f"states the order explicitly. Equivalent: ops="
+                f"{[type(o).__name__ + '(...)' for o in self._legacy_ops()]}",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        return self._legacy_ops()
+
+    def _legacy_ops(self) -> list[AnyDatasetOp]:
+        """The deprecated fields as an op list, in the order ``array()`` has always applied them."""
+        ops: list[AnyDatasetOp] = []
+        if getattr(self, "ome_norm", None):
+            ops.append(OmeNormalize(metadata=self.ome_norm))
+        if getattr(self, "scale_shift", None) is not None:
+            ops.append(ScaleShift(scale=self.scale_shift[0], shift=self.scale_shift[1]))
+        if getattr(self, "stack", None) is not None:
+            ops.append(StackWith(other=self.stack))
+        if self.channels is not None:
+            ops.append(SelectChannels(channels=self.channels))
+        if self.flip:
+            ops.append(ReverseAxes(axes=self.flip))
+        return ops
 
     @property
     @abstractmethod
@@ -288,33 +341,6 @@ class Raw(Dataset):
             attrs["bounds"] = self.bounds
         return attrs
 
-    def lazy_ops(self, arr: Array) -> None:
-        def scale_shift(data, scale_shift):
-            data = data.astype(np.float32)
-            scale, shift = scale_shift
-            norm = data * scale + shift
-            return norm
-
-        def ome_norm(data, bounds):
-            data = data.astype(np.float32)
-            c, *shape = data.shape
-            shift = np.array(
-                [b_min for (b_min, _) in bounds], dtype=np.float32
-            ).reshape(c, *((1,) * len(shape)))
-            scale = np.array(
-                [b_max - b_min for b_min, b_max in bounds], dtype=np.float32
-            ).reshape(c, *((1,) * len(shape)))
-            return (data - shift) / scale
-
-        def stack(data, other_data):
-            return np.concatenate([data, other_data], axis=0)
-
-        if self.ome_norm:
-            arr.lazy_op(lambda data: ome_norm(data, self.bounds))
-        if self.scale_shift is not None:
-            arr.lazy_op(lambda data: scale_shift(data, self.scale_shift))
-        if self.stack is not None:
-            arr.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
 
 
 class Affs(Dataset):
