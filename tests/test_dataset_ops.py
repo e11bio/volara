@@ -1,9 +1,10 @@
 """Lazy operations are an ORDERED list of declarative models.
 
-Two properties carry the design. Order changes the result, so it must be stated rather than implied
-by the order of `if` statements. And an op must SERIALISE, because a blockwise worker rebuilds the
-task from `model_dump_json()` and re-opens the array itself — a `list[Callable]` applies in the
-driver and not in the worker.
+Order changes the result, so it must be stated rather than implied by the order of `if` statements.
+
+An op is a named model or a plain callable. Both reach a worker: volara's `PydanticCallable`
+cloudpickles a callable to base64, the same way `LambdaTask.lambda_func` ships one. A *bare*
+`Callable` annotation would not — that is the trap, not callables themselves.
 """
 
 import warnings
@@ -41,18 +42,48 @@ def test_ops_survive_the_round_trip_a_worker_makes():
     assert back.ops[2].scale == 0.5
 
 
-def test_a_list_of_callables_could_not_have_worked():
-    """Documents WHY these are models. Pydantic refuses to dump a function."""
+def test_a_BARE_callable_annotation_would_not_have_worked():
+    """The trap is the annotation, not callables. `PydanticCallable` is the one that ships."""
     from typing import Any, Callable
 
     from pydantic_core import PydanticSerializationError
 
-    class _WithCallables(BaseModel):
+    class _Bare(BaseModel):
         model_config = {"arbitrary_types_allowed": True}
         ops: list[Callable[[Any], Any]] = []
 
     with pytest.raises(PydanticSerializationError):
-        _WithCallables(ops=[lambda d: d]).model_dump_json()
+        _Bare(ops=[lambda d: d]).model_dump_json()
+
+
+def test_a_plain_callable_op_reaches_the_worker(tmp_path):
+    """Cloudpickled and base64'd, so it survives the config.json a worker reads."""
+    p, data = _store(tmp_path, (5, 4, 3))
+    r = Raw(store=p, ops=[lambda d: d * 2], voxel_size=(1, 1, 1), offset=(0, 0, 0))
+    rebuilt = Raw.model_validate_json(r.model_dump_json())
+    assert np.array_equal(np.asarray(rebuilt.array("r")[:]), data * 2)
+
+
+def test_named_ops_and_callables_compose_in_order(tmp_path):
+    p, data = _store(tmp_path, (2, 3, 5, 4, 3))
+    r = Raw(store=p, ops=[SelectChannels(channels=[1, 2]), lambda d: d + 1,
+                          ReverseAxes(axes=[0])],
+            voxel_size=(1,) * 5, offset=(0,) * 5)
+    rebuilt = Raw.model_validate_json(r.model_dump_json())
+    assert np.array_equal(np.asarray(rebuilt.array("r")[:]), (data[1, 2] + 1)[::-1])
+
+
+def test_a_named_op_stays_readable_in_the_config(tmp_path):
+    """Why to prefer one: a consumer can see and hash it. A cloudpickle blob is opaque, and its
+    bytes move with the Python and cloudpickle versions -- so hashing it would make every worker
+    upgrade look like a change."""
+    p, _ = _store(tmp_path, (5, 4, 3))
+    named = Raw(store=p, ops=[ReverseAxes(axes=[0])], voxel_size=(1, 1, 1),
+                offset=(0, 0, 0)).model_dump_json()
+    assert '"op":"reverse_axes"' in named and '"axes":[0]' in named
+    opaque = Raw(store=p, ops=[lambda d: d[::-1]], voxel_size=(1, 1, 1),
+                 offset=(0, 0, 0)).model_dump_json()
+    assert "reverse" not in opaque
 
 
 # --------------------------------------------------------------- order

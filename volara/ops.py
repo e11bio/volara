@@ -1,9 +1,15 @@
 """Ordered lazy operations for a :class:`~volara.datasets.Dataset`.
 
-An op is a small declarative model, not a callable, and that is the load-bearing choice: a blockwise
-worker rebuilds the whole task from ``model_dump_json()`` and re-opens the array itself, so anything
-that cannot serialise applies in the driver and **not** in the worker. A ``list[Callable]`` raises
-``PydanticSerializationError`` at dump time and makes the dataset unusable for distributed work.
+An op is either a **named model** or a **plain callable**. Both cross the worker boundary: volara's
+``PydanticCallable`` cloudpickles a callable to base64, which is how ``LambdaTask`` already ships
+one. (A bare ``Callable`` annotation does not — it raises ``PydanticSerializationError`` at dump
+time — so use ``PydanticCallable``.)
+
+Prefer a named model where one fits. It is reviewable in a config file, it is stable to hash, and a
+consumer can reason about it: slabreg fences raw-derived artifacts by hashing the ops that define a
+slab's pixel frame, which a base64 cloudpickle blob cannot support — the bytes move with the Python
+and cloudpickle versions, so every worker upgrade would look like a re-framing. Reach for a callable
+when no named op fits.
 
 Order is explicit because it changes the result. ``OmeNormalize`` indexes the channel axis and so
 must run BEFORE ``SelectChannels`` collapses it; ``ReverseAxes`` names axes of the collapsed array
@@ -21,7 +27,7 @@ import numpy as np
 from funlib.persistence import Array
 from pydantic import Field
 
-from .utils import StrictBaseModel
+from .utils import PydanticCallable, StrictBaseModel
 
 
 class DatasetOp(StrictBaseModel, ABC):
@@ -130,7 +136,23 @@ class StackWith(DatasetOp):
         arr.lazy_op(lambda d: np.concatenate([d, other], axis=0))
 
 
-AnyDatasetOp = Annotated[
+NamedOp = Annotated[
     Union[SelectChannels, ReverseAxes, OmeNormalize, ScaleShift, StackWith],
     Field(discriminator="op"),
 ]
+
+#: A named op, or any callable ``data -> data`` (cloudpickled to reach a worker).
+#:
+#: Left-to-right: a mapping carrying an ``op`` discriminator is a named op. Smart-mode would try the
+#: callable branch first and die decoding a dict as base64.
+AnyDatasetOp = Annotated[
+    Union[NamedOp, PydanticCallable], Field(union_mode="left_to_right")
+]
+
+
+def apply_op(op, arr: Array) -> None:
+    """Apply a named op or a bare callable to ``arr``."""
+    if isinstance(op, DatasetOp):
+        op.apply(arr)
+    else:
+        arr.lazy_op(op)

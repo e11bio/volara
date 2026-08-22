@@ -20,6 +20,7 @@ from .ops import (
     ScaleShift,
     SelectChannels,
     StackWith,
+    apply_op,
 )
 from .utils import OpenMode, PydanticCoordinate, StrictBaseModel
 
@@ -50,9 +51,9 @@ class Dataset(StrictBaseModel, ABC):
     channel axis and must precede `select_channels`; `reverse_axes` names the collapsed array and
     must follow it.
 
-    Declarative models rather than callables, because a blockwise worker rebuilds this from
-    `model_dump_json()` -- a `list[Callable]` cannot serialise, so it would apply in the driver and
-    not in the worker.
+    Each entry is a named op model or a plain callable; callables are cloudpickled to reach a
+    worker, the same way `LambdaTask.lambda_func` is. Prefer a named op where one fits -- it is
+    reviewable in a config and stable to hash, which a base64 blob is not.
 
     Supersedes `channels`, `flip`, `ome_norm`, `scale_shift` and `stack`, which remain for
     compatibility and are deprecated. Setting both is refused: the two cannot express the same
@@ -251,7 +252,7 @@ class Dataset(StrictBaseModel, ABC):
                 f"cannot open in mode {mode!r}."
             )
         for op in ops:
-            op.apply(arr)
+            apply_op(op, arr)
         return arr
 
     def resolved_ops(self) -> list[AnyDatasetOp]:
