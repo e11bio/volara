@@ -1,6 +1,5 @@
 import logging
 import time
-import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import rmtree
@@ -14,7 +13,6 @@ from funlib.persistence import Array, open_ds, prepare_ds
 from pydantic import Field
 
 from .ops import (
-    AnyDatasetOp,
     OmeNormalize,
     ReverseAxes,
     ScaleShift,
@@ -22,7 +20,7 @@ from .ops import (
     StackWith,
     apply_op,
 )
-from .utils import OpenMode, PydanticCoordinate, StrictBaseModel
+from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -43,21 +41,17 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
-    ops: list[AnyDatasetOp] | None = None
+    ops: list[PydanticCallable] | None = None
     """
-    Lazy operations to apply, IN THE ORDER GIVEN.
+    Extra lazy operations, applied IN ORDER and AFTER everything the keyword fields below set up.
 
-    Order changes the result, so it is stated rather than implied: `ome_normalize` indexes the
-    channel axis and must precede `select_channels`; `reverse_axes` names the collapsed array and
-    must follow it.
+    Each is a plain callable ``data -> data``, cloudpickled to reach a worker the same way
+    `LambdaTask.lambda_func` is. This is the escape hatch for a transform that has no keyword.
 
-    Each entry is a named op model or a plain callable; callables are cloudpickled to reach a
-    worker, the same way `LambdaTask.lambda_func` is. Prefer a named op where one fits -- it is
-    reviewable in a config and stable to hash, which a base64 blob is not.
-
-    Supersedes `channels`, `flip`, `ome_norm`, `scale_shift` and `stack`, which remain for
-    compatibility and are deprecated. Setting both is refused: the two cannot express the same
-    ordering unambiguously.
+    The keyword fields drive the named ops and run first, in the one order that is correct:
+    `ome_norm` indexes the channel axis so it must precede `channels`, and `flip` names the
+    collapsed array so it must follow. That order is now stated in one place (`resolved_ops`)
+    instead of being implied by the order of `if` statements.
     """
 
     flip: list[int] | None = None
@@ -255,51 +249,26 @@ class Dataset(StrictBaseModel, ABC):
             apply_op(op, arr)
         return arr
 
-    def resolved_ops(self) -> list[AnyDatasetOp]:
-        """The op list to apply, from ``ops`` or derived from the deprecated keyword fields.
+    def resolved_ops(self) -> list:
+        """Every op to apply, in order: the keyword-driven named ops, then ``ops``.
 
-        The derived order -- ome_norm, scale_shift, stack, channels, flip -- is exactly what
-        ``array()`` did before ``ops`` existed, so a dataset that sets neither behaves identically.
+        The named order -- ome_normalize, scale_shift, stack_with, select_channels, reverse_axes --
+        is exactly what ``array()`` has always done, and it is not arbitrary: ``ome_normalize``
+        indexes the channel axis so it must run before ``select_channels`` collapses it, and
+        ``reverse_axes`` names the collapsed array so it must run after.
         """
-        legacy = {
-            "ome_norm": self.ome_norm if hasattr(self, "ome_norm") else None,
-            "scale_shift": self.scale_shift if hasattr(self, "scale_shift") else None,
-            "stack": self.stack if hasattr(self, "stack") else None,
-            "channels": self.channels,
-            "flip": self.flip,
-        }
-        set_legacy = [k for k, v in legacy.items() if v not in (None, [])]
-        if self.ops is not None:
-            if set_legacy:
-                raise ValueError(
-                    f"Dataset {self.store} sets both `ops` and the deprecated {set_legacy}. They "
-                    f"cannot express one unambiguous order -- move the remaining ones into `ops`."
-                )
-            return list(self.ops)
-        if set_legacy:
-            warnings.warn(
-                f"Dataset keyword ops {set_legacy} are deprecated; pass `ops=[...]` instead, which "
-                f"states the order explicitly. Equivalent: ops="
-                f"{[type(o).__name__ + '(...)' for o in self._legacy_ops()]}",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        return self._legacy_ops()
-
-    def _legacy_ops(self) -> list[AnyDatasetOp]:
-        """The deprecated fields as an op list, in the order ``array()`` has always applied them."""
-        ops: list[AnyDatasetOp] = []
+        named: list = []
         if getattr(self, "ome_norm", None):
-            ops.append(OmeNormalize(metadata=self.ome_norm))
+            named.append(OmeNormalize(metadata=self.ome_norm))
         if getattr(self, "scale_shift", None) is not None:
-            ops.append(ScaleShift(scale=self.scale_shift[0], shift=self.scale_shift[1]))
+            named.append(ScaleShift(scale=self.scale_shift[0], shift=self.scale_shift[1]))
         if getattr(self, "stack", None) is not None:
-            ops.append(StackWith(other=self.stack))
+            named.append(StackWith(other=self.stack))
         if self.channels is not None:
-            ops.append(SelectChannels(channels=self.channels))
+            named.append(SelectChannels(channels=self.channels))
         if self.flip:
-            ops.append(ReverseAxes(axes=self.flip))
-        return ops
+            named.append(ReverseAxes(axes=self.flip))
+        return named + list(self.ops or [])
 
     @property
     @abstractmethod
