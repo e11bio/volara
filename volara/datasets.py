@@ -152,21 +152,33 @@ class Dataset(StrictBaseModel, ABC):
     def drop(self) -> None:
         """
         Delete this dataset.
+
+        A LOCAL PATH GIVEN AS A str IS STILL A LOCAL PATH. ``store`` is typed
+        ``Path | str``, so a caller that builds one from string formatting (slabreg's
+        s11 does, for the affs and heatmap stores) passes validation and then hits
+        "not a Path or s3 path" only at drop time -- reached from ``ctx.rerun`` ->
+        ``task.drop()``, i.e. exactly the recompute path invoked when a store's
+        geometry no longer matches. Coerce instead of refusing; s3:// keeps its own
+        branch below. (Reapplied 2026-08-20: the original fix was lost uncommitted.)
         """
-        if not isinstance(self.store, Path):
-            if isinstance(self.store, str) and self.store.startswith("s3://"):
+        if isinstance(self.store, str) and not self.store.startswith("s3://"):
+            store: Path | str = Path(self.store)
+        else:
+            store = self.store
+        if not isinstance(store, Path):
+            if isinstance(store, str) and store.startswith("s3://"):
                 # drop an s3 zarr
                 fs = self._s3fs()
                 try:
-                    fs.rm(self.store, recursive=True)
+                    fs.rm(store, recursive=True)
                 except FileNotFoundError:
                     pass
             else:
                 raise ValueError(
-                    f"Not dropping dataset: store {self.store} is not a Path or s3 path"
+                    f"Not dropping dataset: store {store} is not a Path or s3 path"
                 )
-        elif self.store.exists():
-            rmtree(self.store)
+        elif store.exists():
+            rmtree(store)
 
     def spoof(self, spoof_dir: Path):
         if not isinstance(self.store, Path):
