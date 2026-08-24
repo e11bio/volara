@@ -12,7 +12,6 @@ from pydantic import Field, model_validator
 from scipy.ndimage import gaussian_filter, label, maximum_filter
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage.measure import label as relabel
-from skimage.morphology import remove_small_objects
 from skimage.segmentation import watershed
 
 from ..datasets import Affs, Labels, Raw
@@ -23,9 +22,11 @@ from .blockwise import BlockwiseTask
 
 logger = logging.getLogger(__file__)
 
-# Written onto seam affinities to force a split. mws reads only the sign, so any
-# large negative does; not `-inf`, since `inf * bool` is nan, which mws rejects.
-HARD_SPLIT = -1e9
+# Attractive seam affinities are scaled by this. mws processes edges in descending
+# magnitude, so damping sends them last: both territories grow first and the seeds'
+# own mutex then blocks the crossing. That places the seam without forcing a split,
+# so it does nothing in unseeded tissue, where there is no mutex to block anything.
+SEAM_DAMPING = 0.1
 
 
 class ExtractFrags(BlockwiseTask):
@@ -245,7 +246,7 @@ class ExtractFrags(BlockwiseTask):
         )
 
     def filter_avg_fragments(self, affs, fragments_data, filter_value):
-        # Average over the direct-neighbour offsets only. Those are the first
+        # Average over the direct-neighbor offsets only. Those are the first
         # `ndim` entries of the neighborhood (one per axis), so take the slice
         # from the neighborhood's dimensionality rather than hardcoding 3 -
         # otherwise a 2D neighborhood averages a long-range channel in here.
@@ -300,14 +301,19 @@ class ExtractFrags(BlockwiseTask):
                 affs_data, fragments_data, self.filter_fragments
             )
 
-        # remove small debris
+        # remove small debris. Done here rather than via
+        # `skimage.remove_small_objects`, whose `min_size` is deprecated in favor
+        # of a `max_size` that removes sizes *equal* to the threshold as well - a
+        # silent off-by-one on `remove_debris`, and only available in skimage 0.26.
+        # Fragments are already labelled, so a fragment's size is just how many
+        # times its id occurs.
         if self.remove_debris > 0:
-            fragments_dtype = fragments_data.dtype
-            fragments_data = fragments_data.astype(np.int64)
-            fragments_data = remove_small_objects(
-                fragments_data, min_size=self.remove_debris
-            )
-            fragments_data = fragments_data.astype(fragments_dtype)
+            ids, sizes = np.unique(fragments_data, return_counts=True)
+            debris = ids[sizes < self.remove_debris]
+            if debris.size:
+                fragments_data = replace_values(
+                    fragments_data, debris, np.zeros_like(debris)
+                )
 
         return fragments_data
 
@@ -485,23 +491,71 @@ class ExtractFrags(BlockwiseTask):
             return seeds[tuple(indices)]
 
         return watershed(
-            -boundary_distances,
+            # float32 is bit-identical to float64 here, at half the memory
+            np.multiply(boundary_distances, -1, dtype=np.float32),
             markers=seeds.astype(np.int32),
             mask=boundary_mask,
         )
 
+    def absorb_small_cells(self, cells: np.ndarray) -> np.ndarray:
+        """
+        Merge every territory below `remove_debris` into its largest neighbor, so
+        the seam cannot isolate a fragment that the debris filter would delete.
+        """
+        sizes = np.bincount(cells.reshape(-1))
+        is_small = sizes < self.remove_debris
+        is_small[0] = False
+        if not is_small.any():
+            return cells
+
+        # Neighbours of the small territories, both directions. Restricted to
+        # pairs that touch one: every object surface is a differing pair, which is
+        # orders of magnitude more than we need.
+        touches_small = is_small[cells]
+        src, dst = [], []
+        for axis in range(cells.ndim):
+            lo, hi = (
+                tuple(
+                    slice(*b) if i == axis else slice(None) for i in range(cells.ndim)
+                )
+                for b in ((None, -1), (1, None))
+            )
+            a, b = cells[lo], cells[hi]
+            differ = (a != b) & (touches_small[lo] | touches_small[hi])
+            a, b = a[differ], b[differ]
+            src += [a, b]
+            dst += [b, a]
+        src, dst = np.concatenate(src), np.concatenate(dst)
+
+        absorb = is_small[src] & (dst != 0)
+        src, dst = src[absorb], dst[absorb]
+        remap = np.arange(sizes.size, dtype=cells.dtype)
+        if src.size:
+            # scatter in ascending neighbor size, so the largest one lands last
+            order = np.argsort(sizes[dst], kind="stable")
+            remap[src[order]] = dst[order]
+            while True:  # a territory absorbed into one that was itself absorbed
+                collapsed = remap[remap]
+                if np.array_equal(collapsed, remap):
+                    break
+                remap = collapsed
+        return remap[cells]
+
     def cut_seams(
-        self, shift, seeds: np.ndarray, boundary_distances, boundary_mask, voxel_size
+        self, affs, seeds: np.ndarray, boundary_distances, boundary_mask, voxel_size
     ):
         """
-        Split every unit-offset affinity that crosses a boundary between two seed
-        territories.
+        Damp every unit-offset affinity that crosses a boundary between two seed
+        territories, so the seam falls where the territories meet.
 
-        Any path between two territories crosses such an edge, so the set is a
-        complete cut and the seam is watertight. Edges leaving the mask are
-        skipped, already being low affinity, as are long range offsets.
+        Any path between two territories crosses such an edge, so damping the set
+        places the whole seam. Edges leaving the mask are skipped, already being
+        low affinity, as are long range offsets - one spans many territories, and
+        the seeds' mutex blocks it across a seam regardless.
         """
         cells = self.seed_cells(seeds, boundary_distances, boundary_mask, voxel_size)
+        if self.remove_debris > 0:
+            cells = self.absorb_small_cells(cells)
 
         for channel, offset in enumerate(self.neighborhood):
             if max(abs(d) for d in offset) > 1:
@@ -518,9 +572,10 @@ class ExtractFrags(BlockwiseTask):
             crosses = (
                 (cells[src] != cells[dst]) & boundary_mask[src] & boundary_mask[dst]
             )
-            shift[(channel, *src)][crosses] = HARD_SPLIT
+            channel_affs = affs[(channel, *src)]
+            channel_affs[crosses & (channel_affs > 0)] *= SEAM_DAMPING
 
-        return shift
+        return affs
 
     def boundary_mask(self, affs_data: np.ndarray) -> np.ndarray:
         """
@@ -612,11 +667,6 @@ class ExtractFrags(BlockwiseTask):
 
                 shift -= self.seed_eps * D
 
-            if self.voronoi is not None:
-                shift = self.cut_seams(
-                    shift, seeds, boundary_distances, boundary_mask, voxel_size
-                )
-
         else:
             seeds = None
 
@@ -625,6 +675,11 @@ class ExtractFrags(BlockwiseTask):
         # `.astype(np.float64)` (which copies even when already float64).
         # `affs_data` itself must survive - filter_avg_fragments still reads it.
         shift += affs_data
+
+        if seeds is not None and self.voronoi is not None:
+            shift = self.cut_seams(
+                shift, seeds, boundary_distances, boundary_mask, voxel_size
+            )
 
         fragments_data = mws.agglom(
             shift.astype(np.float64, copy=False),
