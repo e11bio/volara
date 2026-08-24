@@ -13,6 +13,7 @@ from scipy.ndimage import gaussian_filter, label, maximum_filter
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage.measure import label as relabel
 from skimage.morphology import remove_small_objects
+from skimage.segmentation import watershed
 
 from ..datasets import Affs, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
@@ -21,6 +22,10 @@ from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
 logger = logging.getLogger(__file__)
+
+# Written onto seam affinities to force a split. mws reads only the sign, so any
+# large negative does; not `-inf`, since `inf * bool` is nan, which mws rejects.
+HARD_SPLIT = -1e9
 
 
 class ExtractFrags(BlockwiseTask):
@@ -110,21 +115,19 @@ class ExtractFrags(BlockwiseTask):
     adaptive_seed_spacing: float | None = None
     """
     Seed with a spacing that follows the local object size: each candidate's
-    suppression radius is this multiple of its own distance to the boundary, capped
-    at the block context. Candidates sit on the medial axis, where that distance is
-    the local radius, so `2.0` is roughly one seed per local diameter - large
-    objects get sparse seeds and a few large fragments, thin ones stay dense enough
-    to keep touching processes apart. Lower is finer everywhere. Mutually exclusive
-    with `min_seed_distance`.
+    suppression radius is this multiple of its own distance to the boundary,
+    capped at the block context. Candidates sit on the medial axis, where that
+    distance is the local radius, so `2.0` is roughly one seed per local
+    diameter. Lower is finer everywhere. Mutually exclusive with
+    `min_seed_distance`.
     """
     boundary_mask_offsets: Literal["direct", "all"] | list[int] = "direct"
     """
     Which affinity offsets are averaged into the boundary mask that seeds are
-    placed in. `"direct"` uses the unit offsets, `"all"` the whole neighborhood,
-    or pass explicit indices into the neighborhood. Including long range offsets
-    erodes each object by roughly the offset size, which holds seeds away from
-    object boundaries but drops objects thinner than those offsets out of the
-    mask entirely, leaving them unseeded.
+    placed in: `"direct"` for the unit offsets, `"all"` for the whole
+    neighborhood, or explicit indices into it. Including long range offsets
+    erodes each object by roughly the offset size, which drops objects thinner
+    than those offsets out of the mask entirely, leaving them unseeded.
     """
     seed_eps: float | None = None
     """
@@ -139,6 +142,19 @@ class ExtractFrags(BlockwiseTask):
     transform used for affinity decay. This prevents the decay from growing
     without bound deep inside large objects, which can otherwise lead to
     unlabeled (`0`) interiors. If None, no cap is applied.
+    """
+    voronoi: Literal["geodesic", "euclidean"] | None = None
+    """
+    If using seeds, split every unit-offset affinity whose two voxels belong to
+    different seeds, so fragment boundaries land on the surface where two seeds'
+    territories meet rather than wherever the affinity field happens to dip.
+
+    `"geodesic"` grows territory by flooding the boundary distances within the
+    mask, so a seed claims only tissue it connects to and the seam is a cross
+    section, settling at a constriction where there is one. `"euclidean"` takes
+    the nearest seed in space, which is cheaper but lets a seed claim tissue it
+    is not connected to. Long range offsets are never cut, each spanning many
+    territories, so one can still merge across a seam.
     """
 
     bulk_write: bool = False
@@ -371,6 +387,11 @@ class ExtractFrags(BlockwiseTask):
         process the boundary distance is flat down the whole medial axis, so one
         representative per component would put a single seed on a process of any
         length, and the spacing would never be applied.
+
+        Candidates within one voxel of the boundary are rejected outright: their
+        distance carries no thickness information, so spacing them out instead
+        packs seeds down a sub-resolution wisp, which `voronoi` then shatters
+        into fragments small enough for `remove_debris` to delete.
         """
         radius = np.maximum(1, np.rint(min_spacing / np.array(voxel_size))).astype(int)
         grid = np.ogrid[tuple(slice(-r, r + 1) for r in radius)]
@@ -378,7 +399,7 @@ class ExtractFrags(BlockwiseTask):
         maxima = (
             maximum_filter(boundary_distances, footprint=footprint)
             == boundary_distances
-        ) & (boundary_distances > 0)
+        ) & (boundary_distances > max(voxel_size))
 
         coords = np.array(np.nonzero(maxima))
         if coords.shape[1] == 0:
@@ -407,11 +428,9 @@ class ExtractFrags(BlockwiseTask):
         seed's larger spacing instead would let a soma swallow the seeds of every
         thin process passing nearby.
         """
-        # a noise guard, to reject sub-resolution maxima - not a tuning knob, since
-        # thin objects are already spaced by their own radius
+        # a noise guard rather than a knob; thin objects are spaced by their radius
         floor = 2.0 * max(voxel_size)
-        # a spacing past the context would make seed placement depend on where the
-        # block boundaries happened to fall
+        # past the context, seed placement would depend on where blocks fell
         cap = max(float(min(self.context * voxel_size)), floor)
 
         coords, distances = self._seed_candidates(boundary_distances, floor, voxel_size)
@@ -438,6 +457,70 @@ class ExtractFrags(BlockwiseTask):
             1, len(accepted) + 1, dtype=np.uint64
         )
         return seeds
+
+    def seed_cells(
+        self,
+        seeds: np.ndarray,
+        boundary_distances: np.ndarray,
+        boundary_mask,
+        voxel_size=None,
+    ) -> np.ndarray:
+        """
+        Every masked voxel labelled with the seed that owns it.
+
+        `"geodesic"` floods `-boundary_distances` from the seeds within the mask,
+        so territory spreads along tissue and the surface where two seeds meet
+        settles at a constriction, the flood reaching a neck last. The partition
+        is then a function of the boundary mask alone. `"euclidean"` takes the
+        nearest seed in space, for which the distance transform's indices are
+        already the answer.
+        """
+        if self.voronoi == "euclidean":
+            indices = distance_transform_edt(
+                seeds == 0,
+                sampling=tuple(voxel_size),
+                return_distances=False,
+                return_indices=True,
+            )
+            return seeds[tuple(indices)]
+
+        return watershed(
+            -boundary_distances,
+            markers=seeds.astype(np.int32),
+            mask=boundary_mask,
+        )
+
+    def cut_seams(
+        self, shift, seeds: np.ndarray, boundary_distances, boundary_mask, voxel_size
+    ):
+        """
+        Split every unit-offset affinity that crosses a boundary between two seed
+        territories.
+
+        Any path between two territories crosses such an edge, so the set is a
+        complete cut and the seam is watertight. Edges leaving the mask are
+        skipped, already being low affinity, as are long range offsets.
+        """
+        cells = self.seed_cells(seeds, boundary_distances, boundary_mask, voxel_size)
+
+        for channel, offset in enumerate(self.neighborhood):
+            if max(abs(d) for d in offset) > 1:
+                continue
+            # the voxel pairs this offset connects, both ends in bounds
+            src = tuple(
+                slice(max(0, -d), size - max(0, d))
+                for d, size in zip(offset, cells.shape)
+            )
+            dst = tuple(
+                slice(max(0, d), size - max(0, -d))
+                for d, size in zip(offset, cells.shape)
+            )
+            crosses = (
+                (cells[src] != cells[dst]) & boundary_mask[src] & boundary_mask[dst]
+            )
+            shift[(channel, *src)][crosses] = HARD_SPLIT
+
+        return shift
 
     def boundary_mask(self, affs_data: np.ndarray) -> np.ndarray:
         """
@@ -503,14 +586,16 @@ class ExtractFrags(BlockwiseTask):
 
         if self.min_seed_distance is not None or self.adaptive_seed_spacing is not None:
             boundary_mask = self.boundary_mask(affs_data)
+            if voxel_size is None:
+                voxel_size = self.voxel_size
+
+            # in world units, so spacings are physical under anisotropy
+            boundary_distances = distance_transform_edt(
+                boundary_mask, sampling=tuple(voxel_size)
+            )
 
             if self.adaptive_seed_spacing is not None:
-                if voxel_size is None:
-                    voxel_size = self.voxel_size
-                seeds = self.get_adaptive_seeds(
-                    distance_transform_edt(boundary_mask, sampling=tuple(voxel_size)),
-                    voxel_size,
-                )
+                seeds = self.get_adaptive_seeds(boundary_distances, voxel_size)
             else:
                 seeds = self.get_seeds(
                     distance_transform_edt(boundary_mask),
@@ -526,6 +611,11 @@ class ExtractFrags(BlockwiseTask):
                     D = np.minimum(D, self.max_seed_decay_distance)
 
                 shift -= self.seed_eps * D
+
+            if self.voronoi is not None:
+                shift = self.cut_seams(
+                    shift, seeds, boundary_distances, boundary_mask, voxel_size
+                )
 
         else:
             seeds = None

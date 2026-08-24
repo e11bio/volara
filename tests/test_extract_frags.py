@@ -494,25 +494,6 @@ def touching_objects_affs(radii=(6, 3), separation=8):
     return affs, big, a, b
 
 
-def seeds_for(task, affs):
-    """The seed array a task would hand to `mws.agglom`, either mode."""
-    mask = task.boundary_mask(affs)
-    if task.adaptive_seeds is not None:
-        distances = ndimage.distance_transform_edt(mask, sampling=(1, 1))
-        seeds = task.get_adaptive_seeds(distances, Coordinate(1, 1))
-    else:
-        seeds = task.get_seeds(
-            ndimage.distance_transform_edt(mask),
-            min_seed_distance=task.min_seed_distance,
-        ).astype(np.uint64)
-    seeds[~mask] = 0
-    return seeds
-
-
-def n_ids(region_seeds):
-    return len(np.setdiff1d(np.unique(region_seeds), [0]))
-
-
 def test_boundary_mask_offsets_selects_which_channels_are_averaged(affs_2d, tmp_path):
     """The mask follows `boundary_mask_offsets` and not the seeding rule, and a
     thin object survives only when the long range offsets are left out."""
@@ -628,6 +609,34 @@ def test_adaptive_spacing_seeds_a_process_along_its_length(affs_2d, tmp_path):
         )
         counts.append(int((seeds > 0).sum()))
     assert counts[1] > 3 * counts[0], counts
+
+
+def test_adaptive_spacing_does_not_seed_below_resolution(affs_2d, tmp_path):
+    """A structure thinner than a voxel gets no seed at all.
+
+    Its boundary distance is a single voxel's worth and carries no thickness
+    information, so clipping the spacing to the noise floor would pack seeds a
+    few voxels apart down the wisp. Harmless while the affinities merged back
+    across them, but `voronoi` enforces the seams, so the wisp shattered into
+    fragments that `remove_debris` deleted - a gap where an object had been.
+    """
+    affs_path, _ = affs_2d
+    task = adaptive_task(affs_path, tmp_path, 1.5)
+
+    wisp = np.zeros((40, 60), dtype=bool)
+    wisp[20, 5:55] = True  # one voxel thick
+    seeds = task.get_adaptive_seeds(
+        ndimage.distance_transform_edt(wisp), Coordinate(1, 1)
+    )
+    assert (seeds > 0).sum() == 0, int((seeds > 0).sum())
+
+    # a resolvable process next to it must still be seeded along its length
+    thick = np.zeros((40, 60), dtype=bool)
+    thick[18:23, 5:55] = True
+    seeds = task.get_adaptive_seeds(
+        ndimage.distance_transform_edt(thick), Coordinate(1, 1)
+    )
+    assert (seeds > 0).sum() > 3, int((seeds > 0).sum())
 
 
 def test_seed_spacing_rules_are_mutually_exclusive(affs_2d, tmp_path):
