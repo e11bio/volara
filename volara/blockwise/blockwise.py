@@ -155,6 +155,18 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return self.meta_dir / "config.json"
 
 
+    @property
+    def tracking_path(self) -> "Path":
+        """Where daisy persists its built-in per-block tracking for this task.
+
+        Kept under ``meta_dir`` so ``drop()`` resets it with the logs; MUST agree
+        with the ``tracking_path=`` handed to ``daisy.Task`` in ``task()`` below.
+        (Restored 2026-08-24: this property was on the daisy-tracking branch and
+        was lost when the branch history was rewritten -- callers like
+        fullres_surface_skip read it to pre-mark skippable blocks.)
+        """
+        return self.meta_dir / "blocks_done"
+
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
         A helper function to process a given roi without needing to start a
