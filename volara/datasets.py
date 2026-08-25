@@ -55,6 +55,10 @@ class Dataset(StrictBaseModel, ABC):
     - funlib does not update an array's roi or voxel_size for a callable op, so one that changes
       shape leaves the metadata describing the array before it. Use `channels` for that; it goes
       through funlib's index path, which does update them.
+    - Validation produces a fresh function object, so a Dataset carrying `ops` is NOT equal to its
+      own round trip and two rebuilds of the same JSON are not equal to each other. A consumer that
+      dedupes, caches or fences on a dataset config needs the keyword fields, which do compare
+      equal, not this one.
 
     Read-only, for the same reason: a callable makes the array unwriteable, so a write mode is
     refused up front rather than at the first block write.
@@ -224,8 +228,10 @@ class Dataset(StrictBaseModel, ABC):
         specific lazy operations.
 
         Runs before every op in `resolved_ops`. `Raw` no longer overrides it -- its `ome_norm`,
-        `scale_shift` and `stack` are named ops now, so they run after this hook rather than
-        before, and `super().lazy_ops(arr)` applies nothing.
+        `scale_shift` and `stack` are named ops now, so for a subclass that calls
+        `super().lazy_ops(arr)` those three move from before its own ops to after them, and for
+        one that does not call super they are applied rather than suppressed. Relative to
+        `channels` and `flip` this hook's position is unchanged.
         """
         pass
 
