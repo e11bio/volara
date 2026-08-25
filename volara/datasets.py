@@ -33,6 +33,20 @@ class Dataset(StrictBaseModel, ABC):
     units: list[str] | None = None
     writable: bool = True
 
+    flip: list[int] | None = None
+    """
+    Axis indices to reverse, applied AFTER `channels` has collapsed any leading axes -- so
+    they index the FINAL array, not the store. For a `[T,C,Z,Y,X]` store read with
+    `channels=[0, 0]` the result is `[Z,Y,X]` and `flip=[0]` reverses Z.
+
+    Read-only: a reversed array reports `is_writeable` True but `__setitem__` raises, so a
+    write mode is refused up front rather than at the first write.
+
+    Corrects a volume acquired in a flipped orientation, so that nothing downstream needs to
+    know. It is a lazy slice, not a copy, and it travels in this config -- a worker that
+    rebuilds the model applies the same reversal, which an in-memory wrapper would not.
+    """
+
     channels: list[list[int] | int] | int | None = None
     """
     We want to be able to subsample channels from a dataset. Specifically
@@ -211,6 +225,26 @@ class Dataset(StrictBaseModel, ABC):
                         arr.lazy_op(np.s_[channels])
             else:
                 arr.lazy_op(np.s_[self.channels])
+
+        if self.flip:
+            if mode != "r":
+                raise ValueError(
+                    f"Dataset {self.store} has flip={self.flip}, which is read-only; "
+                    f"cannot open in mode {mode!r}."
+                )
+            ndim = len(arr.shape)
+            bad = [a for a in self.flip if not 0 <= a < ndim]
+            if bad:
+                raise ValueError(
+                    f"flip={self.flip} has axes {bad} out of range for the {ndim}-D array "
+                    f"remaining after channels={self.channels}. flip indexes the FINAL array."
+                )
+            rev = set(self.flip)
+            arr.lazy_op(
+                tuple(
+                    slice(None, None, -1) if i in rev else slice(None) for i in range(ndim)
+                )
+            )
         return arr
 
     @property
@@ -364,6 +398,18 @@ class CloudVolumeWrapper(Dataset):
 
     def array(self, mode: OpenMode = "r") -> Array:
         import dask.array as da
+
+        # This override does not call `lazy_ops` and does not apply `channels`, so neither can
+        # take effect here. Refusing is loud; ignoring them would be a silently different array
+        # from the one the same config produces for every other Dataset.
+        unsupported = [
+            n for n in ("flip", "channels") if getattr(self, n, None) not in (None, [])
+        ]
+        if unsupported:
+            raise NotImplementedError(
+                f"CloudVolumeWrapper does not apply {', '.join(unsupported)}; it overrides "
+                f"array() without the lazy-op path. Drop the field or use a zarr-backed Dataset."
+            )
 
         vol = CloudVolume(
             str(self.store),
