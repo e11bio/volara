@@ -8,7 +8,7 @@ import daisy
 import networkx as nx
 from daisy.cl_monitor import CLMonitor
 
-from .benchmark import BenchmarkLogger
+from .benchmark import benchmark_run
 
 if TYPE_CHECKING:
     from .blockwise import BlockwiseTask
@@ -82,59 +82,61 @@ class Pipeline:
 
         return combined_pipeline
 
-    def benchmark(self, multiprocessing: bool = True, out_dir: Path | None = None):
+    def benchmark(
+        self,
+        multiprocessing: bool = True,
+        spoof: bool = False,
+        out_dir: Path | None = None,
+    ):
         """
-        Run the pipeline in a benchmark mode, which will run each task
-        in the pipeline and log the time taken for each task.
+        Run the pipeline with tracing switched on and write a timing, memory and
+        io report covering every task in it.
+
+        By default this is an ordinary :meth:`run_blockwise` with tracing added.
+        See :meth:`BlockwiseTask.benchmark` for ``spoof`` and ``out_dir``.
         """
-        from volara.logging import get_log_basedir, set_log_basedir
+        with benchmark_run(out_dir=out_dir, relocate_logs=spoof):
+            run_graph = (
+                nx.relabel_nodes(
+                    self.task_graph,
+                    lambda x: x.spoof(Path("volara_benchmark_logs/spoof")),
+                )
+                if spoof
+                else self.task_graph
+            )
+            node_ordering = list(nx.topological_sort(run_graph))
 
-        log_basedir = get_log_basedir()
-        set_log_basedir("volara_benchmark_logs")
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
-        if benchmark_db_path.exists():
-            benchmark_db_path.unlink()
-        benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
-        benchmark_logger._init_db()
+            try:
+                with ExitStack() as stack:
+                    task_map: dict[BlockwiseTask, daisy.Task] = {}
+                    for node in node_ordering:
+                        upstream_tasks = [
+                            task_map[upstream]
+                            for upstream in run_graph.predecessors(node)
+                        ]
+                        task = node.task(
+                            upstream_tasks=upstream_tasks,
+                            multiprocessing=multiprocessing,
+                        )
+                        task = stack.enter_context(task)
+                        task_map[node] = task
 
-        tmp_path = Path("volara_benchmark_logs/spoof")
-        spoof_graph = nx.relabel_nodes(
-            self.task_graph,
-            lambda x: x.spoof(tmp_path),
-        )
-        node_ordering = list(nx.topological_sort(spoof_graph))
+                    all_tasks = list(task_map.values())
 
-        try:
-            with ExitStack() as stack:
-                task_map: dict[BlockwiseTask, daisy.Task] = {}
-                for node in node_ordering:
-                    upstream_tasks = [
-                        task_map[upstream]
-                        for upstream in spoof_graph.predecessors(node)
-                    ]
-                    task = node.task(
-                        upstream_tasks=upstream_tasks, multiprocessing=multiprocessing
-                    )
-                    task = stack.enter_context(task)
-                    task_map[node] = task
+                    if multiprocessing:
+                        daisy.run_blockwise(all_tasks)
+                    else:
+                        server = daisy.SerialServer()
+                        _cl_monitor = CLMonitor(server)
+                        server.run_blockwise(all_tasks)
 
-                all_tasks = list(task_map.values())
+            except Exception as e:
+                logger.exception(e)
 
-                if multiprocessing:
-                    daisy.run_blockwise(all_tasks)
-                else:
-                    server = daisy.SerialServer()
-                    _cl_monitor = CLMonitor(server)
-                    server.run_blockwise(all_tasks)
-
-        except Exception as e:
-            logger.exception(e)
-
-        finally:
-            for node in node_ordering:
-                node.drop()
-            benchmark_logger.print_report(out_dir)
-            set_log_basedir(log_basedir)
+            finally:
+                if spoof:
+                    for node in node_ordering:
+                        node.drop()
 
     def run_blockwise(self, multiprocessing: bool = True):
         with ExitStack() as stack:
