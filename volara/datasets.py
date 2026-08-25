@@ -47,6 +47,18 @@ class Dataset(StrictBaseModel, ABC):
     Each is a plain callable ``data -> data``, cloudpickled to base64 so it reaches a worker the
     same way `LambdaTask.lambda_func` does. The escape hatch for a transform that has no keyword.
 
+    Two limits of the callable path, both inherited from funlib:
+
+    - A lambda or a `__main__` function is pickled BY VALUE; one imported from a module is pickled
+      by reference, so the worker must be able to import that module and gets whatever version it
+      has installed.
+    - funlib does not update an array's roi or voxel_size for a callable op, so one that changes
+      shape leaves the metadata describing the array before it. Use `channels` for that; it goes
+      through funlib's index path, which does update them.
+
+    Read-only, for the same reason: a callable makes the array unwriteable, so a write mode is
+    refused up front rather than at the first block write.
+
     See `resolved_ops` for the order the keyword fields resolve to, and `volara.ops` for why that
     order is fixed.
     """
@@ -211,7 +223,9 @@ class Dataset(StrictBaseModel, ABC):
         Subclasses can override this method to apply
         specific lazy operations.
 
-        Runs before every op in `resolved_ops`.
+        Runs before every op in `resolved_ops`. `Raw` no longer overrides it -- its `ome_norm`,
+        `scale_shift` and `stack` are named ops now, so they run after this hook rather than
+        before, and `super().lazy_ops(arr)` applies nothing.
         """
         pass
 
@@ -237,11 +251,17 @@ class Dataset(StrictBaseModel, ABC):
         self.lazy_ops(arr)
 
         ops = self.resolved_ops()
-        if mode != "r" and any(isinstance(o, ReverseAxes) for o in ops):
-            raise ValueError(
-                f"Dataset {self.store} reverses axes, which is read-only; "
-                f"cannot open in mode {mode!r}."
-            )
+        if mode != "r":
+            if any(isinstance(o, ReverseAxes) for o in ops):
+                raise ValueError(
+                    f"Dataset {self.store} reverses axes, which is read-only; "
+                    f"cannot open in mode {mode!r}."
+                )
+            if self.ops:
+                raise ValueError(
+                    f"Dataset {self.store} has ops={len(self.ops)} callables, which make the "
+                    f"array unwriteable; cannot open in mode {mode!r}."
+                )
         for op in ops:
             apply_op(op, arr)
         return arr

@@ -136,12 +136,20 @@ class ScaleShift(DatasetOp):
 
 
 class StackWith(DatasetOp):
-    """Concatenate another dataset along axis 0."""
+    """Concatenate another dataset along axis 0.
+
+    ``other`` is ``Any`` because typing it as a ``Dataset`` would import ``volara.datasets``, which
+    imports this module; the check `apply` makes is what the annotation cannot.
+    """
 
     op: Literal["stack_with"] = "stack_with"
     other: Any
 
     def apply(self, arr: Array) -> None:
+        if not hasattr(self.other, "array"):
+            raise TypeError(
+                f"stack_with needs a Dataset to read from, got {type(self.other).__name__}."
+            )
         other = self.other.array("r").data
         arr.lazy_op(lambda d: np.concatenate([d, other], axis=0))
 
