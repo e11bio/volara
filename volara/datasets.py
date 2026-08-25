@@ -6,7 +6,6 @@ from shutil import rmtree
 from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
-import zarr
 from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
@@ -43,15 +42,13 @@ class Dataset(StrictBaseModel, ABC):
 
     ops: list[PydanticCallable] | None = None
     """
-    Extra lazy operations, applied IN ORDER and AFTER everything the keyword fields below set up.
+    Extra lazy operations, applied IN ORDER and AFTER every keyword-driven op.
 
-    Each is a plain callable ``data -> data``, cloudpickled to reach a worker the same way
-    `LambdaTask.lambda_func` is. This is the escape hatch for a transform that has no keyword.
+    Each is a plain callable ``data -> data``, cloudpickled to base64 so it reaches a worker the
+    same way `LambdaTask.lambda_func` does. The escape hatch for a transform that has no keyword.
 
-    The keyword fields drive the named ops and run first, in the one order that is correct:
-    `ome_norm` indexes the channel axis so it must precede `channels`, and `flip` names the
-    collapsed array so it must follow. That order is now stated in one place (`resolved_ops`)
-    instead of being implied by the order of `if` statements.
+    See `resolved_ops` for the order the keyword fields resolve to, and `volara.ops` for why that
+    order is fixed.
     """
 
     flip: list[int] | None = None
@@ -213,6 +210,8 @@ class Dataset(StrictBaseModel, ABC):
         By default, does nothing.
         Subclasses can override this method to apply
         specific lazy operations.
+
+        Runs before every op in `resolved_ops`.
         """
         pass
 
@@ -235,8 +234,6 @@ class Dataset(StrictBaseModel, ABC):
             **self.zarr_kwargs,
         )
 
-        # Kept for external subclasses that override it. Deprecated: it applies before every op in
-        # `ops` with no way to interleave, which is the implicitness `ops` exists to remove.
         self.lazy_ops(arr)
 
         ops = self.resolved_ops()
@@ -252,18 +249,10 @@ class Dataset(StrictBaseModel, ABC):
     def resolved_ops(self) -> list:
         """Every op to apply, in order: the keyword-driven named ops, then ``ops``.
 
-        The named order -- ome_normalize, scale_shift, stack_with, select_channels, reverse_axes --
-        is exactly what ``array()`` has always done, and it is not arbitrary: ``ome_normalize``
-        indexes the channel axis so it must run before ``select_channels`` collapses it, and
-        ``reverse_axes`` names the collapsed array so it must run after.
+        Subclasses that add keywords of their own override this and prepend, as `Raw` does. See
+        `volara.ops` for why the order is fixed.
         """
         named: list = []
-        if getattr(self, "ome_norm", None):
-            named.append(OmeNormalize(metadata=self.ome_norm))
-        if getattr(self, "scale_shift", None) is not None:
-            named.append(ScaleShift(scale=self.scale_shift[0], shift=self.scale_shift[1]))
-        if getattr(self, "stack", None) is not None:
-            named.append(StackWith(other=self.stack))
         if self.channels is not None:
             named.append(SelectChannels(channels=self.channels))
         if self.flip:
@@ -291,18 +280,11 @@ class Raw(Dataset):
 
     @property
     def bounds(self) -> list[tuple[float, float]] | None:
-        if self.ome_norm is not None:
-            array = open_ds(self.store, mode="r", **self.zarr_kwargs)
-            metadata_group = zarr.open_group(str(self.ome_norm))
-            omero: dict = metadata_group.attrs["omero"]  # type: ignore[assignment]
-            channels_meta: list[dict] = omero["channels"]
-            bounds = [
-                (channels_meta[c]["window"]["min"], channels_meta[c]["window"]["max"])
-                for c in range(array.data.shape[0])
-            ]
-            return bounds
-        else:
+        """The windows `ome_norm` applies: one per channel the store carries."""
+        if self.ome_norm is None:
             return None
+        array = open_ds(self.store, mode="r", **self.zarr_kwargs)
+        return OmeNormalize(metadata=self.ome_norm).windows(array.data.shape[0])
 
     @property
     def attrs(self):
@@ -311,6 +293,18 @@ class Raw(Dataset):
             attrs["bounds"] = self.bounds
         return attrs
 
+    def resolved_ops(self) -> list:
+        """`Raw`'s three keywords all precede the base class's, `ome_norm` first of all."""
+        named: list = []
+        if self.ome_norm:
+            named.append(OmeNormalize(metadata=self.ome_norm))
+        if self.scale_shift is not None:
+            named.append(
+                ScaleShift(scale=self.scale_shift[0], shift=self.scale_shift[1])
+            )
+        if self.stack is not None:
+            named.append(StackWith(other=self.stack))
+        return named + super().resolved_ops()
 
 
 class Affs(Dataset):
@@ -395,11 +389,13 @@ class CloudVolumeWrapper(Dataset):
     def array(self, mode: OpenMode = "r") -> Array:
         import dask.array as da
 
-        # This override does not call `lazy_ops` and does not apply `channels`, so neither can
-        # take effect here. Refusing is loud; ignoring them would be a silently different array
-        # from the one the same config produces for every other Dataset.
+        # This override never reaches the lazy-op path, so nothing in `resolved_ops` can take
+        # effect here. Refusing is loud; ignoring would be a silently different array from the one
+        # the same config produces for every other Dataset.
         unsupported = [
-            n for n in ("flip", "channels") if getattr(self, n, None) not in (None, [])
+            n
+            for n in ("flip", "channels", "ops")
+            if getattr(self, n, None) not in (None, [])
         ]
         if unsupported:
             raise NotImplementedError(

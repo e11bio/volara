@@ -1,30 +1,23 @@
 """Ordered lazy operations for a :class:`~volara.datasets.Dataset`.
 
-Each keyword field on a :class:`~volara.datasets.Dataset` (``ome_norm``, ``scale_shift``, ``stack``,
-``channels``, ``flip``) becomes one of the named ops here, and ``Dataset.ops`` is a list of plain
-callables applied AFTER all of them. ``Dataset.resolved_ops`` assembles the two.
+Each keyword field (``ome_norm``, ``scale_shift``, ``stack``, ``channels``, ``flip``) becomes one of
+the named ops here; ``Dataset.ops`` is a list of plain callables applied after all of them.
+``Dataset.resolved_ops`` assembles the two.
 
-Keeping the named ones as models rather than inlined ``if`` blocks is what lets the order be stated
-in one place, and it keeps them introspectable: a consumer can see that a dataset reverses z, which
-a cloudpickled callable does not expose. slabreg relies on that -- it fences raw-derived artifacts
-by hashing the ops that define a slab's pixel frame, and a base64 blob's bytes move with the Python
-and cloudpickle versions, so hashing one would make a worker upgrade look like a re-framing.
-
-Order matters and is not arbitrary. ``OmeNormalize`` indexes the channel axis and so
-must run BEFORE ``SelectChannels`` collapses it; ``ReverseAxes`` names axes of the collapsed array
-and so must run AFTER. Expressing that as a list makes it reviewable instead of implied by the order
-of ``if`` statements.
+The order is a constraint, not a preference: ``OmeNormalize`` indexes the channel axis so it must
+run BEFORE ``SelectChannels`` collapses it, and ``ReverseAxes`` names axes of the collapsed array so
+it must run AFTER. A named op stays introspectable -- a consumer can see that a dataset reverses z,
+which a cloudpickled callable does not expose.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Annotated, Any, Literal, Union
+from typing import Any, Literal
 
 import numpy as np
 from funlib.persistence import Array
-from pydantic import Field
 
 from .utils import StrictBaseModel
 
@@ -59,7 +52,7 @@ class SelectChannels(DatasetOp):
 
 
 def _take(indices: list[int]):
-    """Bind ``indices`` per op. A closure over a loop variable would late-bind every op to the last."""
+    """Bind ``indices`` at construction, so each op in the loop holds its own."""
     return lambda d: d[indices]
 
 
@@ -82,7 +75,11 @@ class ReverseAxes(DatasetOp):
                 f"list. Axes name the array AS IT STANDS here, not the store."
             )
         rev = set(self.axes)
-        arr.lazy_op(tuple(slice(None, None, -1) if i in rev else slice(None) for i in range(ndim)))
+        arr.lazy_op(
+            tuple(
+                slice(None, None, -1) if i in rev else slice(None) for i in range(ndim)
+            )
+        )
 
 
 class OmeNormalize(DatasetOp):
@@ -93,20 +90,34 @@ class OmeNormalize(DatasetOp):
 
     @property
     def bounds(self) -> list[tuple[float, float]]:
+        """Every ``(min, max)`` window the metadata lists, in its own channel order."""
         import zarr
 
-        omero = zarr.open_group(str(self.metadata)).attrs["omero"]
-        return [(c["window"]["min"], c["window"]["max"]) for c in omero["channels"]]
+        metadata_group = zarr.open_group(str(self.metadata))
+        omero: dict = metadata_group.attrs["omero"]  # type: ignore[assignment]
+        channels_meta: list[dict] = omero["channels"]
+        return [(c["window"]["min"], c["window"]["max"]) for c in channels_meta]
+
+    def windows(self, channels: int) -> list[tuple[float, float]]:
+        """The first ``channels`` bounds; OMERO metadata often lists more than a store carries."""
+        bounds = self.bounds
+        if len(bounds) < channels:
+            raise ValueError(
+                f"{self.metadata} lists {len(bounds)} OMERO channels, too few for the "
+                f"{channels}-channel array it normalizes."
+            )
+        return bounds[:channels]
 
     def apply(self, arr: Array) -> None:
-        bounds = self.bounds
-
         def _norm(data):
             data = data.astype(np.float32)
             c, *shape = data.shape
-            shift = np.array([lo for lo, _ in bounds], np.float32).reshape(c, *((1,) * len(shape)))
-            scale = np.array([hi - lo for lo, hi in bounds], np.float32).reshape(
-                c, *((1,) * len(shape)))
+            windows = self.windows(c)
+            shape1 = (c, *((1,) * len(shape)))
+            shift = np.array([lo for lo, _ in windows], np.float32).reshape(shape1)
+            scale = np.array([hi - lo for lo, hi in windows], np.float32).reshape(
+                shape1
+            )
             return (data - shift) / scale
 
         arr.lazy_op(_norm)
@@ -133,15 +144,6 @@ class StackWith(DatasetOp):
     def apply(self, arr: Array) -> None:
         other = self.other.array("r").data
         arr.lazy_op(lambda d: np.concatenate([d, other], axis=0))
-
-
-NamedOp = Annotated[
-    Union[SelectChannels, ReverseAxes, OmeNormalize, ScaleShift, StackWith],
-    Field(discriminator="op"),
-]
-
-#: Retained for callers that want to build a named op explicitly.
-AnyDatasetOp = NamedOp
 
 
 def apply_op(op, arr: Array) -> None:
