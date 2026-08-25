@@ -28,6 +28,18 @@ logger = logging.getLogger(__file__)
 # so it does nothing in unseeded tissue, where there is no mutex to block anything.
 SEAM_DAMPING = 0.1
 
+# The flood's tie-break. Along an axially flat ridge - a smooth process, a soma
+# interior - the boundary distances give the flood no preference, and skimage's
+# watershed then breaks the tie by queue order: the deepest seed's front races
+# down the whole corridor and claims a one-voxel medial tendril through tissue
+# that locally belongs to other seeds, which the seam term walls off into a
+# bizarrely shaped fragment. Compactness adds `c * dist_from_seed` to the flood
+# priority, so ties break toward the nearest seed - the geodesic midpoint -
+# instead. It only competes with the distances where they are flat: on real data
+# any value in [0.5, 10] produces the same territories, so this is a tie-break
+# constant, not a tuning knob.
+FLOOD_COMPACTNESS = 1.0
+
 
 class ExtractFrags(BlockwiseTask):
     """
@@ -101,6 +113,20 @@ class ExtractFrags(BlockwiseTask):
     """
     The minimum size of a fragment to be considered valid. If the fragment is smaller than this
     value it will be removed.
+    """
+    min_extent: PydanticCoordinate | None = None
+    """
+    If set, remove any fragment whose bounding box spans fewer voxels than this
+    along an axis, one value per axis. A resolution statement rather than a
+    sizing knob: at an anisotropic voxel size a fragment one section thick
+    cannot represent a real structure, and low-certainty pockets come out of
+    mutex watershed as stacks of exactly such single-section plates - confident
+    in plane, uncertain across sections - so `(2, 1, 1)` removes the plates
+    while leaving anything with genuine extent alone. `filter_fragments` cannot
+    catch these: it averages the direct offsets, and the confident in-plane
+    affinities hide the missing cross-section support. Extents are measured on
+    the read block, before cropping, so a fragment that merely pokes into a
+    block face keeps the extent its context gives it.
     """
     randomized_strides: bool = False
     """
@@ -179,6 +205,15 @@ class ExtractFrags(BlockwiseTask):
                 "`min_seed_distance` and `adaptive_seed_spacing` are two ways to set "
                 "the same thing - how far apart seeds go - so set one or the other. "
                 "Whichever is more restrictive at a voxel would simply win."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _min_extent_matches_dims(self) -> "ExtractFrags":
+        if self.min_extent is not None and len(self.min_extent) != len(self.block_size):
+            raise ValueError(
+                f"`min_extent={tuple(self.min_extent)}` needs one value per axis "
+                f"of the {len(self.block_size)}-dimensional block size."
             )
         return self
 
@@ -285,8 +320,11 @@ class ExtractFrags(BlockwiseTask):
         self,
         affs_data,
         voxel_size: Coordinate | None = None,
+        out_of_volume: tuple[Coordinate, Coordinate] | None = None,
     ):
-        fragments_data = self.compute_fragments(affs_data, voxel_size=voxel_size)
+        fragments_data = self.compute_fragments(
+            affs_data, voxel_size=voxel_size, out_of_volume=out_of_volume
+        )
 
         # TODO: also mask out the fragments themselves when a mask is provided.
         # `process_block` currently applies the mask to the affinities before
@@ -315,7 +353,40 @@ class ExtractFrags(BlockwiseTask):
                     fragments_data, debris, np.zeros_like(debris)
                 )
 
+        if self.min_extent is not None:
+            fragments_data = self.filter_min_extent(fragments_data)
+
         return fragments_data
+
+    def filter_min_extent(self, fragments_data: np.ndarray) -> np.ndarray:
+        """
+        Remove every fragment whose bounding box spans fewer voxels than
+        `min_extent` along some axis. See the field for why: single-section
+        plates in low-certainty pockets, which no affinity average can see.
+        """
+        ids, inverse = np.unique(fragments_data, return_inverse=True)
+        inverse = inverse.reshape(fragments_data.shape)
+
+        drop = np.zeros(ids.size, dtype=bool)
+        for axis, required in enumerate(self.min_extent):
+            if required <= 1:
+                continue
+            # first and last slice along `axis` each fragment appears in; slices
+            # are visited in order, so the first sighting sets `lo` and every
+            # sighting overwrites `hi`
+            lo = np.full(ids.size, -1, dtype=np.int64)
+            hi = np.zeros(ids.size, dtype=np.int64)
+            for i in range(fragments_data.shape[axis]):
+                present = np.unique(inverse.take(i, axis=axis))
+                lo[present[lo[present] < 0]] = i
+                hi[present] = i
+            drop |= (hi - lo + 1) < required
+        drop &= ids > 0
+
+        flat = ids[drop].astype(fragments_data.dtype)
+        if flat.size == 0:
+            return fragments_data
+        return replace_values(fragments_data, flat, np.zeros_like(flat))
 
     def fragment_centers(
         self,
@@ -495,6 +566,7 @@ class ExtractFrags(BlockwiseTask):
             np.multiply(boundary_distances, -1, dtype=np.float32),
             markers=seeds.astype(np.int32),
             mask=boundary_mask,
+            compactness=FLOOD_COMPACTNESS,
         )
 
     def absorb_small_cells(self, cells: np.ndarray) -> np.ndarray:
@@ -584,11 +656,46 @@ class ExtractFrags(BlockwiseTask):
         """
         return np.mean(affs_data[self.boundary_mask_channels], axis=0) > 0.5
 
+    def _continue_past_clipped_faces(
+        self, boundary_mask: np.ndarray, out_of_volume
+    ) -> np.ndarray:
+        """
+        Replicate the first in-volume plane of the mask across each band of the
+        read that lies outside the stored volume.
+
+        Reads past the volume face are zero-filled, so the face reads as an
+        object boundary: the distance transform collapses against it, adaptive
+        spacing packs seeds densely there, and the seams then cut them apart
+        into edge debris. Continuing the mask instead lets seed placement treat
+        the face like any block edge, where context supplies the tissue beyond.
+        Only the seed geometry changes: the affinities in the band stay zero, so
+        no merge between real fragments can pass through it. The band is one
+        context wide, which also caps the adaptive spacing, so it is always wide
+        enough for the spacings it has to support.
+        """
+        lo, hi = out_of_volume
+        for axis, n in enumerate(lo):
+            if n > 0:
+                index = lambda s: tuple(  # noqa: E731
+                    s if a == axis else slice(None) for a in range(boundary_mask.ndim)
+                )
+                boundary_mask[index(slice(n))] = boundary_mask[index(slice(n, n + 1))]
+        for axis, n in enumerate(hi):
+            if n > 0:
+                index = lambda s: tuple(  # noqa: E731
+                    s if a == axis else slice(None) for a in range(boundary_mask.ndim)
+                )
+                boundary_mask[index(slice(-n, None))] = boundary_mask[
+                    index(slice(-n - 1, -n))
+                ]
+        return boundary_mask
+
     def compute_fragments(
         self,
         affs_data,
         rng: np.random.Generator | None = None,
         voxel_size: Coordinate | None = None,
+        out_of_volume: tuple[Coordinate, Coordinate] | None = None,
     ):
         """
         Mutex watershed on `affs_data`, returning the fragment labels.
@@ -597,6 +704,11 @@ class ExtractFrags(BlockwiseTask):
         call reproducible. Note that `randomized_strides=True` draws from its own
         generator inside `mws.agglom` which this does not reach, so seeding here
         only pins the noise.
+
+        `out_of_volume` gives, per side of each axis, how many voxels of
+        `affs_data` lie outside the stored volume (zero-filled by the read); the
+        boundary mask is continued across those bands so the volume face does
+        not read as an object boundary to the seeding.
         """
         if rng is None:
             rng = np.random.default_rng()
@@ -641,6 +753,10 @@ class ExtractFrags(BlockwiseTask):
 
         if self.min_seed_distance is not None or self.adaptive_seed_spacing is not None:
             boundary_mask = self.boundary_mask(affs_data)
+            if out_of_volume is not None:
+                boundary_mask = self._continue_past_clipped_faces(
+                    boundary_mask, out_of_volume
+                )
             if voxel_size is None:
                 voxel_size = self.voxel_size
 
@@ -732,7 +848,15 @@ class ExtractFrags(BlockwiseTask):
                 affs_data *= mask_data
 
         with benchmark_logger.trace("Compute Fragments"):
-            fragments_data = self.get_fragments(affs_data, voxel_size=affs.voxel_size)
+            # the voxels of this read that hang past the stored volume, per side
+            in_volume = affs.roi.intersect(block.read_roi)
+            out_of_volume = (
+                (in_volume.begin - block.read_roi.begin) / affs.voxel_size,
+                (block.read_roi.end - in_volume.end) / affs.voxel_size,
+            )
+            fragments_data = self.get_fragments(
+                affs_data, voxel_size=affs.voxel_size, out_of_volume=out_of_volume
+            )
 
             fragments = Array(
                 fragments_data,
