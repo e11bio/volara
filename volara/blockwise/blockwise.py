@@ -9,11 +9,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import daisy
 import numpy as np
-from daisy.block import BlockStatus
-from daisy.cl_monitor import CLMonitor
 from funlib.geometry import Coordinate, Roi
-from funlib.math import cantor_number
-from funlib.persistence import open_ds, prepare_ds
 
 from volara.logging import get_log_basedir, set_log_basedir
 
@@ -62,6 +58,15 @@ class BlockwiseTask(StrictBaseModel, ABC):
     """
     Whether blocks have read/write dependencies on neighborhing blocks requiring
     a specific ordering to the block processing to compute a seamless result.
+    """
+    block_timeout: float | None = None
+    """
+    Per-block timeout in seconds. ``None`` (the default) delegates to daisy's
+    default (600s). daisy v2 always enforces a timeout -- there is no "unlimited"
+    option -- so blocks should be sized to process well within it; a task whose
+    single block legitimately runs long (e.g. the global mutex watershed) must set
+    an explicit large value instead (see ``GraphMWS``). When a block exceeds the
+    timeout daisy reclaims it and retries under ``max_retries``.
     """
 
     def __hash__(self):
@@ -149,22 +154,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         return self.meta_dir / "config.json"
 
-    @property
-    def block_ds(self) -> Path:
-        """
-        The dataset that will be used to track which blocks have been
-        successfully completed.
-        """
-        return self.meta_dir / "blocks_done.zarr"
 
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
         A helper function to process a given roi without needing to start a
         whole blockwise job.
         """
-        block = daisy.Block(
-            roi, roi if context is None else roi.grow(context, context), roi
-        )
+        read_roi = roi if context is None else roi.grow(context, context)
+        block = daisy.Block(roi, read_roi, roi)
         process_block = self.process_block_func()
         process_block(block)
 
@@ -189,47 +186,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
         if drop_outputs:
             self.drop_artifacts()
 
-    def check_block_func(self):
-        """
-        A function to check whether a block has been completed.
-        """
-
-        def check_block(block):
-            block_array = open_ds(self.block_ds, mode="r")
-            zarr_arr = block_array._source_data
-
-            coordinate = (
-                block.write_roi.offset - block_array.offset
-            ) / block_array.voxel_size
-
-            chunk_size = Coordinate(zarr_arr.chunks[-coordinate.dims :])
-            chunk_index = coordinate // chunk_size
-            chunk_key = "/".join(str(i) for i in chunk_index)
-            return (zarr_arr.store.root / "c" / chunk_key).exists()
-
-        return check_block
-
-    def mark_block_done_func(self):
-        """
-        A helper function to mark a block as completed so that it
-        can be skipped if we have to pause and resume processing later.
-        """
-
-        def write_check_block(block):
-            if not block.status == BlockStatus.FAILED:
-                # Unless the block is explicitly marked as failed, we assume
-                # successful processing if there was no error
-                block_array = open_ds(self.block_ds, mode="a")
-                write_roi = block.write_roi.intersect(block_array.roi)
-                write_roi.shape = block_array.voxel_size
-                block_array[write_roi] = np.full(
-                    write_roi.shape // block_array.voxel_size,
-                    fill_value=block.block_id[1] + 1,
-                )
-                block.status = BlockStatus.SUCCESS
-
-        return write_check_block
-
     def worker_func(self):
         """
         The function defining how workers are started.
@@ -245,6 +201,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             def run_worker():
                 cmd = worker_config.get_command(config_file, self.task_name)
+                # daisy v2 runs this spawn function in a THREAD and expects it to
+                # BLOCK for the worker's lifetime -- a spawn fn that returns early
+                # is treated as a dead worker and respawned (up to
+                # max_worker_restarts). get_command therefore builds a blocking
+                # submission on every backend (local child process, sbatch --wait,
+                # bsub -K); a fire-and-forget submit (bare sbatch/bsub) would trip
+                # the v2 respawn loop and leak the real cluster job.
                 return subprocess.run(cmd)
 
             return run_worker
@@ -270,8 +233,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
                 except KeyError as e:
                     raise ValueError(client.context) from e
-                mark_block_done = self.mark_block_done_func()
-
                 while True:
                     logger.info("getting block")
                     with ExitStack() as worker_stack:
@@ -284,8 +245,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
                         with benchmark_logger.trace("Process Block"):
                             process_block(block)
-                        with benchmark_logger.trace("Mark Block Done"):
-                            mark_block_done(block)
 
             if self.num_cache_workers is not None:
                 workers = [
@@ -302,47 +261,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
             else:
                 worker_loop()
 
-    def init_block_array(self):
-        """
-        Build the block done zarr for tracking completed blocks.
-        """
-        # prepare blocks done ds
-
-        def get_dtype(write_roi, write_size):
-            # need to factor in block offset, so use cantor number of last block
-            # + 1 to be safe
-            num_blocks = cantor_number(write_roi.shape / write_size + 1)
-
-            for dtype in [np.uint8, np.uint16, np.uint32, np.uint64]:
-                if num_blocks <= np.iinfo(dtype).max:
-                    return dtype
-            raise ValueError(
-                f"Number of blocks ({num_blocks}) is too large for available data types."
-            )
-
-        block_voxel_size = self.write_size
-
-        try:
-            prepare_ds(
-                self.block_ds,
-                shape=(self.write_roi.shape + block_voxel_size - 1) / block_voxel_size,
-                offset=self.write_roi.offset,
-                voxel_size=block_voxel_size,
-                chunk_shape=self.write_size / block_voxel_size,
-                dtype=get_dtype(self.write_roi, self.write_size),
-                mode="a",
-            )
-        except PermissionError as e:
-            # The dataset already exists but with different parameters.
-            existing_block_ds = open_ds(self.block_ds, mode="r")
-            error_msg = (
-                f"Trying to overwrite existing {self.block_ds} array with incompatible data:\n"
-                f"Shape (existing): {existing_block_ds.shape} vs (new) {self.write_roi.shape / block_voxel_size}\n"
-                f"Chunk Shape (existing): {existing_block_ds._source_data.chunks} vs (new) {self.write_size / block_voxel_size}\n"
-                f"Data Type (existing): {existing_block_ds.dtype} vs (new) {get_dtype(self.write_roi, self.write_size)}\n"
-            )
-            raise ValueError(error_msg) from e
-
     @contextmanager
     def task(
         self,
@@ -356,7 +274,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         benchmark_logger = self.get_benchmark_logger()
 
         with benchmark_logger.trace("init"):
-            self.init_block_array()
+            self.meta_dir.mkdir(parents=True, exist_ok=True)
             self.init()
 
             context = self.context_size
@@ -374,13 +292,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 with benchmark_logger.trace("Process Block Setup"):
                     process_block = stack.enter_context(process_block_func)
 
-                mark_block = self.mark_block_done_func()
-
                 def process_func(block):
                     with benchmark_logger.trace("Process Block"):
                         process_block(block)
-                    with benchmark_logger.trace("Mark Block Done"):
-                        mark_block(block)
 
             task = daisy.Task(
                 self.task_name,
@@ -390,10 +304,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 process_function=process_func,
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
-                num_workers=self.num_workers,
-                check_function=self.check_block_func(),
+                max_workers=self.num_workers,
+                tracking_path=str(self.meta_dir / "blocks_done"),
                 max_retries=2,
-                timeout=None,
+                timeout=self.block_timeout,
                 upstream_tasks=(
                     (
                         upstream_tasks
@@ -457,11 +371,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
             with debug_self.task(multiprocessing=multiprocessing) as task:
                 tasks = [task]
                 if multiprocessing:
-                    result = daisy.run_blockwise(tasks)  # noqa
+                    # daisy v2 Server.run_blockwise returns the {task_id: TaskState} map.
+                    result = daisy.Server().run_blockwise(tasks)
                 else:
-                    server = daisy.SerialServer()
-                    _cl_monitor = CLMonitor(server)
-                    result = server.run_blockwise(tasks)
+                    result = daisy.run_blockwise(
+                        tasks, multiprocessing=False, return_states=True
+                    )
 
         except Exception as e:
             raise e
@@ -479,16 +394,25 @@ class BlockwiseTask(StrictBaseModel, ABC):
     ):
         """
         Execute this task blockwise.
+
+        Returns daisy's ``{task_id: TaskState}`` map for BOTH the multiprocessing and serial
+        paths. Previously the multiprocessing path went through ``daisy.run_blockwise``, which
+        collapses the states to a bool and, worse, reports ``True`` even when blocks failed
+        (``TaskState.is_done()`` counts failed/orphaned blocks as "done"). Returning the states
+        lets callers inspect ``failed_count`` / ``orphaned_count`` / ``is_done()`` and react to
+        an incomplete run instead of silently accepting a partial output.
         """
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]
             if multiprocessing:
-                result = daisy.run_blockwise(tasks)  # noqa
-            else:
-                server = daisy.SerialServer()
-                _cl_monitor = CLMonitor(server)
-                result = server.run_blockwise(tasks)
-            return result
+                # daisy v2's Server.run_blockwise returns the {task_id: TaskState}
+                # map natively, so the old 1.x ThreadPool/IOLooper/progress-monitor
+                # states workaround is no longer needed.
+                return daisy.Server().run_blockwise(tasks)
+            # Serial path: module-level run_blockwise returns a bool unless
+            # return_states=True (see daisy._runner), so request the states map to
+            # keep the same {task_id: TaskState} contract as the distributed path.
+            return daisy.run_blockwise(tasks, multiprocessing=False, return_states=True)
 
     def __add__(self, other: "BlockwiseTask | Pipeline") -> "Pipeline":
         """
