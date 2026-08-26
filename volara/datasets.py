@@ -302,7 +302,7 @@ class Raw(Dataset):
     dataset_type: Literal["raw"] = "raw"
     ome_norm: Path | str | None = None
     scale_shift: tuple[float, float] | None = None
-    stack: Dataset | None = None
+    stack: "PydanticDataset | None" = None
 
     @property
     def bounds(self) -> list[tuple[float, float]] | None:

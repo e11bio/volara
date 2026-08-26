@@ -161,6 +161,34 @@ def test_lazy_stacking(zarr_store, second_zarr_store):
     assert np.all(data[2:4] == 2.0)
 
 
+def test_stack_survives_a_config_round_trip(zarr_store, second_zarr_store):
+    """A worker rebuilds its task from `config.json`, so a field that does not serialise fails
+    there and only there. Annotated with the abstract base, `stack` dumped only `Dataset`'s own
+    fields -- dropping `scale_shift` -- and came back with no discriminator to pick a class from.
+    """
+    base = Raw(store=zarr_store, stack=Raw(store=second_zarr_store, scale_shift=(2.0, 0.0)))
+
+    back = Raw.model_validate_json(base.model_dump_json())
+
+    assert isinstance(back.stack, Raw)
+    assert back.stack.scale_shift == (2.0, 0.0)
+    # and the rebuilt dataset still stacks: 2.0 scaled by 2.0, on the base's 1.0
+    data = back.array()[:]
+    assert data.shape == (4, 10, 10)
+    assert np.all(data[0:2] == 1.0) and np.all(data[2:4] == 4.0)
+
+
+def test_a_stacked_dataset_keeps_its_own_class_through_the_round_trip(zarr_store,
+                                                                      second_zarr_store):
+    """`stack` is typed as any dataset, not as `Raw`, so the discriminator has to choose -- which
+    is what a plain `Raw | None` annotation would not do."""
+    base = Raw(store=zarr_store, stack=Labels(store=second_zarr_store))
+
+    back = Raw.model_validate_json(base.model_dump_json())
+
+    assert isinstance(back.stack, Labels)
+
+
 # --- Test Category 3: Attributes ---
 
 
