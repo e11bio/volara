@@ -302,7 +302,7 @@ class Raw(Dataset):
     dataset_type: Literal["raw"] = "raw"
     ome_norm: Path | str | None = None
     scale_shift: tuple[float, float] | None = None
-    stack: Dataset | None = None
+    stack: "PydanticDataset | None" = None
 
     @property
     def bounds(self) -> list[tuple[float, float]] | None:
@@ -495,3 +495,9 @@ PydanticDataset = Annotated[
     Union[Raw, Affs, LSD, Labels, CloudVolumeWrapper],
     Field(discriminator="dataset_type"),
 ]
+
+# `Raw.stack` names this union, which is defined below `Raw` and so reaches it as a string. Pydantic
+# resolves that on first use, but until then `Raw.__pydantic_complete__` is False and the field's
+# annotation is still a ForwardRef -- so anything reading `model_fields` early sees the unresolved
+# form.
+Raw.model_rebuild()

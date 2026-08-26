@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -159,6 +161,50 @@ def test_lazy_stacking(zarr_store, second_zarr_store):
     assert np.all(data[0:2] == 1.0)
     # Next 2 channels should be 2.0 (stacked)
     assert np.all(data[2:4] == 2.0)
+
+
+def test_raw_is_a_complete_model_at_import():
+    """`stack` names a union defined below `Raw`, so it arrives as a string annotation. Pydantic
+    would resolve it on first use, leaving `model_fields` showing a ForwardRef until then; the
+    explicit `model_rebuild()` resolves it at import instead.
+
+    In a fresh interpreter on purpose: validating a `Raw` anywhere earlier in this session resolves
+    the ForwardRef, so an in-process assert would pass with the rebuild removed.
+    """
+    out = subprocess.run(
+        [sys.executable, "-c", "from volara.datasets import Raw;"
+         "print(Raw.__pydantic_complete__, 'ForwardRef' in repr(Raw.model_fields['stack'].annotation))"],
+        capture_output=True, text=True, check=True)
+
+    assert out.stdout.split() == ["True", "False"], out.stdout
+
+
+def test_stack_survives_a_config_round_trip(zarr_store, second_zarr_store):
+    """A worker rebuilds its task from `config.json`, so a field that does not serialise fails
+    there and only there. Annotated with the abstract base, `stack` dumped only `Dataset`'s own
+    fields -- dropping `scale_shift` -- and came back with no discriminator to pick a class from.
+    """
+    base = Raw(store=zarr_store, stack=Raw(store=second_zarr_store, scale_shift=(2.0, 0.0)))
+
+    back = Raw.model_validate_json(base.model_dump_json())
+
+    assert isinstance(back.stack, Raw)
+    assert back.stack.scale_shift == (2.0, 0.0)
+    # and the rebuilt dataset still stacks: 2.0 scaled by 2.0, on the base's 1.0
+    data = back.array()[:]
+    assert data.shape == (4, 10, 10)
+    assert np.all(data[0:2] == 1.0) and np.all(data[2:4] == 4.0)
+
+
+def test_a_stacked_dataset_keeps_its_own_class_through_the_round_trip(zarr_store,
+                                                                      second_zarr_store):
+    """`stack` is typed as any dataset, not as `Raw`, so the discriminator has to choose -- which
+    is what a plain `Raw | None` annotation would not do."""
+    base = Raw(store=zarr_store, stack=Labels(store=second_zarr_store))
+
+    back = Raw.model_validate_json(base.model_dump_json())
+
+    assert isinstance(back.stack, Labels)
 
 
 # --- Test Category 3: Attributes ---
