@@ -392,6 +392,39 @@ class Labels(Dataset):
         return {}
 
 
+class MaskDataset(Dataset):
+    """A per-block SKIP mask for a blockwise task.
+
+    Points to a zarr array in the task's BLOCK-GRID space -- one element per
+    *block*, not per voxel: dtype uint8, shape equal to daisy's block-grid shape
+    (``ceil(total_roi.shape / block_size)`` over the context-grown total ROI),
+    value 1 = skip this block (pre-mark it done), 0 = run it.
+
+    Handed to ``BlockwiseTask.block_done_mask``, volara writes it into daisy's
+    tracking store as a *caller-provided* ``done`` array (daisy accepts a
+    hash-less tracking group and validates it by shape), so the masked blocks
+    are skipped without ever running. This is the generic form of the
+    surface-band skip: a thin predicted surface only touches a few blocks, so the
+    rest can be pre-skipped.
+
+    Grid-space, not voxel-space: the inherited voxel-metadata fields are unused.
+    How the mask is built is left to the caller (e.g. a slabreg helper that marks
+    the blocks whose Z range cannot reach a predicted surface).
+    """
+
+    dataset_type: Literal["mask"] = "mask"
+
+    @property
+    def attrs(self):
+        return {}
+
+    def read_mask(self) -> "np.ndarray":
+        """The mask as a uint8 numpy array in block-grid space (1 = skip)."""
+        import zarr
+
+        return np.asarray(zarr.open(str(self.store), mode="r")[:], dtype=np.uint8)
+
+
 class CloudVolumeWrapper(Dataset):
     """
     Represents a volumetric dataset through Cloud Volume.
