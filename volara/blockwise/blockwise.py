@@ -16,6 +16,7 @@ from volara.logging import get_log_basedir, set_log_basedir
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
+from ..datasets import MaskDataset
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
@@ -67,6 +68,23 @@ class BlockwiseTask(StrictBaseModel, ABC):
     single block legitimately runs long (e.g. the global mutex watershed) must set
     an explicit large value instead (see ``GraphMWS``). When a block exceeds the
     timeout daisy reclaims it and retries under ``max_retries``.
+    """
+
+    block_done_mask: MaskDataset | None = None
+    """
+    An optional per-block SKIP mask (a :class:`~volara.datasets.MaskDataset`): a
+    uint8 zarr array over this task's block grid where 1 = skip the block
+    (pre-mark it done) and 0 = run it. Before the run, volara writes it into
+    daisy's tracking store as a caller-provided ``done`` array, so masked blocks
+    are skipped without ever being scheduled -- daisy still creates and tracks the
+    task and reports the skips in its summary. On a resume the mask is OR'd into
+    the existing done state, so real completions from a prior run are preserved.
+
+    The mask's shape must equal daisy's block-grid shape
+    (``ceil(total_roi.shape / block_size)`` over the context-grown total ROI);
+    daisy validates this on open and rejects a mismatch with a useful error. How
+    the mask is built is left to the caller (e.g. a slabreg helper that marks the
+    blocks far from a predicted surface).
     """
 
     def __hash__(self):
@@ -308,6 +326,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     with benchmark_logger.trace("Process Block"):
                         process_block(block)
 
+            if self.block_done_mask is not None:
+                self._seed_block_done_mask()
+
             task = daisy.Task(
                 self.task_name,
                 total_roi=self.write_roi.grow(context_low, context_high),
@@ -332,6 +353,45 @@ class BlockwiseTask(StrictBaseModel, ABC):
             )
 
             yield task
+
+    def _seed_block_done_mask(self) -> None:
+        """Write ``block_done_mask`` into daisy's tracking store as a
+        caller-provided ``done`` array, before the task runs.
+
+        daisy accepts a hash-less tracking group and validates it by shape,
+        reading ``done`` as a raw uint8 single-chunk array -- so the mask is
+        written uncompressed at ``chunks == shape``; a compressed chunk would be
+        mmapped as garbage. On a resume the mask is OR'd into whatever daisy
+        already marked done, so real completions from a prior run are preserved.
+        A shape that does not match daisy's block grid is rejected by daisy on
+        open with an actionable error.
+        """
+        import zarr
+
+        skip = (self.block_done_mask.read_mask() != 0).astype(np.uint8)
+        tracking = self.meta_dir / "blocks_done"
+        if (tracking / "done" / "zarr.json").exists():
+            done = zarr.open(str(tracking / "done"), mode="r+")
+            cur = np.asarray(done[:], dtype=np.uint8)
+            if cur.shape != skip.shape:
+                raise ValueError(
+                    f"block_done_mask shape {skip.shape} does not match the "
+                    f"existing done array shape {cur.shape} for task "
+                    f"{self.task_name!r}"
+                )
+            done[:] = cur | skip
+        else:
+            group = zarr.open_group(str(tracking), mode="a")
+            done = group.create_array(
+                "done",
+                shape=skip.shape,
+                chunks=skip.shape,
+                dtype="uint8",
+                fill_value=0,
+                compressors=[],
+                overwrite=True,
+            )
+            done[:] = skip
 
     def get_benchmark_logger(self) -> BenchmarkLogger:
         _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
