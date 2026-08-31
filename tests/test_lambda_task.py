@@ -265,7 +265,9 @@ def test_lambda_task_init_out_false_skips_prepare_and_drop(tmp_path):
     # init() should not recreate or overwrite the output
     task.init()
     result_shape = task.out_data.array("r").shape
-    assert result_shape == (20, 20), "init_out=False should not recreate the output array"
+    assert result_shape == (20, 20), (
+        "init_out=False should not recreate the output array"
+    )
 
     # drop_artifacts() should not remove the output
     task.drop_artifacts()
