@@ -13,15 +13,78 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.logging import get_log_basedir, set_log_basedir
 
+from ..datasets import MaskDataset
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
-from ..datasets import MaskDataset
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
+
+#: Group attribute recording what a seeded tracking store was written for.
+_SEED_ATTR = "volara_block_done_seed"
+
+#: Memoised result of the seeded-store capability probe (None = not yet run).
+_daisy_seeded_store_ok: bool | None = None
+
+
+def _require_daisy_accepts_seeded_store() -> None:
+    """Refuse ``block_done_mask`` on a daisy that rejects caller-seeded stores.
+
+    Measured, not inferred from a version: the probe seeds a one-cell tracking
+    store in exactly the format ``_seed_block_done_mask`` writes and runs a
+    one-block no-op task against it -- the same call path a real seeded run
+    takes. daisy before ``a160769`` refuses such a store at scheduler init
+    (``LayoutMismatch``: no ``daisy_task_hash``); from ``a160769`` it is
+    accepted and validated by shape. The result is memoised per process.
+    """
+    global _daisy_seeded_store_ok
+    if _daisy_seeded_store_ok is None:
+        import tempfile
+
+        import zarr
+
+        with tempfile.TemporaryDirectory(prefix="volara-seed-probe-") as td:
+            tracking = Path(td) / "blocks_done"
+            group = zarr.open_group(str(tracking), mode="a")
+            for name in ("done", "seed"):
+                arr = group.create_array(
+                    name, shape=(1,), chunks=(1,), dtype="uint8",
+                    fill_value=0, compressors=[], overwrite=True,
+                )
+                arr[:] = np.ones(1, dtype=np.uint8)
+            group.attrs[_SEED_ATTR] = {"probe": True}
+            probe = daisy.Task(
+                "volara-block-done-mask-probe",
+                total_roi=Roi((0,), (8,)),
+                read_roi=Roi((0,), (8,)),
+                write_roi=Roi((0,), (8,)),
+                process_function=lambda block: None,
+                fit="shrink",
+                max_workers=1,
+                tracking_path=str(tracking),
+                max_retries=0,
+            )
+            try:
+                daisy.run_blockwise([probe], progress=False)
+                _daisy_seeded_store_ok = True
+            except RuntimeError as e:
+                text = str(e)
+                if "task layout" in text or "daisy_task_hash" in text:
+                    _daisy_seeded_store_ok = False
+                else:
+                    raise
+    if not _daisy_seeded_store_ok:
+        raise RuntimeError(
+            "block_done_mask needs a daisy that accepts a caller-seeded "
+            "(hash-less) tracking store: funkelab/daisy a160769 "
+            "('block_tracking: accept a caller-provided tracking store', "
+            "v2.0 branch, 2026-08-31) or later. The installed daisy refused "
+            "the probe store at scheduler init -- bump the daisy pin and "
+            "relock before using block_done_mask."
+        )
 
 
 class BlockwiseTask(StrictBaseModel, ABC):
@@ -74,17 +137,26 @@ class BlockwiseTask(StrictBaseModel, ABC):
     """
     An optional per-block SKIP mask (a :class:`~volara.datasets.MaskDataset`): a
     uint8 zarr array over this task's block grid where 1 = skip the block
-    (pre-mark it done) and 0 = run it. Before the run, volara writes it into
-    daisy's tracking store as a caller-provided ``done`` array, so masked blocks
-    are skipped without ever being scheduled -- daisy still creates and tracks the
-    task and reports the skips in its summary. On a resume the mask is OR'd into
-    the existing done state, so real completions from a prior run are preserved.
+    (pre-mark it done) and 0 = run it. Before the run, volara seeds it into
+    daisy's tracking store, so masked blocks are skipped without ever being
+    scheduled; daisy still tracks the task and reports the skips in its summary.
 
-    The mask's shape must equal daisy's block-grid shape
-    (``ceil(total_roi.shape / block_size)`` over the context-grown total ROI);
-    daisy validates this on open and rejects a mismatch with a useful error. How
-    the mask is built is left to the caller (e.g. a slabreg helper that marks the
-    blocks far from a predicted surface).
+    Grid contract: the mask's shape must equal :attr:`block_grid_shape`
+    (``ceil(total_roi.shape / block)`` over the context-grown total ROI), and
+    cell ``i`` in dim ``d`` covers the write window starting at
+    ``write_roi.offset[d] + i * block[d]`` -- daisy anchors the grid at the first
+    block's WRITE offset, not at the grown total's offset, and cells beyond
+    ``ceil(write_roi.shape / block)`` are never scheduled. Use
+    :meth:`block_grid_slices` to map a world ROI to cells.
+
+    Resume contract: seeded skip bits are recorded separately from real
+    completions, so re-running with a different mask un-skips blocks the new
+    mask no longer covers while keeping every block a prior run actually
+    computed. A task whose geometry changed refuses to reuse the store.
+
+    Requires a daisy that accepts a caller-seeded tracking store
+    (funkelab/daisy ``a160769``, v2.0 branch, 2026-08-31); on an older daisy the
+    seed refuses up front, naming that commit.
     """
 
     def __hash__(self):
@@ -172,18 +244,55 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         return self.meta_dir / "config.json"
 
-
     @property
     def tracking_path(self) -> "Path":
-        """Where daisy persists its built-in per-block tracking for this task.
+        """Where daisy persists its per-block tracking for this task.
 
-        Kept under ``meta_dir`` so ``drop()`` resets it with the logs; MUST agree
-        with the ``tracking_path=`` handed to ``daisy.Task`` in ``task()`` below.
-        (Restored 2026-08-24: this property was on the daisy-tracking branch and
-        was lost when the branch history was rewritten -- callers like
-        fullres_surface_skip read it to pre-mark skippable blocks.)
+        Kept under ``meta_dir`` so ``drop()`` resets it with the logs; ``task()``
+        hands exactly this path to ``daisy.Task(tracking_path=...)``.
         """
         return self.meta_dir / "blocks_done"
+
+    def _context_pair(self) -> tuple[Coordinate, Coordinate]:
+        """``(context_low, context_high)`` as ``task()`` resolves them."""
+        context = self.context_size
+        if not isinstance(context, Coordinate):
+            assert isinstance(context, tuple)
+            return context[0], context[1]
+        return context, context
+
+    @property
+    def block_grid_shape(self) -> tuple[int, ...]:
+        """Shape of daisy's per-block tracking grid for this task.
+
+        ``ceil(total_roi.shape / block)`` where ``total_roi`` is the
+        context-grown write ROI and ``block`` is ``block_write_roi.shape`` --
+        the same numbers ``task()`` hands to ``daisy.Task``.
+        """
+        lo, hi = self._context_pair()
+        total = self.write_roi.grow(lo, hi)
+        block = self.block_write_roi.shape
+        return tuple(-(-int(t) // int(b)) for t, b in zip(total.shape, block))
+
+    def block_grid_slices(self, roi: Roi) -> tuple[slice, ...]:
+        """Grid cells whose WRITE window intersects ``roi``, as per-dim slices.
+
+        Cell ``i`` in dim ``d`` covers the write window starting at
+        ``write_roi.offset[d] + i * block[d]``: daisy anchors the grid at the
+        first block's write offset, not at the context-grown total's offset.
+        Slices are clipped to :attr:`block_grid_shape`.
+        """
+        block = self.block_write_roi.shape
+        anchor = self.write_roi.offset
+        grid = self.block_grid_shape
+        out = []
+        for d, (a, b, g) in enumerate(zip(anchor, block, grid)):
+            begin = int(roi.begin[d]) - int(a)
+            end = int(roi.end[d]) - int(a)
+            lo = max(begin // int(b), 0)
+            hi = min(-(-end // int(b)), g)
+            out.append(slice(lo, max(hi, lo)))
+        return tuple(out)
 
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
@@ -338,7 +447,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
                 max_workers=self.num_workers,
-                tracking_path=str(self.meta_dir / "blocks_done"),
+                tracking_path=str(self.tracking_path),
                 max_retries=2,
                 timeout=self.block_timeout,
                 upstream_tasks=(
@@ -354,44 +463,99 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             yield task
 
-    def _seed_block_done_mask(self) -> None:
-        """Write ``block_done_mask`` into daisy's tracking store as a
-        caller-provided ``done`` array, before the task runs.
+    def _seed_layout(self) -> dict:
+        """The task geometry a seeded tracking store is only valid for."""
+        lo, hi = self._context_pair()
+        total = self.write_roi.grow(lo, hi)
+        return {
+            "total_roi": [list(total.offset), list(total.shape)],
+            "read_roi": [
+                list(self.block_write_roi.grow(lo, hi).offset),
+                list(self.block_write_roi.grow(lo, hi).shape),
+            ],
+            "write_roi": [
+                list(self.block_write_roi.offset),
+                list(self.block_write_roi.shape),
+            ],
+            "fit": str(self.fit),
+            "grid_shape": list(self.block_grid_shape),
+        }
 
-        daisy accepts a hash-less tracking group and validates it by shape,
-        reading ``done`` as a raw uint8 single-chunk array -- so the mask is
-        written uncompressed at ``chunks == shape``; a compressed chunk would be
-        mmapped as garbage. On a resume the mask is OR'd into whatever daisy
-        already marked done, so real completions from a prior run are preserved.
-        A shape that does not match daisy's block grid is rejected by daisy on
-        open with an actionable error.
+    def _seed_block_done_mask(self) -> None:
+        """Seed ``block_done_mask`` into daisy's tracking store before the run.
+
+        The mask is written uncompressed at ``chunks == shape`` (daisy reads
+        ``done`` as a raw single-chunk uint8 array). The seeded skip bits are
+        ALSO recorded in a sibling ``seed`` array plus a layout stamp in the
+        group attributes, so on a resume real completions are
+        ``done & ~previous_seed`` and the new mask replaces the old: a narrower
+        mask un-skips what it no longer covers, and completed work is never
+        re-marked. A store whose recorded layout differs from this task's
+        geometry refuses (drop the meta dir to reset tracking). A daisy-written
+        store from a mask-less run is treated as all real completions.
         """
+        import hashlib
+
         import zarr
 
+        _require_daisy_accepts_seeded_store()
         skip = (self.block_done_mask.read_mask() != 0).astype(np.uint8)
-        tracking = self.meta_dir / "blocks_done"
+        expected = self.block_grid_shape
+        if tuple(skip.shape) != tuple(expected):
+            raise ValueError(
+                f"block_done_mask shape {tuple(skip.shape)} does not match task "
+                f"{self.task_name!r}'s block grid {tuple(expected)} "
+                "(= ceil(context-grown total / block); cell i covers the write "
+                "window at write_roi.offset + i*block -- see block_grid_slices())."
+            )
+        layout = self._seed_layout()
+        record = {
+            "layout": layout,
+            "mask_sha256": hashlib.sha256(skip.tobytes()).hexdigest(),
+        }
+        tracking = self.tracking_path
         if (tracking / "done" / "zarr.json").exists():
-            done = zarr.open(str(tracking / "done"), mode="r+")
+            group = zarr.open_group(str(tracking), mode="r+")
+            done = group["done"]
             cur = np.asarray(done[:], dtype=np.uint8)
             if cur.shape != skip.shape:
                 raise ValueError(
-                    f"block_done_mask shape {skip.shape} does not match the "
-                    f"existing done array shape {cur.shape} for task "
-                    f"{self.task_name!r}"
+                    f"block_done_mask shape {tuple(skip.shape)} does not match "
+                    f"the existing done array shape {cur.shape} for task "
+                    f"{self.task_name!r}; drop the meta dir to reset tracking."
                 )
-            done[:] = cur | skip
+            prior = group.attrs.get(_SEED_ATTR)
+            if prior is not None:
+                if prior.get("layout") != layout:
+                    raise RuntimeError(
+                        f"task {self.task_name!r}: the seeded tracking store at "
+                        f"{tracking} was written for a different task geometry; "
+                        f"drop the meta dir ({self.meta_dir}) to reset tracking "
+                        "rather than reusing done bits from another layout."
+                    )
+                prev_seed = np.asarray(group["seed"][:], dtype=np.uint8)
+                real = cur & ~prev_seed
+            else:
+                real = cur
+            done[:] = real | skip
+            if "seed" in group:
+                group["seed"][:] = skip
+            else:
+                seed = group.create_array(
+                    "seed", shape=skip.shape, chunks=skip.shape, dtype="uint8",
+                    fill_value=0, compressors=[], overwrite=True,
+                )
+                seed[:] = skip
+            group.attrs[_SEED_ATTR] = record
         else:
             group = zarr.open_group(str(tracking), mode="a")
-            done = group.create_array(
-                "done",
-                shape=skip.shape,
-                chunks=skip.shape,
-                dtype="uint8",
-                fill_value=0,
-                compressors=[],
-                overwrite=True,
-            )
-            done[:] = skip
+            for name in ("done", "seed"):
+                arr = group.create_array(
+                    name, shape=skip.shape, chunks=skip.shape, dtype="uint8",
+                    fill_value=0, compressors=[], overwrite=True,
+                )
+                arr[:] = skip
+            group.attrs[_SEED_ATTR] = record
 
     def get_benchmark_logger(self) -> BenchmarkLogger:
         _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
