@@ -150,34 +150,29 @@ class Dataset(StrictBaseModel, ABC):
             return self.store.rstrip("/").split("/")[-1]
 
     def drop(self) -> None:
-        """
-        Delete this dataset.
-
-        A LOCAL PATH GIVEN AS A str IS STILL A LOCAL PATH. ``store`` is typed
-        ``Path | str``, so a caller that builds one from string formatting (slabreg's
-        s11 does, for the affs and heatmap stores) passes validation and then hits
-        "not a Path or s3 path" only at drop time -- reached from ``ctx.rerun`` ->
-        ``task.drop()``, i.e. exactly the recompute path invoked when a store's
-        geometry no longer matches. Coerce instead of refusing; s3:// keeps its own
-        branch below. (Reapplied 2026-08-20: the original fix was lost uncommitted.)
-        """
-        if isinstance(self.store, str) and not self.store.startswith("s3://"):
-            store: Path | str = Path(self.store)
-        else:
-            store = self.store
-        if not isinstance(store, Path):
-            if isinstance(store, str) and store.startswith("s3://"):
-                # drop an s3 zarr
-                fs = self._s3fs()
-                try:
-                    fs.rm(store, recursive=True)
-                except FileNotFoundError:
-                    pass
-            else:
+        """Delete this dataset's store: a local path (``Path`` or ``str``) or ``s3://``."""
+        store = self.store
+        if isinstance(store, str) and store.startswith("s3://"):
+            fs = self._s3fs()
+            try:
+                fs.rm(store, recursive=True)
+            except FileNotFoundError:
+                pass
+            return
+        if isinstance(store, str):
+            if "://" in store:
+                # any other URL scheme would silently coerce to a Path that never
+                # exists -- a no-op drop that looks like success
                 raise ValueError(
-                    f"Not dropping dataset: store {store} is not a Path or s3 path"
+                    f"Not dropping dataset: store {store} is a URL this method "
+                    "cannot delete (only local paths and s3:// are supported)"
                 )
-        elif store.exists():
+            store = Path(store)  # a local path given as a str is still a local path
+        if not isinstance(store, Path):
+            raise ValueError(
+                f"Not dropping dataset: store {store} is not a Path or s3 path"
+            )
+        if store.exists():
             rmtree(store)
 
     def spoof(self, spoof_dir: Path):
