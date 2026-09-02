@@ -150,23 +150,30 @@ class Dataset(StrictBaseModel, ABC):
             return self.store.rstrip("/").split("/")[-1]
 
     def drop(self) -> None:
-        """
-        Delete this dataset.
-        """
-        if not isinstance(self.store, Path):
-            if isinstance(self.store, str) and self.store.startswith("s3://"):
-                # drop an s3 zarr
-                fs = self._s3fs()
-                try:
-                    fs.rm(self.store, recursive=True)
-                except FileNotFoundError:
-                    pass
-            else:
+        """Delete this dataset's store: a local path (``Path`` or ``str``) or ``s3://``."""
+        store = self.store
+        if isinstance(store, str) and store.startswith("s3://"):
+            fs = self._s3fs()
+            try:
+                fs.rm(store, recursive=True)
+            except FileNotFoundError:
+                pass
+            return
+        if isinstance(store, str):
+            if "://" in store:
+                # any other URL scheme would silently coerce to a Path that never
+                # exists -- a no-op drop that looks like success
                 raise ValueError(
-                    f"Not dropping dataset: store {self.store} is not a Path or s3 path"
+                    f"Not dropping dataset: store {store} is a URL this method "
+                    "cannot delete (only local paths and s3:// are supported)"
                 )
-        elif self.store.exists():
-            rmtree(self.store)
+            store = Path(store)  # a local path given as a str is still a local path
+        if not isinstance(store, Path):
+            raise ValueError(
+                f"Not dropping dataset: store {store} is not a Path or s3 path"
+            )
+        if store.exists():
+            rmtree(store)
 
     def spoof(self, spoof_dir: Path):
         if not isinstance(self.store, Path):
