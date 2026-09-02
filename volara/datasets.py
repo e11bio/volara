@@ -6,13 +6,20 @@ from shutil import rmtree
 from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
-import zarr
 from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from pydantic import Field
 
-from .utils import OpenMode, PydanticCoordinate, StrictBaseModel
+from .ops import (
+    OmeNormalize,
+    ReverseAxes,
+    ScaleShift,
+    SelectChannels,
+    StackWith,
+    apply_op,
+)
+from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,6 +39,47 @@ class Dataset(StrictBaseModel, ABC):
     axis_names: list[str] | None = None
     units: list[str] | None = None
     writable: bool = True
+
+    ops: list[PydanticCallable] | None = None
+    """
+    Extra lazy operations, applied IN ORDER and AFTER every keyword-driven op.
+
+    Each is a plain callable ``data -> data``, cloudpickled to base64 so it reaches a worker the
+    same way `LambdaTask.lambda_func` does. The escape hatch for a transform that has no keyword.
+
+    Two limits of the callable path, both inherited from funlib:
+
+    - A lambda or a `__main__` function is pickled BY VALUE; one imported from a module is pickled
+      by reference, so the worker must be able to import that module and gets whatever version it
+      has installed.
+    - funlib does not update an array's roi or voxel_size for a callable op, so one that changes
+      shape leaves the metadata describing the array before it. Use `channels` for that; it goes
+      through funlib's index path, which does update them.
+    - Validation produces a fresh function object, so a Dataset carrying `ops` is NOT equal to its
+      own round trip and two rebuilds of the same JSON are not equal to each other. A consumer that
+      dedupes, caches or fences on a dataset config needs the keyword fields, which do compare
+      equal, not this one.
+
+    Read-only, for the same reason: a callable makes the array unwriteable, so a write mode is
+    refused up front rather than at the first block write.
+
+    See `resolved_ops` for the order the keyword fields resolve to, and `volara.ops` for why that
+    order is fixed.
+    """
+
+    flip: list[int] | None = None
+    """
+    Axis indices to reverse, applied AFTER `channels` has collapsed any leading axes -- so
+    they index the FINAL array, not the store. For a `[T,C,Z,Y,X]` store read with
+    `channels=[0, 0]` the result is `[Z,Y,X]` and `flip=[0]` reverses Z.
+
+    Read-only: a reversed array reports `is_writeable` True but `__setitem__` raises, so a
+    write mode is refused up front rather than at the first write.
+
+    Corrects a volume acquired in a flipped orientation, so that nothing downstream needs to
+    know. It is a lazy slice, not a copy, and it travels in this config -- a worker that
+    rebuilds the model applies the same reversal, which an in-memory wrapper would not.
+    """
 
     channels: list[list[int] | int] | int | None = None
     """
@@ -178,6 +226,12 @@ class Dataset(StrictBaseModel, ABC):
         By default, does nothing.
         Subclasses can override this method to apply
         specific lazy operations.
+
+        Runs before every op in `resolved_ops`. `Raw` no longer overrides it -- its `ome_norm`,
+        `scale_shift` and `stack` are named ops now, so for a subclass that calls
+        `super().lazy_ops(arr)` those three move from before its own ops to after them, and for
+        one that does not call super they are applied rather than suppressed. Relative to
+        `channels` and `flip` this hook's position is unchanged.
         """
         pass
 
@@ -202,16 +256,34 @@ class Dataset(StrictBaseModel, ABC):
 
         self.lazy_ops(arr)
 
-        if self.channels is not None:
-            if isinstance(self.channels, list):
-                for channels in self.channels:
-                    if isinstance(channels, list):
-                        arr.lazy_op(lambda d: d[channels])
-                    else:
-                        arr.lazy_op(np.s_[channels])
-            else:
-                arr.lazy_op(np.s_[self.channels])
+        ops = self.resolved_ops()
+        if mode != "r":
+            if any(isinstance(o, ReverseAxes) for o in ops):
+                raise ValueError(
+                    f"Dataset {self.store} reverses axes, which is read-only; "
+                    f"cannot open in mode {mode!r}."
+                )
+            if self.ops:
+                raise ValueError(
+                    f"Dataset {self.store} has ops={len(self.ops)} callables, which make the "
+                    f"array unwriteable; cannot open in mode {mode!r}."
+                )
+        for op in ops:
+            apply_op(op, arr)
         return arr
+
+    def resolved_ops(self) -> list:
+        """Every op to apply, in order: the keyword-driven named ops, then ``ops``.
+
+        Subclasses that add keywords of their own override this and prepend, as `Raw` does. See
+        `volara.ops` for why the order is fixed.
+        """
+        named: list = []
+        if self.channels is not None:
+            named.append(SelectChannels(channels=self.channels))
+        if self.flip:
+            named.append(ReverseAxes(axes=self.flip))
+        return named + list(self.ops or [])
 
     @property
     @abstractmethod
@@ -234,18 +306,11 @@ class Raw(Dataset):
 
     @property
     def bounds(self) -> list[tuple[float, float]] | None:
-        if self.ome_norm is not None:
-            array = open_ds(self.store, mode="r", **self.zarr_kwargs)
-            metadata_group = zarr.open_group(str(self.ome_norm))
-            omero: dict = metadata_group.attrs["omero"]  # type: ignore[assignment]
-            channels_meta: list[dict] = omero["channels"]
-            bounds = [
-                (channels_meta[c]["window"]["min"], channels_meta[c]["window"]["max"])
-                for c in range(array.data.shape[0])
-            ]
-            return bounds
-        else:
+        """The windows `ome_norm` applies: one per channel the store carries."""
+        if self.ome_norm is None:
             return None
+        array = open_ds(self.store, mode="r", **self.zarr_kwargs)
+        return OmeNormalize(metadata=self.ome_norm).windows(array.data.shape[0])
 
     @property
     def attrs(self):
@@ -254,33 +319,18 @@ class Raw(Dataset):
             attrs["bounds"] = self.bounds
         return attrs
 
-    def lazy_ops(self, arr: Array) -> None:
-        def scale_shift(data, scale_shift):
-            data = data.astype(np.float32)
-            scale, shift = scale_shift
-            norm = data * scale + shift
-            return norm
-
-        def ome_norm(data, bounds):
-            data = data.astype(np.float32)
-            c, *shape = data.shape
-            shift = np.array(
-                [b_min for (b_min, _) in bounds], dtype=np.float32
-            ).reshape(c, *((1,) * len(shape)))
-            scale = np.array(
-                [b_max - b_min for b_min, b_max in bounds], dtype=np.float32
-            ).reshape(c, *((1,) * len(shape)))
-            return (data - shift) / scale
-
-        def stack(data, other_data):
-            return np.concatenate([data, other_data], axis=0)
-
+    def resolved_ops(self) -> list:
+        """`Raw`'s three keywords all precede the base class's, `ome_norm` first of all."""
+        named: list = []
         if self.ome_norm:
-            arr.lazy_op(lambda data: ome_norm(data, self.bounds))
+            named.append(OmeNormalize(metadata=self.ome_norm))
         if self.scale_shift is not None:
-            arr.lazy_op(lambda data: scale_shift(data, self.scale_shift))
+            named.append(
+                ScaleShift(scale=self.scale_shift[0], shift=self.scale_shift[1])
+            )
         if self.stack is not None:
-            arr.lazy_op(lambda data: stack(data, self.stack.array("r").data))  # type: ignore[possibly-missing-attribute]
+            named.append(StackWith(other=self.stack))
+        return named + super().resolved_ops()
 
 
 class Affs(Dataset):
@@ -364,6 +414,20 @@ class CloudVolumeWrapper(Dataset):
 
     def array(self, mode: OpenMode = "r") -> Array:
         import dask.array as da
+
+        # This override never reaches the lazy-op path, so nothing in `resolved_ops` can take
+        # effect here. Refusing is loud; ignoring would be a silently different array from the one
+        # the same config produces for every other Dataset.
+        unsupported = [
+            n
+            for n in ("flip", "channels", "ops")
+            if getattr(self, n, None) not in (None, [])
+        ]
+        if unsupported:
+            raise NotImplementedError(
+                f"CloudVolumeWrapper does not apply {', '.join(unsupported)}; it overrides "
+                f"array() without the lazy-op path. Drop the field or use a zarr-backed Dataset."
+            )
 
         vol = CloudVolume(
             str(self.store),
