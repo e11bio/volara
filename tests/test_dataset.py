@@ -227,3 +227,18 @@ def test_attrs_labels_lsd():
 
     lsd = LSD(store="dummy")
     assert lsd.attrs == {"lsds": True}
+
+
+def test_drop_removes_a_local_store_given_as_a_str(tmp_path):
+    """``store`` is annotated ``Path | str``; both must drop.
+
+    A local path arriving as a ``str`` used to raise "not a Path or s3 path", so callers that
+    build ``Raw(store=str(...))`` -- the common case when a path is composed from a URI-aware
+    library -- could never delete a dataset.
+    """
+    for store in (tmp_path / "as_path.zarr", str(tmp_path / "as_str.zarr")):
+        arr = zarr.create_array(str(store), shape=(4, 4), chunks=(2, 2), dtype="uint8")
+        arr[:] = 1
+        assert Path(str(store)).exists()
+        Raw(store=store).drop()
+        assert not Path(str(store)).exists()
