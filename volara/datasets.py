@@ -10,6 +10,7 @@ from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from pydantic import Field
+from upath import UPath
 
 from .ops import (
     OmeNormalize,
@@ -152,21 +153,19 @@ class Dataset(StrictBaseModel, ABC):
     def drop(self) -> None:
         """
         Delete this dataset.
+
+        ``store`` is resolved through :class:`upath.UPath`, so a local path and an ``s3://`` URI
+        are handled the same whether either arrives as a ``str`` or as a path object.
         """
-        if not isinstance(self.store, Path):
-            if isinstance(self.store, str) and self.store.startswith("s3://"):
-                # drop an s3 zarr
-                fs = self._s3fs()
-                try:
-                    fs.rm(self.store, recursive=True)
-                except FileNotFoundError:
-                    pass
-            else:
-                raise ValueError(
-                    f"Not dropping dataset: store {self.store} is not a Path or s3 path"
-                )
-        elif self.store.exists():
-            rmtree(self.store)
+        store = UPath(self.store)
+        if store.protocol in ("s3", "s3a"):
+            fs = self._s3fs()
+            try:
+                fs.rm(str(store), recursive=True)
+            except FileNotFoundError:
+                pass
+        elif store.exists():
+            rmtree(store)
 
     def spoof(self, spoof_dir: Path):
         if not isinstance(self.store, Path):

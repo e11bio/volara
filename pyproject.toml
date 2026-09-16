@@ -18,6 +18,7 @@ keywords = []
 requires-python = ">=3.11"
 
 dependencies = [
+    "universal-pathlib",
     "click>=8.0",
     # daisy v2 (Rust rewrite) -- pinned to the git v2.0 branch via
     # [tool.uv.sources] below until 2.0.0 is published to PyPI.
