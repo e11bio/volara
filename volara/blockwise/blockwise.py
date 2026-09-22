@@ -3,8 +3,6 @@ import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
-from pathlib import Path
-from shutil import rmtree
 from typing import TYPE_CHECKING, Iterator
 
 import daisy
@@ -14,6 +12,7 @@ from daisy.cl_monitor import CLMonitor
 from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
 from funlib.persistence import open_ds, prepare_ds
+from upath import UPath
 
 from volara.logging import get_log_basedir, set_log_basedir
 
@@ -133,7 +132,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return Roi((0,) * self.write_size.dims, self.write_size)
 
     @property
-    def meta_dir(self) -> Path:
+    def meta_dir(self) -> UPath:
         """
         The path to the meta directory where we will store log files
         and a block done cache for resuming work if processing is
@@ -142,7 +141,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return get_log_basedir() / f"{self.task_name}-meta"
 
     @property
-    def config_file(self) -> Path:
+    def config_file(self) -> UPath:
         """
         The config file that will be used to serialize this task for
         logging purposes.
@@ -150,7 +149,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return self.meta_dir / "config.json"
 
     @property
-    def block_ds(self) -> Path:
+    def block_ds(self) -> UPath:
         """
         The dataset that will be used to track which blocks have been
         successfully completed.
@@ -183,9 +182,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 on the next run while leaving the existing outputs (datasets, dbs,
                 luts) in place to be overwritten block by block.
         """
-        # reset the blocks_done ds so that the task is rerun
-        if self.meta_dir.exists():
-            rmtree(self.meta_dir)
+        # reset the blocks_done ds so that the task is rerun.
+        # ``shutil.rmtree`` only understands the local filesystem; going
+        # through the fsspec filesystem behind the path removes the tree
+        # wherever the basedir lives (local, s3, ...).
+        meta_dir = self.meta_dir
+        if meta_dir.exists():
+            meta_dir.fs.rm(meta_dir.path, recursive=True)
         if drop_outputs:
             self.drop_artifacts()
 
@@ -238,7 +241,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
         if worker_config is not None:
             config_file = self.config_file
 
-            with open(config_file, "w") as f:
+            # ``config_file.open`` rather than the builtin ``open``: the latter
+            # only accepts local paths, and the basedir may be remote.
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            with config_file.open("w") as f:
                 f.write(self.model_dump_json())
 
             logging.info("Running block with config %s..." % config_file)
@@ -408,13 +414,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
             yield task
 
     def get_benchmark_logger(self) -> BenchmarkLogger:
-        _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        _benchmark_db_path = UPath("volara_benchmark_logs/benchmark.db")
         return BenchmarkLogger(
             None,
             task=self.task_name,
         )
 
-    def spoof(self, spoof_dir: Path):
+    def spoof(self, spoof_dir: UPath):
         """
         Whether or not to spoof the data inputs to this task.
         """
@@ -444,13 +450,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
         log_basedir = get_log_basedir()
         set_log_basedir("volara_benchmark_logs")
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        benchmark_db_path = UPath("volara_benchmark_logs/benchmark.db")
         if benchmark_db_path.exists():
             benchmark_db_path.unlink()
         benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
         benchmark_logger._init_db()
 
-        spoof_dir = Path("volara_benchmark_logs/spoof")
+        spoof_dir = UPath("volara_benchmark_logs/spoof")
         debug_self = self.spoof(spoof_dir)
 
         try:

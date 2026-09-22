@@ -3,10 +3,10 @@ import sqlite3
 import time
 from collections import Counter, defaultdict, deque
 from contextlib import contextmanager
-from pathlib import Path
 
 import daisy
 import psutil
+from upath import UPath
 
 
 def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
@@ -50,8 +50,8 @@ def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
 
 
 class BenchmarkLogger:
-    def __init__(self, db_path: Path | str | None, task: str | None):
-        db_path = Path(db_path) if db_path is not None else None
+    def __init__(self, db_path: UPath | str | None, task: str | None):
+        db_path = UPath(db_path) if db_path is not None else None
         self.task = task
         self.conn: None | sqlite3.Connection = None
         if db_path is not None:
@@ -147,11 +147,11 @@ class BenchmarkLogger:
         else:
             yield
 
-    def print_report(self, out_dir: Path | None = None):
+    def print_report(self, out_dir: UPath | None = None):
         import polars as pl
 
         if out_dir is None:
-            out_dir = Path("./volara_benchmark_report")
+            out_dir = UPath("./volara_benchmark_report")
         if self.conn is not None:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM benchmark;")

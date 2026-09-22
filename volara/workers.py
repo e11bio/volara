@@ -1,9 +1,9 @@
 import logging
 import subprocess as sp
 from abc import ABC
-from pathlib import Path
 
 import daisy
+from upath import UPath
 
 from .utils import StrictBaseModel
 
@@ -15,7 +15,7 @@ class Worker(StrictBaseModel, ABC):
     num_gpus: int = 0
     num_cpus: int = 1
 
-    def get_command(self, config_path: Path, task_name: str) -> list[str]:
+    def get_command(self, config_path: UPath, task_name: str) -> list[str]:
         cmd = [
             "volara-cli",
             "blockwise-worker",
@@ -30,7 +30,7 @@ class SlurmWorker(Worker):
     num_gpus: int = 0
     num_cpus: int = 1
 
-    def get_command(self, config_path: Path, task_name: str) -> list[str]:
+    def get_command(self, config_path: UPath, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
 
         context = daisy.Context.from_env()
@@ -179,7 +179,7 @@ class LSFWorker(Worker):
     num_gpus: int = 0
     num_cpus: int = 1
 
-    def get_command(self, config_path: Path, task_name: str) -> list[str]:
+    def get_command(self, config_path: UPath, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
 
         context = daisy.Context.from_env()
@@ -261,7 +261,7 @@ class LSFWorker(Worker):
 
 
 class LocalWorker(Worker):
-    def get_command(self, config_path: Path, task_name: str) -> list[str]:
+    def get_command(self, config_path: UPath, task_name: str) -> list[str]:
         cmd = super().get_command(config_path, task_name)
 
         context = daisy.Context.from_env()

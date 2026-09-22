@@ -1,7 +1,7 @@
 import logging
-from pathlib import Path
 
 import click
+from upath import UPath
 
 
 @click.group()
@@ -20,13 +20,12 @@ def cli(log_level: str) -> None:
 @click.option(
     "-c", "--config-file", required=True, type=click.Path(exists=True, dir_okay=False)
 )
-def blockwise_worker(config_file: Path) -> None:
+def blockwise_worker(config_file: UPath) -> None:
     import json
-    from pathlib import Path
 
     from volara.blockwise import BlockwiseTask, get_blockwise_tasks_type
 
-    config_file = Path(config_file)
+    config_file = UPath(config_file)
     config_json = json.loads(config_file.open("r").read())
 
     BlockwiseTasks = get_blockwise_tasks_type()

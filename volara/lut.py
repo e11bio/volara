@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
 import numpy as np
+from upath import UPath
 
 from volara.segment_utils import replace_values
 
@@ -14,6 +15,10 @@ class LUT(StrictBaseModel):
     A class for defining look up tables
     """
 
+    # Deliberately ``Path | str`` and not ``UPath | str``: ``is_s3`` below
+    # discriminates on the field still being a ``str``, and a ``UPath``
+    # annotation would have pydantic parse ``s3://...`` into an ``S3Path``
+    # before that check ever runs.
     path: Path | str
     """
     The path at which we will read/write the look up table. Either a local
@@ -63,19 +68,19 @@ class LUT(StrictBaseModel):
         return self.file.stem
 
     @property
-    def file(self) -> Path:
+    def file(self) -> UPath:
         if isinstance(self.path, str):
             if self.is_s3:
                 raise ValueError(
                     f"{self.path} is an s3 uri and has no local path, use `uri` instead"
                 )
             return (
-                Path(self.path)
+                UPath(self.path)
                 if self.path.endswith(".npz")
-                else Path(f"{self.path}.npz")
+                else UPath(f"{self.path}.npz")
             )
         elif isinstance(self.path, Path):
-            return self.path
+            return UPath(self.path)
         else:
             raise TypeError(f"Invalid type for path ({self.path}): {type(self.path)}")
 
