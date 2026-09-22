@@ -4,7 +4,6 @@ import subprocess
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from shutil import rmtree
 from typing import TYPE_CHECKING, Iterator
 
 import daisy
@@ -14,6 +13,7 @@ from daisy.cl_monitor import CLMonitor
 from funlib.geometry import Coordinate, Roi
 from funlib.math import cantor_number
 from funlib.persistence import open_ds, prepare_ds
+from upath import UPath
 
 from volara.logging import get_log_basedir, set_log_basedir
 
@@ -133,7 +133,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return Roi((0,) * self.write_size.dims, self.write_size)
 
     @property
-    def meta_dir(self) -> Path:
+    def meta_dir(self) -> UPath:
         """
         The path to the meta directory where we will store log files
         and a block done cache for resuming work if processing is
@@ -142,7 +142,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return get_log_basedir() / f"{self.task_name}-meta"
 
     @property
-    def config_file(self) -> Path:
+    def config_file(self) -> UPath:
         """
         The config file that will be used to serialize this task for
         logging purposes.
@@ -150,12 +150,26 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return self.meta_dir / "config.json"
 
     @property
-    def block_ds(self) -> Path:
+    def block_ds(self) -> UPath:
         """
         The dataset that will be used to track which blocks have been
         successfully completed.
         """
         return self.meta_dir / "blocks_done.zarr"
+
+    @property
+    def block_ds_store(self) -> UPath | str:
+        """
+        :attr:`block_ds` in the form zarr accepts as a store.
+
+        ``zarr.open`` takes a ``str``, a ``pathlib.Path`` or a ``Store``. A local
+        ``UPath`` *is* a ``pathlib.Path`` and goes through unchanged; a remote one is
+        neither (it does not even implement ``__fspath__``) and raises ``TypeError:
+        Unsupported type for store_like``, so it has to be handed over as its URL --
+        from which zarr builds an fsspec-backed store.
+        """
+        block_ds = self.block_ds
+        return block_ds if isinstance(block_ds, Path) else str(block_ds)
 
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
@@ -183,9 +197,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 on the next run while leaving the existing outputs (datasets, dbs,
                 luts) in place to be overwritten block by block.
         """
-        # reset the blocks_done ds so that the task is rerun
-        if self.meta_dir.exists():
-            rmtree(self.meta_dir)
+        # reset the blocks_done ds so that the task is rerun.
+        # ``shutil.rmtree`` only understands the local filesystem; going
+        # through the fsspec filesystem behind the path removes the tree
+        # wherever the basedir lives (local, s3, ...).
+        meta_dir = self.meta_dir
+        if meta_dir.exists():
+            meta_dir.fs.rm(meta_dir.path, recursive=True)
         if drop_outputs:
             self.drop_artifacts()
 
@@ -195,7 +213,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
 
         def check_block(block):
-            block_array = open_ds(self.block_ds, mode="r")
+            block_array = open_ds(self.block_ds_store, mode="r")
             zarr_arr = block_array._source_data
 
             coordinate = (
@@ -205,7 +223,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
             chunk_size = Coordinate(zarr_arr.chunks[-coordinate.dims :])
             chunk_index = coordinate // chunk_size
             chunk_key = "/".join(str(i) for i in chunk_index)
-            return (zarr_arr.store.root / "c" / chunk_key).exists()
+            # via the path rather than ``zarr_arr.store.root``: ``root`` exists only on
+            # zarr's ``LocalStore``, and the store for a remote basedir is an
+            # ``FsspecStore``. The two are the same location -- the store's root *is*
+            # ``block_ds``.
+            return (self.block_ds / "c" / chunk_key).exists()
 
         return check_block
 
@@ -219,7 +241,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             if not block.status == BlockStatus.FAILED:
                 # Unless the block is explicitly marked as failed, we assume
                 # successful processing if there was no error
-                block_array = open_ds(self.block_ds, mode="a")
+                block_array = open_ds(self.block_ds_store, mode="a")
                 write_roi = block.write_roi.intersect(block_array.roi)
                 write_roi.shape = block_array.voxel_size
                 block_array[write_roi] = np.full(
@@ -238,7 +260,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
         if worker_config is not None:
             config_file = self.config_file
 
-            with open(config_file, "w") as f:
+            # ``config_file.open`` rather than the builtin ``open``: the latter
+            # only accepts local paths, and the basedir may be remote.
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            with config_file.open("w") as f:
                 f.write(self.model_dump_json())
 
             logging.info("Running block with config %s..." % config_file)
@@ -324,7 +349,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
         try:
             prepare_ds(
-                self.block_ds,
+                self.block_ds_store,
                 shape=(self.write_roi.shape + block_voxel_size - 1) / block_voxel_size,
                 offset=self.write_roi.offset,
                 voxel_size=block_voxel_size,
@@ -334,7 +359,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             )
         except PermissionError as e:
             # The dataset already exists but with different parameters.
-            existing_block_ds = open_ds(self.block_ds, mode="r")
+            existing_block_ds = open_ds(self.block_ds_store, mode="r")
             error_msg = (
                 f"Trying to overwrite existing {self.block_ds} array with incompatible data:\n"
                 f"Shape (existing): {existing_block_ds.shape} vs (new) {self.write_roi.shape / block_voxel_size}\n"
@@ -408,7 +433,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             yield task
 
     def get_benchmark_logger(self) -> BenchmarkLogger:
-        _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        _benchmark_db_path = UPath("volara_benchmark_logs/benchmark.db")
         return BenchmarkLogger(
             None,
             task=self.task_name,
@@ -444,12 +469,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
         log_basedir = get_log_basedir()
         set_log_basedir("volara_benchmark_logs")
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        benchmark_db_path = UPath("volara_benchmark_logs/benchmark.db")
         if benchmark_db_path.exists():
             benchmark_db_path.unlink()
         benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
         benchmark_logger._init_db()
 
+        # A plain ``Path``: ``spoof()`` feeds ``Dataset.spoof``, which symlinks, so the
+        # spoof dir is local by construction.
         spoof_dir = Path("volara_benchmark_logs/spoof")
         debug_self = self.spoof(spoof_dir)
 

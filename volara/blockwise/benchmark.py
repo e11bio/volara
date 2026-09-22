@@ -7,6 +7,7 @@ from pathlib import Path
 
 import daisy
 import psutil
+from upath import UPath
 
 
 def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
@@ -50,14 +51,19 @@ def partial_order(task_orders: dict[str, list[str]]) -> list[str]:
 
 
 class BenchmarkLogger:
-    def __init__(self, db_path: Path | str | None, task: str | None):
-        db_path = Path(db_path) if db_path is not None else None
+    def __init__(self, db_path: UPath | Path | str | None, task: str | None):
+        db_path = UPath(db_path) if db_path is not None else None
         self.task = task
         self.conn: None | sqlite3.Connection = None
         if db_path is not None:
             if not db_path.parent.exists():
                 db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+            # sqlite is local-only; ``str()`` rather than ``os.fspath`` because ``UPath``
+            # does not advertise ``__fspath__`` to type checkers (a local UPath is a
+            # ``pathlib.Path`` at runtime, so the string is the same either way).
+            self.conn = sqlite3.connect(
+                str(db_path), timeout=30, check_same_thread=False
+            )
         else:
             self.conn = None
 
@@ -147,11 +153,11 @@ class BenchmarkLogger:
         else:
             yield
 
-    def print_report(self, out_dir: Path | None = None):
+    def print_report(self, out_dir: UPath | Path | None = None):
         import polars as pl
 
         if out_dir is None:
-            out_dir = Path("./volara_benchmark_report")
+            out_dir = UPath("./volara_benchmark_report")
         if self.conn is not None:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM benchmark;")
@@ -251,8 +257,10 @@ class BenchmarkLogger:
                 on="operation", index="task", values="io_profile"
             ).select(["task"] + ops_order)
 
-            time_df.write_csv(out_dir / "time.csv")
-            mem_df.write_csv(out_dir / "memory.csv")
-            io_df.write_csv(out_dir / "io.csv")
+            # ``str()``: polars takes ``str | Path | IO`` and ``UPath`` does not advertise
+            # ``__fspath__`` to type checkers; a local UPath stringifies to the same path.
+            time_df.write_csv(str(out_dir / "time.csv"))
+            mem_df.write_csv(str(out_dir / "memory.csv"))
+            io_df.write_csv(str(out_dir / "io.csv"))
         else:
             print("No benchmark data available.")

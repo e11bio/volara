@@ -147,6 +147,79 @@ def test_serialization_roundtrip():
     assert t2.task_name == t.task_name
 
 
+class MultiBlockTask(DummyTask):
+    """Four blocks, recording which ones were actually processed."""
+
+    label: str = "multi-block-task"
+
+    @property
+    def write_roi(self) -> Roi:
+        return Roi((0, 0), (20, 20))
+
+    @property
+    def write_size(self) -> Coordinate:
+        return Coordinate(10, 10)
+
+    @contextmanager
+    def process_block_func(self):
+        def process_block(block):
+            PROCESSED_BLOCKS.append(block.block_id)
+
+        yield process_block
+
+
+PROCESSED_BLOCKS: list = []
+
+
+def test_a_local_run_resumes_at_its_markers(tmp_path):
+    """A re-run must skip the blocks the first run finished.
+
+    This is the property every resumed pipeline rests on, and it runs through daisy
+    rather than calling ``check_block_func`` directly, so it covers the whole path:
+    ``block_ds`` as the store argument to ``prepare_ds``/``open_ds``, the chunk-existence
+    check behind ``check_function``, and the marker write.
+
+    daisy 2.0 keeps done markers of its own under ``<basedir>/<task_id>/``, which would
+    skip the second run by itself and hide a broken check. They are deleted in between so
+    that a skip here can only come from volara's ``blocks_done.zarr``.
+
+    pytest tests/test_blockwise_base.py::test_a_local_run_resumes_at_its_markers
+    """
+    import shutil
+
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    t = MultiBlockTask()
+
+    PROCESSED_BLOCKS.clear()
+    first = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert first.total_block_count == 4
+    assert first.skipped_count == 0
+    assert len(PROCESSED_BLOCKS) == 4
+
+    # daisy's own markers out of the way: only volara's block_ds can answer now
+    for path in (tmp_path / "logs").glob("*"):
+        if path.name.endswith("-meta"):
+            continue
+        shutil.rmtree(path) if path.is_dir() else path.unlink()
+
+    PROCESSED_BLOCKS.clear()
+    second = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert second.skipped_count == 4, (
+        "a re-run recomputed blocks the first run had already marked done; "
+        f"skipped {second.skipped_count} of {second.total_block_count}"
+    )
+    assert PROCESSED_BLOCKS == []
+
+    # and dropping the meta dir is what forces the full recompute
+    t.drop(drop_outputs=False)
+    PROCESSED_BLOCKS.clear()
+    third = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert third.skipped_count == 0
+    assert len(PROCESSED_BLOCKS) == 4
+
+
 def test_check_block_func(tmp_path):
     """mark_block_done then check_block should detect the block as done."""
     import daisy
