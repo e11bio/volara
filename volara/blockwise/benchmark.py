@@ -257,8 +257,10 @@ class BenchmarkLogger:
                 on="operation", index="task", values="io_profile"
             ).select(["task"] + ops_order)
 
-            time_df.write_csv(out_dir / "time.csv")
-            mem_df.write_csv(out_dir / "memory.csv")
-            io_df.write_csv(out_dir / "io.csv")
+            # ``str()``: polars takes ``str | Path | IO`` and ``UPath`` does not advertise
+            # ``__fspath__`` to type checkers; a local UPath stringifies to the same path.
+            time_df.write_csv(str(out_dir / "time.csv"))
+            mem_df.write_csv(str(out_dir / "memory.csv"))
+            io_df.write_csv(str(out_dir / "io.csv"))
         else:
             print("No benchmark data available.")
