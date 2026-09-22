@@ -108,6 +108,9 @@ def test_an_s3_basedir_survives_as_a_url():
 
     pytest tests/test_upath_basedir.py::test_an_s3_basedir_survives_as_a_url
     """
+    # ``UPath("s3://...")`` needs the s3 backend even for pure path algebra; it is an
+    # optional dependency, so this test skips (not fails) where it is absent.
+    pytest.importorskip("s3fs")
     set_log_basedir("s3://bucket/x")
 
     basedir = get_log_basedir()
@@ -126,6 +129,7 @@ def test_a_task_derives_its_meta_dir_inside_the_bucket():
 
     pytest tests/test_upath_basedir.py::test_a_task_derives_its_meta_dir_inside_the_bucket
     """
+    pytest.importorskip("s3fs")
     set_log_basedir("s3://bucket/x")
     task = DummyTask()
 
@@ -273,4 +277,4 @@ def test_none_is_still_not_a_log_basedir():
     pytest tests/test_upath_basedir.py::test_none_is_still_not_a_log_basedir
     """
     with pytest.raises(TypeError):
-        set_log_basedir(None)  # type: ignore[arg-type]
+        set_log_basedir(None)  # type: ignore[invalid-argument-type]

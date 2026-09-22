@@ -2,6 +2,7 @@ import functools
 import itertools
 import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Annotated, Literal
 
 import daisy
@@ -10,7 +11,6 @@ import networkx as nx
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
-from upath import UPath
 
 from volara.lut import LUT, LUTS
 from volara.segment_utils import replace_values
@@ -300,7 +300,9 @@ class IterativeGraphMWS(BlockwiseTask):
         out_rag_provider = self.segments_db.open("w")
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            tmp_path = UPath(tmpdirname)
+            # A plain ``Path``: a tempdir is local by construction, and ``LUT.path``
+            # is declared ``Path | str``.
+            tmp_path = Path(tmpdirname)
 
             def process_block(block: daisy.Block):
                 # mutex watershed inside write roi only to get super fragments
@@ -589,7 +591,9 @@ class GraphMWSExtractFragments(BlockwiseTask):
         out_rag_provider = self.segments_db.open("w")
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            tmp_path = UPath(tmpdirname)
+            # A plain ``Path``: a tempdir is local by construction, and ``LUT.path``
+            # is declared ``Path | str``.
+            tmp_path = Path(tmpdirname)
 
             def process_block(block: daisy.Block):
                 # mutex watershed inside write roi only to get super fragments

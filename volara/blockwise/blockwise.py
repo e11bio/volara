@@ -475,7 +475,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
         benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
         benchmark_logger._init_db()
 
-        spoof_dir = UPath("volara_benchmark_logs/spoof")
+        # A plain ``Path``: ``spoof()`` feeds ``Dataset.spoof``, which symlinks, so the
+        # spoof dir is local by construction.
+        spoof_dir = Path("volara_benchmark_logs/spoof")
         debug_self = self.spoof(spoof_dir)
 
         try:

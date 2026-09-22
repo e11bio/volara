@@ -58,7 +58,12 @@ class BenchmarkLogger:
         if db_path is not None:
             if not db_path.parent.exists():
                 db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+            # sqlite is local-only; ``str()`` rather than ``os.fspath`` because ``UPath``
+            # does not advertise ``__fspath__`` to type checkers (a local UPath is a
+            # ``pathlib.Path`` at runtime, so the string is the same either way).
+            self.conn = sqlite3.connect(
+                str(db_path), timeout=30, check_same_thread=False
+            )
         else:
             self.conn = None
 
