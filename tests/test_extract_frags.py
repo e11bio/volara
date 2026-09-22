@@ -719,3 +719,27 @@ def test_seed_spacing_rules_are_mutually_exclusive(affs_2d, tmp_path):
     affs_path, _ = affs_2d
     with pytest.raises(ValueError, match="one or the other"):
         make_task(affs_path, tmp_path, min_seed_distance=10, adaptive_seed_spacing=1.5)
+
+
+# ---------------------------------------------------------------------------
+# absorb_small_cells
+# ---------------------------------------------------------------------------
+
+
+def test_absorb_small_cells_merges_into_largest_neighbor(affs_2d, tmp_path):
+    """The documented behavior, unchanged by the cycle fix: a small cell is
+    absorbed by its largest neighbor; ties break toward the greater id."""
+    cells = np.array(
+        [
+            [2, 2, 2, 2],
+            [2, 1, 1, 2],
+            [3, 3, 3, 3],
+            [3, 3, 3, 3],
+        ],
+        dtype=np.uint64,
+    )
+    task = make_task(affs_2d[0], tmp_path, remove_debris=3)
+    result = task.absorb_small_cells(cells)
+    # 1 (size 2) is small; its neighbors are 2 (size 6) and 3 (size 8) -> 3
+    assert set(np.unique(result[cells == 1]).tolist()) == {3}
+    assert np.array_equal(result[cells != 1], cells[cells != 1])
