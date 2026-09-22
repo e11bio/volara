@@ -200,8 +200,9 @@ def test_a_local_run_resumes_at_its_markers(tmp_path):
 
     # daisy's own markers out of the way: only volara's block_ds can answer now
     for path in (tmp_path / "logs").glob("*"):
-        if not path.name.endswith("-meta"):
-            shutil.rmtree(path)
+        if path.name.endswith("-meta"):
+            continue
+        shutil.rmtree(path) if path.is_dir() else path.unlink()
 
     PROCESSED_BLOCKS.clear()
     second = t.run_blockwise(multiprocessing=False)[t.task_name]

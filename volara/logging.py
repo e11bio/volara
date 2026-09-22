@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import daisy
 from upath import UPath
 
@@ -8,10 +10,13 @@ LOG_BASEDIR = UPath("./volara_logs")
 daisy.logging.set_log_basedir(str(LOG_BASEDIR))
 
 
-def set_log_basedir(path: UPath | str):
+def set_log_basedir(path: UPath | Path | str):
     """Set the base directory for logging (indivudal worker logs and detailed
     task summaries). ``None`` is not a valid log directory and raises
     ``TypeError``.
+
+    A local ``UPath`` subclasses ``pathlib.Path``, but not the reverse, so the
+    argument type has to name ``Path`` as well -- passing one is the common case.
 
     A remote URL (``s3://bucket/logs``) survives here: ``UPath`` keeps the
     protocol, where ``pathlib.Path`` would collapse ``s3://`` to the relative

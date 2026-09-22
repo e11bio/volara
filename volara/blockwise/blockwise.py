@@ -439,7 +439,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             task=self.task_name,
         )
 
-    def spoof(self, spoof_dir: UPath):
+    def spoof(self, spoof_dir: Path):
         """
         Whether or not to spoof the data inputs to this task.
         """
