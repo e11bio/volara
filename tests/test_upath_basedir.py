@@ -206,6 +206,29 @@ def test_the_worker_cli_accepts_a_remote_config_path():
     assert "not-a-real-task" in str(result.exception)
 
 
+def test_the_worker_cli_still_refuses_a_missing_local_config(tmp_path):
+    """Dropping click's ``exists=True`` must not soften the local failure.
+
+    The existence check moved from the option parser to the read. A worker pointed at a
+    config that is not there has to die saying so -- a worker that starts on an empty or
+    half-read config would take blocks and mark them done.
+
+    pytest tests/test_upath_basedir.py::test_the_worker_cli_still_refuses_a_missing_local_config
+    """
+    missing = tmp_path / "nowhere" / "config.json"
+
+    result = CliRunner().invoke(cli, ["blockwise-worker", "-c", str(missing)])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, FileNotFoundError), result.exception
+    assert str(missing) in str(result.exception)
+
+    # a directory is not a config either
+    result = CliRunner().invoke(cli, ["blockwise-worker", "-c", str(tmp_path)])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, IsADirectoryError), result.exception
+
+
 def test_a_local_basedir_is_still_an_ordinary_path(tmp_path):
     """Nothing moved for local runs: a local UPath *is* a ``pathlib.Path``.
 

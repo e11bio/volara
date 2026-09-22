@@ -83,7 +83,9 @@ class Pipeline:
 
         return combined_pipeline
 
-    def benchmark(self, multiprocessing: bool = True, out_dir: UPath | Path | None = None):
+    def benchmark(
+        self, multiprocessing: bool = True, out_dir: UPath | Path | None = None
+    ):
         """
         Run the pipeline in a benchmark mode, which will run each task
         in the pipeline and log the time taken for each task.
