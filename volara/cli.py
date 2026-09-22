@@ -18,15 +18,22 @@ def cli(log_level: str) -> None:
 
 @cli.command()
 @click.option(
-    "-c", "--config-file", required=True, type=click.Path(exists=True, dir_okay=False)
+    "-c",
+    "--config-file",
+    required=True,
+    # NOT ``click.Path(exists=True)``: that stats the value on the local filesystem, so a
+    # config written beside a remote basedir ("s3://bucket/logs/<task>-meta/config.json",
+    # which is exactly what ``Worker.get_command`` passes) is rejected as nonexistent
+    # before the worker starts. A missing file still fails loudly, at the read below.
+    type=str,
 )
-def blockwise_worker(config_file: UPath) -> None:
+def blockwise_worker(config_file: str) -> None:
     import json
 
     from volara.blockwise import BlockwiseTask, get_blockwise_tasks_type
 
-    config_file = UPath(config_file)
-    config_json = json.loads(config_file.open("r").read())
+    config_path = UPath(config_file)
+    config_json = json.loads(config_path.read_text())
 
     BlockwiseTasks = get_blockwise_tasks_type()
     config = BlockwiseTasks.validate_python(config_json)

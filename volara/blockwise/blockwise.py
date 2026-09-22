@@ -3,6 +3,7 @@ import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 import daisy
@@ -156,6 +157,20 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         return self.meta_dir / "blocks_done.zarr"
 
+    @property
+    def block_ds_store(self) -> UPath | str:
+        """
+        :attr:`block_ds` in the form zarr accepts as a store.
+
+        ``zarr.open`` takes a ``str``, a ``pathlib.Path`` or a ``Store``. A local
+        ``UPath`` *is* a ``pathlib.Path`` and goes through unchanged; a remote one is
+        neither (it does not even implement ``__fspath__``) and raises ``TypeError:
+        Unsupported type for store_like``, so it has to be handed over as its URL --
+        from which zarr builds an fsspec-backed store.
+        """
+        block_ds = self.block_ds
+        return block_ds if isinstance(block_ds, Path) else str(block_ds)
+
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
         A helper function to process a given roi without needing to start a
@@ -198,7 +213,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
 
         def check_block(block):
-            block_array = open_ds(self.block_ds, mode="r")
+            block_array = open_ds(self.block_ds_store, mode="r")
             zarr_arr = block_array._source_data
 
             coordinate = (
@@ -208,7 +223,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
             chunk_size = Coordinate(zarr_arr.chunks[-coordinate.dims :])
             chunk_index = coordinate // chunk_size
             chunk_key = "/".join(str(i) for i in chunk_index)
-            return (zarr_arr.store.root / "c" / chunk_key).exists()
+            # via the path rather than ``zarr_arr.store.root``: ``root`` exists only on
+            # zarr's ``LocalStore``, and the store for a remote basedir is an
+            # ``FsspecStore``. The two are the same location -- the store's root *is*
+            # ``block_ds``.
+            return (self.block_ds / "c" / chunk_key).exists()
 
         return check_block
 
@@ -222,7 +241,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             if not block.status == BlockStatus.FAILED:
                 # Unless the block is explicitly marked as failed, we assume
                 # successful processing if there was no error
-                block_array = open_ds(self.block_ds, mode="a")
+                block_array = open_ds(self.block_ds_store, mode="a")
                 write_roi = block.write_roi.intersect(block_array.roi)
                 write_roi.shape = block_array.voxel_size
                 block_array[write_roi] = np.full(
@@ -330,7 +349,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
         try:
             prepare_ds(
-                self.block_ds,
+                self.block_ds_store,
                 shape=(self.write_roi.shape + block_voxel_size - 1) / block_voxel_size,
                 offset=self.write_roi.offset,
                 voxel_size=block_voxel_size,
@@ -340,7 +359,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             )
         except PermissionError as e:
             # The dataset already exists but with different parameters.
-            existing_block_ds = open_ds(self.block_ds, mode="r")
+            existing_block_ds = open_ds(self.block_ds_store, mode="r")
             error_msg = (
                 f"Trying to overwrite existing {self.block_ds} array with incompatible data:\n"
                 f"Shape (existing): {existing_block_ds.shape} vs (new) {self.write_roi.shape / block_voxel_size}\n"

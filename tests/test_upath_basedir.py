@@ -16,15 +16,20 @@ The remote assertions are pure string/path algebra and the round-trip runs on fs
 in-memory filesystem, so nothing here touches the network.
 """
 
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
+import daisy
+import fsspec
 import pytest
+from click.testing import CliRunner
 from funlib.geometry import Coordinate, Roi
 from upath import UPath
 
 from volara.blockwise.blockwise import BlockwiseTask
+from volara.cli import cli
 from volara.logging import get_log_basedir, set_log_basedir
 from volara.workers import LocalWorker
 
@@ -73,6 +78,31 @@ def restore_basedir():
     set_log_basedir(previous)
 
 
+@pytest.fixture(autouse=True)
+def clean_memory_fs():
+    """``MemoryFileSystem``'s store is a CLASS attribute shared by every instance.
+
+    A test that leaves files behind (because it failed, or because a later assertion
+    never ran) would otherwise hand the next test a half-populated bucket and make the
+    failure look like it belongs there.
+    """
+    fs = fsspec.filesystem("memory")
+    fs.store.clear()
+    fs.pseudo_dirs[:] = [""]
+    yield
+    fs.store.clear()
+    fs.pseudo_dirs[:] = [""]
+
+
+def _one_block(task: BlockwiseTask) -> daisy.Block:
+    return daisy.Block(
+        total_roi=task.write_roi,
+        read_roi=task.write_roi,
+        write_roi=task.write_roi,
+        block_id=0,
+    )
+
+
 def test_an_s3_basedir_survives_as_a_url():
     """The whole point: ``s3://bucket/x``, not ``s3:/bucket/x``.
 
@@ -104,31 +134,76 @@ def test_a_task_derives_its_meta_dir_inside_the_bucket():
     assert str(task.block_ds) == "s3://bucket/x/dummy-task-meta/blocks_done.zarr"
 
 
-def test_a_remote_meta_dir_round_trips_write_and_drop():
-    """mkdir, write the worker config, and drop it again -- all off the local filesystem.
+def test_a_remote_meta_dir_round_trips_the_whole_task_lifecycle():
+    """Every meta-dir operation a real run performs, against a non-local filesystem.
 
     ``memory://`` is fsspec's in-memory filesystem: a real non-local UPath backend with
-    no network. This is what proves the writes go through the path's filesystem rather
-    than through ``open()`` and ``shutil.rmtree``, which only ever see local paths.
+    no network. Going through the *whole* lifecycle is the point -- a test that only
+    mkdirs, writes the config and drops exercises the three operations that already
+    worked and misses the two that did not (``init_block_array`` handing a remote
+    ``UPath`` to ``prepare_ds``, and ``check_block`` reading ``store.root``, which only
+    zarr's ``LocalStore`` has).
 
-    pytest tests/test_upath_basedir.py::test_a_remote_meta_dir_round_trips_write_and_drop
+    pytest tests/test_upath_basedir.py::test_a_remote_meta_dir_round_trips_the_whole_task_lifecycle
     """
     set_log_basedir("memory://volara-test-logs")
     task = DummyTask(worker_config=LocalWorker())
 
     assert str(task.meta_dir) == "memory://volara-test-logs/dummy-task-meta"
 
-    task.meta_dir.mkdir(parents=True, exist_ok=True)
-    assert task.meta_dir.exists()
+    # 1. the block-done store: built by prepare_ds, read back by open_ds
+    task.init_block_array()
+    assert task.block_ds.exists()
 
-    # the real config-write path: worker_func() serializes the task for the worker
+    # 2. the resume check: mark a block done, then see it as done
+    block = _one_block(task)
+    check_block = task.check_block_func()
+    mark_block_done = task.mark_block_done_func()
+    assert not check_block(block)
+    mark_block_done(block)
+    assert check_block(block), (
+        "a block marked done in the bucket does not read back as done, so every "
+        "resumed run would recompute every block"
+    )
+
+    # 3. the config a spawned worker reads: worker_func() writes it
     task.worker_func()
     assert task.config_file.exists()
     assert task.config_file.read_text().startswith("{")
 
+    # 4. --rerun
     task.drop(drop_outputs=False)
     assert not task.meta_dir.exists(), "drop() left the remote meta dir behind"
     assert not task.config_file.exists()
+    assert not task.block_ds.exists()
+
+
+def test_the_worker_cli_accepts_a_remote_config_path():
+    """``volara-cli blockwise-worker -c <url>`` is how the config reaches a worker.
+
+    The driver writes the config beside the basedir and passes ``str(config_path)`` to
+    the worker command, so with a remote basedir the CLI is handed a URL. A
+    ``click.Path(exists=True)`` gate stats that locally and kills the worker with a usage
+    error before volara is even imported.
+
+    pytest tests/test_upath_basedir.py::test_the_worker_cli_accepts_a_remote_config_path
+    """
+    config_file = UPath("memory://volara-test-logs/dummy-task-meta/config.json")
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    # valid JSON, not a task volara knows: enough to prove the file was READ, while
+    # stopping short of process_blocks(), which needs a daisy server.
+    config_file.write_text(json.dumps({"task_type": "not-a-real-task"}))
+
+    result = CliRunner().invoke(cli, ["blockwise-worker", "-c", str(config_file)])
+
+    assert result.exit_code != 0
+    assert "does not exist" not in result.output, (
+        "click rejected the remote config path on a local stat; no worker can ever read "
+        f"a config from a bucket -- {result.output.strip()!r}"
+    )
+    # got past the option gate and all the way into validating the file's contents
+    assert result.exception is not None
+    assert "not-a-real-task" in str(result.exception)
 
 
 def test_a_local_basedir_is_still_an_ordinary_path(tmp_path):
