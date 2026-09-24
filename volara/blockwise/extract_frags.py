@@ -599,12 +599,18 @@ class ExtractFrags(BlockwiseTask):
             dst += [b, a]
         src, dst = np.concatenate(src), np.concatenate(dst)
 
-        absorb = is_small[src] & (dst != 0)
+        # only absorb toward a strictly greater (size, id) key, so the
+        # absorption graph is acyclic and the pointer-jumping below converges
+        absorb = (
+            is_small[src]
+            & (dst != 0)
+            & ((sizes[dst] > sizes[src]) | ((sizes[dst] == sizes[src]) & (dst > src)))
+        )
         src, dst = src[absorb], dst[absorb]
         remap = np.arange(sizes.size, dtype=cells.dtype)
         if src.size:
-            # scatter in ascending neighbor size, so the largest one lands last
-            order = np.argsort(sizes[dst], kind="stable")
+            # scatter in ascending (neighbor size, id), so the greatest lands last
+            order = np.lexsort((dst, sizes[dst]))
             remap[src[order]] = dst[order]
             while True:  # a territory absorbed into one that was itself absorbed
                 collapsed = remap[remap]
