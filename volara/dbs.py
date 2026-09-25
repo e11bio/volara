@@ -225,6 +225,7 @@ class PostgreSQL(DB):
 
     db_type: Literal["postgresql"] = "postgresql"
     host: str = "localhost"
+    port: int | None = None
     name: str = "volara"
     user: str | None = None
     password: str | None = None
@@ -238,6 +239,7 @@ class PostgreSQL(DB):
 
         return PgSQLGraphDatabase(
             db_host=self.host,
+            db_port=self.port,
             db_name=self.name,
             db_user=self.user,
             db_password=self.password,
