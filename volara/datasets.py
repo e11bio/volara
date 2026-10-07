@@ -347,6 +347,44 @@ class Labels(Dataset):
         return {}
 
 
+class _CloudVolumeView:
+    """
+    Zero-based, numpy-like view of a CloudVolume.
+
+    CloudVolume indexes in absolute voxel coordinates; dask indexes from 0.
+    Doing the shift here (instead of via ``getitem=`` on ``da.from_array``)
+    lets dask use its default getter, which fuses slices into the read. That
+    keeps the task graph small and each read fetches exactly the requested ROI.
+    """
+
+    def __init__(self, vol: CloudVolume):
+        self.vol = vol
+        self.shape = tuple(int(s) for s in vol.shape)  # type: ignore[unresolved-attribute]
+        self.dtype = np.dtype(vol.dtype)  # type: ignore[unresolved-attribute]
+        self.ndim = len(self.shape)
+        # last dimension in CV is always channel and has no offset
+        self._offset = tuple(int(o) for o in vol.voxel_offset) + (0,)  # type: ignore[unresolved-attribute]
+
+    def __getitem__(self, index) -> np.ndarray:
+        if not isinstance(index, tuple):
+            index = (index,)
+        shifted = tuple(
+            slice(
+                (s.start or 0) + o,
+                (self.shape[i] if s.stop is None else s.stop) + o,
+                s.step,
+            )
+            if isinstance(s, slice)
+            else slice(s + o, s + o + 1)
+            for i, (s, o) in enumerate(zip(index, self._offset))
+        )
+        data = np.asarray(self.vol[shifted])
+        # CloudVolume always returns all dims; drop the ones indexed by an int
+        # so we behave like a numpy array.
+        squeeze = tuple(slice(None) if isinstance(s, slice) else 0 for s in index)
+        return data[squeeze]
+
+
 class CloudVolumeWrapper(Dataset):
     """
     Represents a volumetric dataset through Cloud Volume.
@@ -379,31 +417,17 @@ class CloudVolumeWrapper(Dataset):
             + ["channel"],  # last dimension in CV is always channel
         }
 
-        # da.from_array indexes from 0, but CloudVolume reads at absolute voxel
-        # coords; shift each spatial slice by voxel_offset so volumes with a
-        # non-zero offset are read at the correct location.
-        offset = tuple(int(o) for o in vol.voxel_offset)  # type: ignore[unresolved-attribute]
-
-        def getitem(a, index):
-            idx = tuple(
-                slice(
-                    (s.start or 0) + (offset[i] if i < len(offset) else 0),
-                    (s.stop if s.stop is not None else a.shape[i])
-                    + (offset[i] if i < len(offset) else 0),
-                    s.step,
-                )
-                if isinstance(s, slice)
-                else s + (offset[i] if i < len(offset) else 0)
-                for i, s in enumerate(index)
-            )
-            return a[idx]
-
-        chunks = tuple(int(c) for c in vol.chunk_size) + (int(vol.num_channels),)  # type: ignore[unresolved-attribute]
+        view = _CloudVolumeView(vol)
+        # Coarse dask grid (8x the storage chunks). Because the default getter
+        # fuses slices into the read, this only shrinks the task graph (e.g.
+        # ~20k keys instead of ~10M for FlyWire-sized volumes); it never causes
+        # over-reading. With one dask chunk per storage chunk, dask spent ~4s
+        # culling the graph on every read regardless of ROI size.
+        chunks = tuple(int(c) * 8 for c in vol.chunk_size) + (int(vol.num_channels),)  # type: ignore[unresolved-attribute]
         dask_arr = da.from_array(
-            vol,
+            view,
             chunks=chunks,
-            getitem=getitem,
-            meta=np.empty((0,) * len(vol.shape), dtype=vol.dtype),  # type: ignore[unresolved-attribute]
+            meta=np.empty((0,) * view.ndim, dtype=view.dtype),
         )
 
         return Array(
