@@ -49,6 +49,9 @@ def test_volara_set_log_basedir_reaches_the_daisy_context(tmp_path):
     basedir = tmp_path / "driver_basedir"
     set_log_basedir(basedir)
     assert get_log_basedir() == basedir
+    # a local basedir is a UPath, but UPath of a local path *is* a pathlib.Path -- that
+    # subclassing is what keeps every downstream consumer of this value working.
+    assert isinstance(get_log_basedir(), Path)
 
     # daisy stores the Path itself in the context object and stringifies it in to_env(),
     # so compare as paths here and as strings in the serialized test below.

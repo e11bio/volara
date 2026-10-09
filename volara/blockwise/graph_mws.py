@@ -300,6 +300,8 @@ class IterativeGraphMWS(BlockwiseTask):
         out_rag_provider = self.segments_db.open("w")
 
         with tempfile.TemporaryDirectory() as tmpdirname:
+            # A plain ``Path``: a tempdir is local by construction, and ``LUT.path``
+            # is declared ``Path | str``.
             tmp_path = Path(tmpdirname)
 
             def process_block(block: daisy.Block):
@@ -589,6 +591,8 @@ class GraphMWSExtractFragments(BlockwiseTask):
         out_rag_provider = self.segments_db.open("w")
 
         with tempfile.TemporaryDirectory() as tmpdirname:
+            # A plain ``Path``: a tempdir is local by construction, and ``LUT.path``
+            # is declared ``Path | str``.
             tmp_path = Path(tmpdirname)
 
             def process_block(block: daisy.Block):

@@ -34,6 +34,10 @@ dependencies = [
     "polars>=1.31.0",
     "cloudpickle>=3.0",
     "psutil>=7.0.0",
+    # paths are UPaths throughout so a remote basedir/store survives as a URL;
+    # pathlib.Path silently rewrites "s3://bucket/x" to the relative local path
+    # "s3:/bucket/x".
+    "universal-pathlib>=0.2",
     # not a direct dependency, but we have to specify
     # otherwise uv demands a --pre-release=allow flag
     "iohub>=0.3.0a5",

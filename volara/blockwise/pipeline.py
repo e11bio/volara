@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import daisy
 import networkx as nx
 from daisy.cl_monitor import CLMonitor
+from upath import UPath
 
 from .benchmark import BenchmarkLogger
 
@@ -82,7 +83,9 @@ class Pipeline:
 
         return combined_pipeline
 
-    def benchmark(self, multiprocessing: bool = True, out_dir: Path | None = None):
+    def benchmark(
+        self, multiprocessing: bool = True, out_dir: UPath | Path | None = None
+    ):
         """
         Run the pipeline in a benchmark mode, which will run each task
         in the pipeline and log the time taken for each task.
@@ -91,13 +94,13 @@ class Pipeline:
 
         log_basedir = get_log_basedir()
         set_log_basedir("volara_benchmark_logs")
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
+        benchmark_db_path = UPath("volara_benchmark_logs/benchmark.db")
         if benchmark_db_path.exists():
             benchmark_db_path.unlink()
         benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
         benchmark_logger._init_db()
 
-        tmp_path = Path("volara_benchmark_logs/spoof")
+        tmp_path = UPath("volara_benchmark_logs/spoof")
         spoof_graph = nx.relabel_nodes(
             self.task_graph,
             lambda x: x.spoof(tmp_path),
