@@ -178,3 +178,20 @@ def test_drop_reraises_real_failures(monkeypatch):
     monkeypatch.setattr(PostgreSQL, "open", fresh)
     db.drop()
     db.drop_edges()
+
+
+@pytest.mark.parametrize("port", [None, 5433])
+def test_postgresql_port_is_passed_to_provider(port, monkeypatch):
+    """``PostgreSQL.port`` reaches funlib's provider; ``None`` (the default) leaves
+    the choice to libpq, i.e. ``PGPORT`` or 5432. Needs no live Postgres."""
+    captured = {}
+
+    def provider(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("volara.dbs.PgSQLGraphDatabase", provider)
+    kwargs = {} if port is None else {"port": port}
+    db = PostgreSQL(node_attrs={"color": 3}, ndim=2, **kwargs)
+    db.open("r")
+    assert captured["db_port"] == port
+    assert PostgreSQL.model_validate_json(db.model_dump_json()).port == port
