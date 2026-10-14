@@ -574,7 +574,9 @@ class ExtractFrags(BlockwiseTask):
         Merge every territory below `remove_debris` into its largest neighbor, so
         the seam cannot isolate a fragment that the debris filter would delete.
         """
-        sizes = np.bincount(cells.reshape(-1))
+        # bincount wants a signed index array; numpy 2.0.0 refuses to cast uint64
+        # labels (the euclidean path's dtype) to it under the 'safe' rule
+        sizes = np.bincount(cells.reshape(-1).astype(np.intp, copy=False))
         is_small = sizes < self.remove_debris
         is_small[0] = False
         if not is_small.any():
