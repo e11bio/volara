@@ -471,3 +471,275 @@ def test_compute_fragments_does_not_mutate_affs(affs_2d, tmp_path):
     task.compute_fragments(affs_data, rng=np.random.default_rng(3))
 
     np.testing.assert_array_equal(affs_data, affs)
+
+
+# ---------------------------------------------------------------------------
+# adaptive seeding
+# ---------------------------------------------------------------------------
+
+
+def touching_objects_affs(radii=(6, 3), separation=8):
+    """Affinities over a big object plus two objects of different size whose
+    shared boundary has collapsed - the case adaptive seeding exists for."""
+    yy, xx = np.ogrid[:90, :90]
+
+    def disk(cy, cx, r):
+        return (yy - cy) ** 2 + (xx - cx) ** 2 < r * r
+
+    big = disk(22, 25, 15)
+    a = disk(65, 30, radii[0])
+    b = disk(65, 30 + separation, radii[1])
+    mask = big | a | b
+    affs = np.stack([mask.astype(np.float64) * 0.9 + 0.05] * 4)
+    return affs, big, a, b
+
+
+def test_boundary_mask_offsets_selects_which_channels_are_averaged(affs_2d, tmp_path):
+    """The mask follows `boundary_mask_offsets` and not the seeding rule, and a
+    thin object survives only when the long range offsets are left out."""
+    thin = np.zeros((40, 40), dtype=bool)
+    thin[20:23, 5:35] = True  # thinner than the 8-voxel offsets
+    affs = np.stack(
+        [
+            np.where(thin, 0.9, 0.05),
+            np.where(thin, 0.9, 0.05),
+            np.full(thin.shape, 0.05),
+            np.full(thin.shape, 0.05),
+        ]
+    )
+    affs_path = tmp_path / "test.zarr" / "lr_affs"
+    write_affs(affs_path, affs.astype(np.float32), [[1, 0], [0, 1], [8, 0], [0, 8]])
+
+    for kwargs in (dict(min_seed_distance=5), dict(min_seed_distance=5)):
+        assert (
+            make_task(affs_path, tmp_path, **kwargs).boundary_mask_offsets == "direct"
+        )
+
+        keeps = make_task(affs_path, tmp_path, **kwargs)
+        drops = make_task(affs_path, tmp_path, boundary_mask_offsets="all", **kwargs)
+        subset = make_task(affs_path, tmp_path, boundary_mask_offsets=[0, 1], **kwargs)
+
+        assert keeps.boundary_mask(affs)[thin].all()
+        assert not drops.boundary_mask(affs).any()
+        assert subset.boundary_mask(affs)[thin].all()
+
+    # no mask means no seed, so nothing forces a split anywhere in the thin object
+    for task, seeded in ((keeps, True), (drops, False)):
+        mask = task.boundary_mask(affs)
+        seeds = np.asarray(task.get_seeds(ndimage.distance_transform_edt(mask), 5))
+        seeds[~mask] = 0
+        assert bool((seeds[thin] > 0).any()) is seeded
+
+
+def test_boundary_mask_offsets_rejects_a_bad_selection(affs_2d, tmp_path):
+    """An out-of-range or empty selection would otherwise surface as an IndexError
+    or an all-False mask inside `compute_fragments`."""
+    affs_path, _ = affs_2d
+    for bad in ([0, 99], [], [-1]):
+        with pytest.raises(ValueError, match="at least one offset"):
+            make_task(affs_path, tmp_path, boundary_mask_offsets=bad)
+
+
+def adaptive_task(affs_path, tmp_path, ratio):
+    """A 2D task with a real context - the spacing cap is derived from it, so a
+    zero context would collapse every spacing onto the noise floor."""
+    return ExtractFrags(
+        db=SQLite(path=tmp_path / "test.zarr" / "unit_db.sqlite", ndim=2),
+        affs_data=Affs(store=affs_path),
+        frags_data=Labels(store=tmp_path / "test.zarr" / "unit_frags"),
+        block_size=Coordinate(60, 60),
+        context=Coordinate(30, 30),
+        bias=[-0.5, -0.5],
+        adaptive_seed_spacing=ratio,
+    )
+
+
+def thin_and_thick():
+    """A 3-voxel-wide bar beside a 25-voxel-wide blob, as a boundary distance."""
+    mask = np.zeros((60, 60), dtype=bool)
+    thin = np.zeros_like(mask)
+    thin[8:11, 5:55] = True
+    thick = np.zeros_like(mask)
+    thick[25:50, 15:45] = True
+    mask = thin | thick
+    return ndimage.distance_transform_edt(mask), thin, thick
+
+
+def test_adaptive_spacing_is_dense_in_thin_and_sparse_in_thick(affs_2d, tmp_path):
+    """The whole point: one rule that seeds a thin process densely and a thick
+    object sparsely, which a single footprint cannot do."""
+    affs_path, _ = affs_2d
+    dt, thin, thick = thin_and_thick()
+    seeds = adaptive_task(affs_path, tmp_path, 1.5).get_adaptive_seeds(
+        dt, Coordinate(1, 1)
+    )
+    density = lambda m: (seeds[m] > 0).sum() / m.sum()
+    assert density(thin) > density(thick), (density(thin), density(thick))
+
+
+def test_adaptive_spacing_ratio_is_the_density_knob(affs_2d, tmp_path):
+    """Lower ratio -> finer everywhere. This is the tuning knob in adaptive mode."""
+    affs_path, _ = affs_2d
+    dt, _, _ = thin_and_thick()
+    counts = [
+        int(
+            (
+                adaptive_task(affs_path, tmp_path, r).get_adaptive_seeds(
+                    dt, Coordinate(1, 1)
+                )
+                > 0
+            ).sum()
+        )
+        for r in (1.0, 2.0, 4.0)
+    ]
+    assert counts[0] > counts[1] > counts[2], counts
+
+
+def test_adaptive_spacing_seeds_a_process_along_its_length(affs_2d, tmp_path):
+    """Candidates are ridge *voxels*, not one per connected component - along a
+    smooth process the distance is flat, so a component would give one seed at
+    any length."""
+    affs_path, _ = affs_2d
+    counts = []
+    for length in (20, 120):
+        mask = np.zeros((20, length + 10), dtype=bool)
+        mask[8:11, 5 : 5 + length] = True
+        seeds = adaptive_task(affs_path, tmp_path, 1.0).get_adaptive_seeds(
+            ndimage.distance_transform_edt(mask), Coordinate(1, 1)
+        )
+        counts.append(int((seeds > 0).sum()))
+    assert counts[1] > 3 * counts[0], counts
+
+
+def test_adaptive_spacing_does_not_seed_below_resolution(affs_2d, tmp_path):
+    """A structure thinner than a voxel gets no seed at all.
+
+    Its boundary distance is a single voxel's worth and carries no thickness
+    information, so clipping the spacing to the noise floor would pack seeds a
+    few voxels apart down the wisp. Harmless while the affinities merged back
+    across them, but `voronoi` enforces the seams, so the wisp shattered into
+    fragments that `remove_debris` deleted - a gap where an object had been.
+    """
+    affs_path, _ = affs_2d
+    task = adaptive_task(affs_path, tmp_path, 1.5)
+
+    wisp = np.zeros((40, 60), dtype=bool)
+    wisp[20, 5:55] = True  # one voxel thick
+    seeds = task.get_adaptive_seeds(
+        ndimage.distance_transform_edt(wisp), Coordinate(1, 1)
+    )
+    assert (seeds > 0).sum() == 0, int((seeds > 0).sum())
+
+    # a resolvable process next to it must still be seeded along its length
+    thick = np.zeros((40, 60), dtype=bool)
+    thick[18:23, 5:55] = True
+    seeds = task.get_adaptive_seeds(
+        ndimage.distance_transform_edt(thick), Coordinate(1, 1)
+    )
+    assert (seeds > 0).sum() > 3, int((seeds > 0).sum())
+
+
+def test_seeding_treats_the_volume_face_like_a_block_edge(affs_2d, tmp_path):
+    """A read past the volume face is zero-filled, so the face reads as an
+    object boundary: the distance transform distorts against it and the seeding
+    (and the seam flood) misplace against the face rather than against tissue.
+    With the mask continued across the clipped band, a process that truly
+    continues past the face is seeded exactly as if the tissue were present."""
+    affs_path, _ = affs_2d
+    task = adaptive_task(affs_path, tmp_path, 1.5)
+
+    band = 10
+    mask = np.zeros((40, 80), dtype=bool)
+    mask[14:25, :] = True  # a process crossing the whole read, band included
+    clipped = mask.copy()
+    clipped[:, :band] = False  # what a zero-filled read looks like
+
+    fixed = task._continue_past_clipped_faces(
+        clipped.copy(), (Coordinate(0, band), Coordinate(0, 0))
+    )
+    assert (fixed == mask).all()
+
+    def seeds(m):
+        return task.get_adaptive_seeds(
+            ndimage.distance_transform_edt(m), Coordinate(1, 1)
+        )
+
+    # continuation restores ground-truth seeding; the zero-fill does not
+    assert (seeds(fixed) == seeds(mask)).all()
+    assert (seeds(clipped) != seeds(mask)).any()
+
+
+def test_geodesic_flood_splits_a_flat_ridge_at_the_midpoint(affs_2d, tmp_path):
+    """Along a smooth process the boundary distance is axially flat, so the
+    flood has no preference and plain watershed breaks the tie by queue order:
+    the first seed's front races the whole corridor and claims a medial tendril
+    through the other's territory. The compactness tie-break settles it at the
+    geodesic midpoint instead."""
+    affs_path, _ = affs_2d
+    task = make_task(affs_path, tmp_path, voronoi="geodesic")
+
+    mask = np.zeros((20, 60), dtype=bool)
+    mask[8:13, 2:58] = True  # a smooth process: flat ridge along axis 1
+    bd = ndimage.distance_transform_edt(mask)
+    seeds = np.zeros_like(mask, dtype=np.uint64)
+    seeds[10, 5] = 1
+    seeds[10, 54] = 2
+
+    cells = task.seed_cells(seeds, bd, mask, Coordinate(1, 1))
+    ridge = cells[10, 2:58]
+    split = int(np.argmax(ridge == 2)) + 2  # first column owned by seed 2
+    assert abs(split - 30) <= 3, split
+    # and no tendril: each territory is one solid block of columns
+    assert (ridge[: split - 2] == 1).all() and (ridge[split - 2 :] == 2).all()
+
+
+def test_min_extent_removes_single_section_plates(affs_2d, tmp_path):
+    """Low-certainty pockets come out of mws as stacks of fragments one section
+    thick - confident in plane, so `filter_fragments` never sees them (the
+    direct-offset average stays high). `min_extent` is the resolution statement
+    that removes them: a fragment one voxel thick along an axis cannot
+    represent a real structure."""
+    affs_path, _ = affs_2d
+    task = make_task(affs_path, tmp_path, min_extent=Coordinate(2, 1))
+
+    frags = np.zeros((10, 12), dtype=np.uint64)
+    frags[4, 2:10] = 7  # a plate: one section along axis 0, long along axis 1
+    frags[6:9, 2:5] = 9  # genuine extent in both axes
+    out = task.filter_min_extent(frags.copy())
+    assert (out[frags == 7] == 0).all()
+    assert (out[frags == 9] == 9).all()
+
+    # one value per axis, validated
+    with pytest.raises(ValueError, match="one value per axis"):
+        make_task(affs_path, tmp_path, min_extent=Coordinate(2, 1, 1))
+
+
+def test_seed_spacing_rules_are_mutually_exclusive(affs_2d, tmp_path):
+    """They answer the same question, so the more restrictive one would just win."""
+    affs_path, _ = affs_2d
+    with pytest.raises(ValueError, match="one or the other"):
+        make_task(affs_path, tmp_path, min_seed_distance=10, adaptive_seed_spacing=1.5)
+
+
+# ---------------------------------------------------------------------------
+# absorb_small_cells
+# ---------------------------------------------------------------------------
+
+
+def test_absorb_small_cells_merges_into_largest_neighbor(affs_2d, tmp_path):
+    """The documented behavior, unchanged by the cycle fix: a small cell is
+    absorbed by its largest neighbor; ties break toward the greater id."""
+    cells = np.array(
+        [
+            [2, 2, 2, 2],
+            [2, 1, 1, 2],
+            [3, 3, 3, 3],
+            [3, 3, 3, 3],
+        ],
+        dtype=np.uint64,
+    )
+    task = make_task(affs_2d[0], tmp_path, remove_debris=3)
+    result = task.absorb_small_cells(cells)
+    # 1 (size 2) is small; its neighbors are 2 (size 6) and 3 (size 8) -> 3
+    assert set(np.unique(result[cells == 1]).tolist()) == {3}
+    assert np.array_equal(result[cells != 1], cells[cells != 1])
