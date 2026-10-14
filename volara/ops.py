@@ -44,16 +44,13 @@ class SelectChannels(DatasetOp):
         if isinstance(chans, list):
             for c in chans:
                 if isinstance(c, list):
-                    arr.lazy_op(_take(c))
+                    # a native slice, not a callable: funlib marks the array
+                    # unwriteable as soon as a custom callable lazy op is applied
+                    arr.lazy_op(np.s_[c,])
                 else:
                     arr.lazy_op(np.s_[c])
         else:
             arr.lazy_op(np.s_[chans])
-
-
-def _take(indices: list[int]):
-    """Bind ``indices`` at construction, so each op in the loop holds its own."""
-    return lambda d: d[indices]
 
 
 class ReverseAxes(DatasetOp):
