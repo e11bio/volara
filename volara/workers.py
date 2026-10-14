@@ -107,12 +107,14 @@ class SlurmWorker(Worker):
         does not is any tie between the job and its client. A worker is now an
         independent slurm job, and MEASURED on a real cluster, neither ``SIGTERM`` nor
         ``SIGKILL`` of the ``sbatch --wait`` client ends it -- only ``scancel`` does.
-        So a driver that dies abnormally leaves its workers running until the
-        partition's walltime, and there is no knob here to bound that: ``flags`` is not
-        threaded through :meth:`SlurmWorker.get_command`, so a configured worker cannot
-        yet request ``--time``. On a partition with ``DefaultTime=NONE`` /
-        ``MaxTime=UNLIMITED`` -- the ones measured here -- an escaped worker runs
-        forever, and must be reaped with ``scancel``.
+        What bounds an escaped worker is daisy itself: the server/worker connection
+        runs TCP keepalive, so a worker whose driver has vanished sees a connection
+        error within about two minutes of its next socket read, and the per-block
+        watchdog caps the read in between. An orphaned worker therefore lives for
+        roughly ``block_timeout`` plus keepalive detection, not until the
+        partition's walltime. ``flags`` is still not threaded through
+        :meth:`SlurmWorker.get_command`, so a configured worker cannot yet request
+        ``--time`` as a second line of defence.
 
         Args:
             command (list[str]): The worker command to run inside the slurm job.

@@ -10,20 +10,12 @@ map return on both the serial and multiprocessing paths so a caller can see
 """
 
 import numpy as np
-import pytest
+from daisy import TaskState
+from funlib.geometry import Coordinate
+from funlib.persistence.arrays import prepare_ds
 
-# daisy v2 is a Rust extension (not buildable/installed in every env). Skip this whole
-# module unless the v2 surface is importable -- `daisy.v2` exists only on v2, so it's a
-# clean v2-only sentinel. Runtime validation of these assertions is deferred to a
-# v2-built CI environment.
-pytest.importorskip("daisy.v2")
-
-from daisy import TaskState  # noqa: E402  (after importorskip guard)
-from funlib.geometry import Coordinate  # noqa: E402
-from funlib.persistence.arrays import prepare_ds  # noqa: E402
-
-from volara.blockwise.lambda_task import LambdaTask  # noqa: E402
-from volara.datasets import Labels, Raw  # noqa: E402
+from volara.blockwise.lambda_task import LambdaTask
+from volara.datasets import Labels, Raw
 
 
 def _write_raw(path, data):

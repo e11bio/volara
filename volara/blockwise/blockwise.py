@@ -154,7 +154,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         return self.meta_dir / "config.json"
 
-
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
         A helper function to process a given roi without needing to start a
@@ -201,13 +200,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             def run_worker():
                 cmd = worker_config.get_command(config_file, self.task_name)
-                # daisy v2 runs this spawn function in a THREAD and expects it to
-                # BLOCK for the worker's lifetime -- a spawn fn that returns early
-                # is treated as a dead worker and respawned (up to
-                # max_worker_restarts). get_command therefore builds a blocking
-                # submission on every backend (local child process, sbatch --wait,
-                # bsub -K); a fire-and-forget submit (bare sbatch/bsub) would trip
-                # the v2 respawn loop and leak the real cluster job.
+                # daisy v2 cloudpickles this spawn function into a worker
+                # subprocess and expects it to BLOCK for the worker's lifetime --
+                # a spawn fn that returns early is treated as a dead worker and
+                # respawned (up to max_worker_restarts). get_command therefore
+                # builds a blocking submission on every backend (local child
+                # process, sbatch --wait, bsub -K); a fire-and-forget submit (bare
+                # sbatch/bsub) would trip the v2 respawn loop and leak the real
+                # cluster job.
                 return subprocess.run(cmd)
 
             return run_worker
@@ -396,11 +396,12 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Execute this task blockwise.
 
         Returns daisy's ``{task_id: TaskState}`` map for BOTH the multiprocessing and serial
-        paths. Previously the multiprocessing path went through ``daisy.run_blockwise``, which
-        collapses the states to a bool and, worse, reports ``True`` even when blocks failed
-        (``TaskState.is_done()`` counts failed/orphaned blocks as "done"). Returning the states
-        lets callers inspect ``failed_count`` / ``orphaned_count`` / ``is_done()`` and react to
-        an incomplete run instead of silently accepting a partial output.
+        paths. Before volara 2.0 the multiprocessing path returned ``daisy.run_blockwise``'s
+        collapsed bool, which under daisy 1.x reported ``True`` even when blocks failed.
+        Returning the states lets callers inspect ``failed_count`` / ``orphaned_count`` /
+        ``is_done()`` and react to an incomplete run instead of silently accepting a partial
+        output. Note that a non-empty dict is always truthy: ``if not task.run_blockwise()``
+        no longer detects failure; check ``states[task.task_name].failed_count`` instead.
         """
         with self.task(multiprocessing=multiprocessing) as task:
             tasks = [task]

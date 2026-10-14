@@ -100,7 +100,7 @@ def test_pipeline_drop_outputs_false(zarr_2d, tmp_path):
 
     for task in (task1, task2):
         task.init()
-        task.init_block_array()
+        task.meta_dir.mkdir(parents=True, exist_ok=True)
     assert mask1_path.exists()
     assert mask2_path.exists()
 
