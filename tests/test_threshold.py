@@ -36,10 +36,9 @@ def test_threshold_drop_outputs_false_keeps_output(zarr_2d, tmp_path):
         threshold=0.5,
         block_size=Coordinate(10, 10),
     )
-    task.init()
-    task.init_block_array()
+    task.run_blockwise(multiprocessing=False)
     assert mask_path.exists()
-    assert task.block_ds.exists()
+    assert (task.meta_dir / "blocks_done").exists()
 
     task.drop(drop_outputs=False)
     assert mask_path.exists(), "drop_outputs=False must not delete the output"

@@ -80,6 +80,14 @@ class GraphMWS(BlockwiseTask):
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
+    block_timeout: float = 24 * 60 * 60
+    """
+    This task agglomerates the ENTIRE graph in one global block, which on large
+    datasets legitimately runs for hours -- daisy's default per-block timeout
+    (600s) would reclaim and retry it mid-run. 24h keeps a genuinely hung run
+    bounded without tripping on real workloads. Override with a smaller value
+    for small graphs if you want faster reclaim of a stuck run.
+    """
 
     @property
     def task_name(self) -> str:

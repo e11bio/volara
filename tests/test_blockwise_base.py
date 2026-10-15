@@ -107,13 +107,19 @@ def test_drop_outputs_false_skips_drop_artifacts(tmp_path):
     assert DROP_ARTIFACTS_CALLS == []
 
 
-def test_init_block_array(tmp_path):
+def test_run_creates_meta_dir_and_tracking_store(tmp_path):
+    """A run leaves daisy's block-tracking store under the task's meta dir."""
     from volara.logging import set_log_basedir
 
     set_log_basedir(tmp_path / "logs")
     t = DummyTask()
-    t.init_block_array()
-    assert t.block_ds.exists()
+    assert not t.meta_dir.exists()
+
+    state = t.run_blockwise(multiprocessing=False)[t.task_name]
+
+    assert state.completed_count == 1
+    assert state.failed_count == 0
+    assert (t.meta_dir / "blocks_done").exists()
 
 
 def test_pipeline_add_operator():
@@ -147,26 +153,43 @@ def test_serialization_roundtrip():
     assert t2.task_name == t.task_name
 
 
-def test_check_block_func(tmp_path):
-    """mark_block_done then check_block should detect the block as done."""
-    import daisy
+PROCESSED_BLOCKS: list[int] = []
 
+
+class CountingTask(DummyTask):
+    """DummyTask that records every block it processes."""
+
+    @contextmanager
+    def process_block_func(self):
+        def process_block(block):
+            PROCESSED_BLOCKS.append(block.block_id)
+
+        yield process_block
+
+
+def test_second_run_skips_blocks_already_done(tmp_path):
+    """Resuming a finished task reruns nothing; drop() makes it rerun everything.
+
+    This is the contract volara's own ``blocks_done.zarr`` used to provide and
+    daisy's built-in tracking (``Task(tracking_path=...)``) now does. daisy
+    counts a skipped block as completed, so the process function's call count
+    is what distinguishes the two.
+    """
     from volara.logging import set_log_basedir
 
     set_log_basedir(tmp_path / "logs")
-    t = DummyTask()
-    t.init_block_array()
+    PROCESSED_BLOCKS.clear()
+    t = CountingTask()
 
-    block = daisy.Block(
-        total_roi=Roi((0, 0), (10, 10)),
-        read_roi=Roi((0, 0), (10, 10)),
-        write_roi=Roi((0, 0), (10, 10)),
-        block_id=0,
-    )
+    first = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert first.skipped_count == 0
+    assert len(PROCESSED_BLOCKS) == 1
 
-    check_block = t.check_block_func()
-    mark_done = t.mark_block_done_func()
+    second = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert second.skipped_count == 1
+    assert len(PROCESSED_BLOCKS) == 1, "a done block was processed again"
 
-    assert not check_block(block)
-    mark_done(block)
-    assert check_block(block)
+    t.drop()
+    third = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert third.skipped_count == 0
+    assert len(PROCESSED_BLOCKS) == 2

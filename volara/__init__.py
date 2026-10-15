@@ -10,5 +10,5 @@ def __getattr__(name: str):
         return module
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-__version__ = "1.0.5"
+__version__ = "1.1.0"
 __version_info__ = tuple(int(i) for i in __version__.split("."))

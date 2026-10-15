@@ -23,6 +23,12 @@ Datasets
 .. automodule:: volara.datasets
     :members:
 
+Dataset Operations
+==================
+
+.. automodule:: volara.ops
+    :members:
+
 Blockwise Tasks
 ===============
 
