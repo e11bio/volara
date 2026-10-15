@@ -38,6 +38,9 @@ dependencies = [
     "polars>=1.31.0",
     "cloudpickle>=3.0",
     "psutil>=7.0.0",
+    # every path field is a upath.UPath; local ones are pathlib.Paths, remote ones
+    # carry their fsspec filesystem. >=0.3: remote classes are no longer Path subclasses.
+    "universal-pathlib>=0.3",
     # not a direct dependency, but we have to specify
     # otherwise uv demands a --pre-release=allow flag
     "iohub>=0.3.0a5",

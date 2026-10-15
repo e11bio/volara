@@ -6,15 +6,12 @@ from volara.lut import LUT, LUTS
 
 
 @pytest.fixture
-def fake_s3(monkeypatch):
-    """
-    Back `LUT._s3fs` with an in-memory fsspec filesystem so that s3 code
-    paths can be exercised without a bucket.
-    """
+def memory_fs():
+    """A clean in-memory fsspec filesystem: `memory://...` paths exercise every
+    remote code path without a bucket."""
     fs = fsspec.filesystem("memory")
     fs.store.clear()
     fs.pseudo_dirs.clear()
-    monkeypatch.setattr(LUT, "_s3fs", lambda self: fs)
     yield fs
     fs.store.clear()
     fs.pseudo_dirs.clear()
@@ -76,15 +73,16 @@ def test_luts_load(tmp_path):
 def test_lut_uri_local(tmp_path):
     """`uri` is the normalized local path for non-s3 luts."""
     lut = LUT(path=str(tmp_path / "local"))
-    assert not lut.is_s3
     assert lut.uri == str(tmp_path / "local.npz")
     assert lut.name == "local"
 
 
-def test_lut_s3_save_load(fake_s3):
-    lut = LUT(path="s3://bucket/path/to/data.zarr/lut.npz")
-    assert lut.is_s3
-    assert lut.uri == "s3://bucket/path/to/data.zarr/lut.npz"
+def test_lut_remote_save_load(memory_fs):
+    from pathlib import Path
+
+    lut = LUT(path="memory://bucket/path/to/data.zarr/lut.npz")
+    assert not isinstance(lut.file, Path)  # a remote UPath, no local counterpart
+    assert lut.uri == "memory://bucket/path/to/data.zarr/lut.npz"
     assert lut.name == "lut"
     assert not lut.exists()
     assert lut.load() is None
@@ -92,26 +90,27 @@ def test_lut_s3_save_load(fake_s3):
     data = np.array([[1, 2, 3], [10, 20, 30]])
     lut.save(data)
     assert lut.exists()
+    assert memory_fs.exists("/bucket/path/to/data.zarr/lut.npz")
     np.testing.assert_array_equal(lut.load(), data)
 
 
-def test_lut_s3_save_load_with_edges(fake_s3):
-    lut = LUT(path="s3://bucket/lut.npz")
+def test_lut_remote_save_load_with_edges(memory_fs):
+    lut = LUT(path="memory://bucket/lut.npz")
     data = np.array([[1, 2], [10, 20]])
-    edges = np.array([[1, 2, 0.5]])
+    edges = np.array([[1, 2]])
     lut.save(data, edges=edges)
     np.testing.assert_array_equal(lut.load(), data)
 
 
-def test_lut_s3_extension_appended(fake_s3):
-    lut = LUT(path="s3://bucket/path/to/data.zarr/lut")
-    assert lut.uri == "s3://bucket/path/to/data.zarr/lut.npz"
+def test_lut_remote_extension_appended(memory_fs):
+    lut = LUT(path="memory://bucket/path/to/data.zarr/lut")
+    assert lut.uri == "memory://bucket/path/to/data.zarr/lut.npz"
     lut.save(np.array([[1], [2]]))
-    assert fake_s3.exists("s3://bucket/path/to/data.zarr/lut.npz")
+    assert memory_fs.exists("/bucket/path/to/data.zarr/lut.npz")
 
 
-def test_lut_s3_drop(fake_s3):
-    lut = LUT(path="s3://bucket/lut.npz")
+def test_lut_remote_drop(memory_fs):
+    lut = LUT(path="memory://bucket/lut.npz")
     lut.save(np.array([[1], [2]]))
     assert lut.exists()
     lut.drop()
@@ -120,17 +119,10 @@ def test_lut_s3_drop(fake_s3):
     lut.drop()
 
 
-def test_lut_s3_file_raises(fake_s3):
-    """s3 luts have no local path."""
-    lut = LUT(path="s3://bucket/lut.npz")
-    with pytest.raises(ValueError, match="no local path"):
-        lut.file
-
-
-def test_luts_mixed_local_and_s3(tmp_path, fake_s3):
-    """Local and s3 luts can be combined."""
+def test_luts_mixed_local_and_remote(tmp_path, memory_fs):
+    """Local and remote luts can be combined."""
     local = LUT(path=tmp_path / "a.npz")
-    remote = LUT(path="s3://bucket/b.npz")
+    remote = LUT(path="memory://bucket/b.npz")
     local.save(np.array([[1, 2], [10, 20]]))
     remote.save(np.array([[10, 20], [100, 200]]))
 
@@ -139,6 +131,28 @@ def test_luts_mixed_local_and_s3(tmp_path, fake_s3):
     iterated = luts.load_iterated()
     np.testing.assert_array_equal(iterated[0], [1, 2])
     np.testing.assert_array_equal(iterated[1], [100, 200])
+
+
+def test_lut_config_round_trips_as_the_string_it_was_given(tmp_path):
+    """`path` serialises as a plain string, so saved configs are unchanged, and
+    `s3_kwargs` is still accepted as the former name of `storage_options`."""
+    for given in (
+        "s3://bucket/lut.npz",
+        str(tmp_path / "lut.npz"),
+        tmp_path / "lut.npz",
+    ):
+        lut = LUT(path=given)
+        assert lut.model_dump()["path"] == str(given)
+        assert LUT.model_validate_json(lut.model_dump_json()) == lut
+
+    assert LUT.model_json_schema()["properties"]["path"]["type"] == "string"
+
+    lut = LUT.model_validate(
+        {"path": "memory://bucket/lut.npz", "s3_kwargs": {"anon": True}}
+    )
+    assert lut.storage_options == {"anon": True}
+    assert lut.path.storage_options == {"anon": True}
+    assert "s3_kwargs" not in lut.model_dump()
 
 
 def test_luts_load_skips_missing(tmp_path):

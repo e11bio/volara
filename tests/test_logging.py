@@ -115,3 +115,94 @@ def test_a_worker_without_a_context_does_not_silently_guess(tmp_path, monkeypatc
     monkeypatch.delenv(daisy.Context.ENV_VARIABLE, raising=False)
     with pytest.raises(Exception):
         daisy.Context.from_env()
+
+
+# --- URL basedirs are coerced to ONE local directory -------------------------
+#
+# The basedir is the one path volara hands to daisy, and daisy (worker log
+# files, the mmap'd tracking store) is local-only. ``pathlib.Path("s3://b/x")``
+# is the relative directory ``s3:/b/x``, so a URL used to land in a directory
+# named ``s3:`` under whatever the launch directory was -- a different one for
+# a worker launched elsewhere. Now it maps, once and absolutely, under
+# ``get_remote_root()``, and that is what every worker sees.
+
+
+@pytest.fixture
+def remote_root(tmp_path):
+    from volara.logging import get_remote_root, set_remote_root
+
+    before = get_remote_root()
+    set_remote_root(tmp_path / "remote")
+    yield tmp_path / "remote"
+    set_remote_root(before)
+
+
+def test_a_local_basedir_is_used_as_given(tmp_path):
+    from volara.logging import local_path
+
+    assert local_path("logs") == Path("logs")  # relative stays relative
+    assert local_path(tmp_path / "logs") == tmp_path / "logs"
+    assert local_path(str(tmp_path)) == tmp_path
+    assert local_path(f"file://{tmp_path}/logs") == tmp_path / "logs"
+
+
+def test_a_url_basedir_maps_under_the_remote_root_and_warns_once(remote_root):
+    """pytest tests/test_logging.py::test_a_url_basedir_maps_under_the_remote_root_and_warns_once"""
+    import warnings
+
+    from volara.logging import local_path
+
+    with pytest.warns(UserWarning, match="s3://bucket/x.*mapped to"):
+        got = local_path("s3://bucket/x/")
+    assert got == (remote_root / "s3" / "bucket" / "x").resolve()
+    assert got.is_absolute()
+    assert "s3:" not in str(got)  # never the pathlib accident
+    with warnings.catch_warnings():  # the same URL again: same answer, silent
+        warnings.simplefilter("error")
+        assert local_path("s3://bucket/x/") == got
+    with pytest.warns(UserWarning):  # a query string is not a directory
+        assert local_path("s3://bucket/x?versionId=7") == got
+
+
+def test_a_remote_upath_maps_like_its_url(remote_root):
+    upath = pytest.importorskip("upath")
+    from volara.logging import local_path
+
+    with pytest.warns(UserWarning):
+        assert local_path(upath.UPath("memory://bucket/x")) == local_path(
+            "memory://bucket/x"
+        )
+    # a local UPath is a pathlib.Path and passes through untouched
+    assert local_path(upath.UPath(remote_root / "plain")) == remote_root / "plain"
+
+
+def test_none_is_still_not_a_log_basedir():
+    with pytest.raises(TypeError):
+        set_log_basedir(None)
+
+
+def test_a_url_basedir_reaches_every_worker_as_the_same_local_directory(
+    remote_root,
+):
+    """The coerced path, not the URL, is what daisy carries across the process
+    boundary -- so driver and spawned worker resolve one directory whatever
+    their CWD.
+
+    pytest tests/test_logging.py::test_a_url_basedir_reaches_every_worker_as_the_same_local_directory
+    """
+    with pytest.warns(UserWarning):
+        returned = set_log_basedir("s3://bucket/logs")
+    expected = (remote_root / "s3" / "bucket" / "logs").resolve()
+    assert returned == expected
+    assert get_log_basedir() == expected
+    assert isinstance(get_log_basedir(), Path)
+
+    env = dict(os.environ)
+    env[daisy.Context.ENV_VARIABLE] = _context().to_env()
+    child = subprocess.run(
+        [sys.executable, "-c", "import daisy, json;"
+         " print(json.dumps(daisy.Context.from_env()['logdir']))"],
+        capture_output=True, text=True, env=env, check=True,
+        cwd=remote_root.parent,  # a different launch directory than the driver's
+    )
+    assert json.loads(child.stdout.strip()) == str(expected)

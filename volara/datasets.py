@@ -2,14 +2,13 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from shutil import rmtree
 from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
 from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
-from pydantic import Field
+from pydantic import AliasChoices, Field, model_validator
 
 from .ops import (
     OmeNormalize,
@@ -19,6 +18,7 @@ from .ops import (
     StackWith,
     apply_op,
 )
+from .paths import PydanticUPath, is_local, rm, to_upath, zarr_store
 from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
 
 logging.basicConfig(level=logging.INFO)
@@ -32,7 +32,11 @@ class Dataset(StrictBaseModel, ABC):
     for all dataset types.
     """
 
-    store: Path | str
+    store: PydanticUPath
+    """
+    Where the array lives: a local path or a URL on any fsspec filesystem
+    (`s3://bucket/data.zarr/raw`). Serialised as that string.
+    """
 
     voxel_size: PydanticCoordinate | None = None
     offset: PydanticCoordinate | None = None
@@ -102,40 +106,30 @@ class Dataset(StrictBaseModel, ABC):
 
     zarr_kwargs: dict = Field(default_factory=dict)
 
-    s3_kwargs: dict | None = None
+    storage_options: dict | None = Field(
+        default=None, validation_alias=AliasChoices("storage_options", "s3_kwargs")
+    )
     """
-    Optional config for S3-compatible stores like Lyve Cloud
-    Leave as None for existing local / standard S3 behavior
+    fsspec filesystem options for a remote `store` (credentials, a custom
+    endpoint such as Lyve Cloud, ...). `None` uses the environment.
+    `s3_kwargs` is accepted as the former name.
     """
 
-    def _s3fs(self):
-        import s3fs  # type: ignore[unresolved-import]
+    @model_validator(mode="after")
+    def _apply_storage_options(self):
+        if self.storage_options:
+            self.store = to_upath(self.store, **self.storage_options)
+        return self
 
-        if self.s3_kwargs is None:
-            return s3fs.S3FileSystem()
-
-        return s3fs.S3FileSystem(**self.s3_kwargs)
+    @property
+    def is_local(self) -> bool:
+        return is_local(self.store)
 
     @property
     def prepared_store(self):
-        """
-        Return the actual object passed to prepare_ds/open_ds.
-
-        Existing behavior:
-        - Path -> Path
-        - normal s3:// string -> string
-
-        Custom S3 behavior:
-        - s3:// string + s3_kwargs -> fsspec mapper
-        """
-        if (
-            self.s3_kwargs is not None
-            and isinstance(self.store, str)
-            and self.store.startswith("s3://")
-        ):
-            return self._s3fs().get_mapper(self.store, check=False)
-
-        return self.store
+        """The object handed to prepare_ds/open_ds: the path itself when local,
+        an fsspec-backed zarr store (carrying `storage_options`) otherwise."""
+        return zarr_store(self.store)
 
     @property
     def name(self) -> str:
@@ -144,40 +138,17 @@ class Dataset(StrictBaseModel, ABC):
         path provided as the store. We use it to differentiate between
         multiple runs of the same blockwise task on different data.
         """
-        if isinstance(self.store, Path):
-            return self.store.name
-        else:
-            return self.store.rstrip("/").split("/")[-1]
+        return self.store.name
 
     def drop(self) -> None:
-        """Delete this dataset's store: a local path (``Path`` or ``str``) or ``s3://``."""
-        store = self.store
-        if isinstance(store, str) and store.startswith("s3://"):
-            fs = self._s3fs()
-            try:
-                fs.rm(store, recursive=True)
-            except FileNotFoundError:
-                pass
-            return
-        if isinstance(store, str):
-            if "://" in store:
-                # any other URL scheme would silently coerce to a Path that never
-                # exists -- a no-op drop that looks like success
-                raise ValueError(
-                    f"Not dropping dataset: store {store} is a URL this method "
-                    "cannot delete (only local paths and s3:// are supported)"
-                )
-            store = Path(store)  # a local path given as a str is still a local path
-        if not isinstance(store, Path):
-            raise ValueError(
-                f"Not dropping dataset: store {store} is not a Path or s3 path"
-            )
-        if store.exists():
-            rmtree(store)
+        """Delete this dataset's store wherever it lives; a missing store is a no-op."""
+        rm(self.store, recursive=True)
 
     def spoof(self, spoof_dir: Path):
-        if not isinstance(self.store, Path):
-            raise ValueError(f"Not spoofing dataset: store {self.store} is not a Path")
+        if not self.is_local:
+            raise ValueError(
+                f"Not spoofing dataset: store {self.store} is remote and spoofing symlinks"
+            )
 
         spoof_path = spoof_dir / f"spoof_{self.name}"
 
@@ -191,7 +162,9 @@ class Dataset(StrictBaseModel, ABC):
             """
             print("Symlinking", self.store)
             if not spoof_path.exists():
-                spoof_path.symlink_to(self.store.absolute(), target_is_directory=True)
+                spoof_path.symlink_to(
+                    Path(str(self.store)).absolute(), target_is_directory=True
+                )
         else:
             print("Spoofing", self.store)
 
@@ -307,7 +280,7 @@ class Raw(Dataset):
     """
 
     dataset_type: Literal["raw"] = "raw"
-    ome_norm: Path | str | None = None
+    ome_norm: PydanticUPath | None = None
     scale_shift: tuple[float, float] | None = None
     stack: "PydanticDataset | None" = None
 
@@ -316,7 +289,7 @@ class Raw(Dataset):
         """The windows `ome_norm` applies: one per channel the store carries."""
         if self.ome_norm is None:
             return None
-        array = open_ds(self.store, mode="r", **self.zarr_kwargs)
+        array = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
         return OmeNormalize(metadata=self.ome_norm).windows(array.data.shape[0])
 
     @property

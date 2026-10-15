@@ -13,12 +13,12 @@ which a cloudpickled callable does not expose.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
 from funlib.persistence import Array
 
+from .paths import PydanticUPath, zarr_store
 from .utils import StrictBaseModel
 
 
@@ -83,14 +83,14 @@ class OmeNormalize(DatasetOp):
     """Scale each channel into [0, 1] using OMERO window bounds. Needs the channel axis PRESENT."""
 
     op: Literal["ome_normalize"] = "ome_normalize"
-    metadata: Path | str
+    metadata: PydanticUPath
 
     @property
     def bounds(self) -> list[tuple[float, float]]:
         """Every ``(min, max)`` window the metadata lists, in its own channel order."""
         import zarr
 
-        metadata_group = zarr.open_group(str(self.metadata))
+        metadata_group = zarr.open_group(zarr_store(self.metadata), mode="r")
         omero: dict = metadata_group.attrs["omero"]  # type: ignore[assignment]
         channels_meta: list[dict] = omero["channels"]
         return [(c["window"]["min"], c["window"]["max"]) for c in channels_meta]
