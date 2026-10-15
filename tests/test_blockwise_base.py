@@ -254,7 +254,7 @@ def test_block_grid_shape_matches_daisy(tmp_path):
     set_log_basedir(tmp_path / "logs")
     for context in [(0, 0), (10, 10), (15, 5)]:
         t = MaskedTask(context=context)
-        assert t.block_grid_shape == (4, 1)
+        assert t.block_grid_shape == Coordinate(4, 1)
         with t.task(multiprocessing=False) as daisy_task:
             assert list(daisy_task.block_grid_shape) == [4, 1]
 

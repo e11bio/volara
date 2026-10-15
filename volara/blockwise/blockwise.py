@@ -153,7 +153,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return Roi((0,) * self.write_size.dims, self.write_size)
 
     @property
-    def block_grid_shape(self) -> tuple[int, ...]:
+    def block_grid_shape(self) -> Coordinate:
         """
         The number of blocks per axis: the shape a :attr:`skip_mask` must
         have. Computed from :attr:`write_roi` and :attr:`write_size` alone, so a
@@ -161,15 +161,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
         partial trailing block, ``overhang`` and ``shrink`` keep it, matching
         ``daisy.Task.block_grid_shape``.
         """
-        counts = []
-        for total, block in zip(self.write_roi.shape, self.write_size):
-            if block <= 0 or total <= 0:
-                counts.append(0)
-            elif self.fit == "valid":
-                counts.append(int(total // block))
-            else:
-                counts.append(int(-(-total // block)))
-        return tuple(counts)
+        shape = self.write_roi.shape
+        if self.fit == "valid":
+            return shape // self.write_size
+        return -(-shape // self.write_size)
 
     @property
     def meta_dir(self) -> Path:
