@@ -89,7 +89,27 @@ def zarr_store(path: UPath | Path):
     assert isinstance(path, UPath)
     from zarr.storage import FsspecStore
 
-    return FsspecStore.from_upath(path)
+    return FsspecStore(fs=_async_fs(path.fs), path=path.path.rstrip("/"))
+
+
+def _async_fs(fs):
+    """``fs`` in the asynchronous form zarr's ``FsspecStore`` requires.
+
+    A ``UPath`` hands back its filesystem in synchronous mode. An async-capable
+    filesystem (s3fs, gcsfs, ...) is re-created in async mode with the same
+    storage options; a genuinely synchronous one (memory, local, sftp, ...) is
+    wrapped. zarr >= 3.2 does this inside ``FsspecStore.from_upath``; this is
+    the same logic so that zarr 3.1 (the newest on Python 3.11) works too.
+    """
+    if getattr(fs, "async_impl", False):
+        if getattr(fs, "asynchronous", False):
+            return fs
+        return type(fs)(
+            *fs.storage_args, **{**fs.storage_options, "asynchronous": True}
+        )
+    from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
+
+    return AsyncFileSystemWrapper(fs, asynchronous=True)
 
 
 def rm(path: UPath | Path, recursive: bool = True) -> None:
