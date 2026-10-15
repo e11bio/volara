@@ -407,6 +407,36 @@ class Labels(Dataset):
         return {}
 
 
+class MaskDataset(Dataset):
+    """A per-block skip mask for a blockwise task.
+
+    Points to a zarr array in the task's *block-grid* space: one element per
+    block, not per voxel. Any nonzero value means "skip this block", zero means
+    "run it". The array must have one cell per block of the task
+    (:attr:`BlockwiseTask.block_grid_shape`), and cell ``(0, 0, ...)`` is the
+    first block of the task's ``write_roi`` whatever the context.
+
+    Handed to :attr:`BlockwiseTask.skip_mask`, it is passed straight to daisy as
+    ``Task(skip_mask=...)``: masked blocks are reported as skipped and release
+    their downstream dependencies, but are never recorded as done, so the mask
+    applies to the run it is passed to. A later run with a narrower mask (or
+    none) runs the blocks it no longer covers, while blocks that completed stay
+    done. This is the generic form of the surface-band skip: a thin predicted
+    surface only touches a few blocks, so the rest can be skipped up front.
+
+    Grid-space, not voxel-space: the inherited voxel-metadata fields are unused
+    and the array may have any integer or bool dtype; daisy casts it. Read it
+    like any other dataset, with :meth:`array`. How the mask is built is left to
+    the caller.
+    """
+
+    dataset_type: Literal["mask"] = "mask"
+
+    @property
+    def attrs(self):
+        return {}
+
+
 class _CloudVolumeView:
     """
     Zero-based, numpy-like view of a CloudVolume.

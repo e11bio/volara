@@ -8,7 +8,7 @@ from funlib.geometry import Coordinate
 from funlib.persistence import prepare_ds
 from pydantic import ValidationError
 
-from volara.datasets import LSD, Affs, Labels, Raw
+from volara.datasets import LSD, Affs, Labels, MaskDataset, Raw
 
 
 @pytest.fixture
@@ -287,3 +287,25 @@ def test_drop_refuses_a_non_s3_url_rather_than_silently_skipping():
     looks like success)."""
     with pytest.raises(ValueError, match="URL this method cannot delete"):
         Raw(store="gs://bucket/x.zarr").drop()
+
+
+# --- MaskDataset: a block-grid skip mask ---
+
+
+def _write_mask(path, array):
+    z = zarr.create_array(
+        store=str(path), shape=array.shape, chunks=array.shape, dtype=array.dtype
+    )
+    z[:] = array
+    return path
+
+
+def test_mask_dataset_round_trips_and_reads_like_any_dataset(tmp_path):
+    array = np.array([[0], [1], [0], [0]], dtype=np.uint8)
+    dataset = MaskDataset(store=_write_mask(tmp_path / "mask.zarr", array))
+
+    rebuilt = MaskDataset.model_validate_json(dataset.model_dump_json())
+
+    assert rebuilt.dataset_type == "mask"
+    assert rebuilt == dataset
+    assert rebuilt.array("r")[:].tolist() == array.tolist()

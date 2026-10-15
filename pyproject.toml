@@ -22,7 +22,7 @@ dependencies = [
     # daisy v2 (Rust rewrite) -- pinned to a commit on the git v2.0 branch (and
     # again under [tool.uv.sources] below) until 2.0.0 is published to PyPI.
     # Replace both with "daisy>=2,<3" once it is.
-    "daisy @ git+https://github.com/funkelab/daisy@627c608d36e29e4867f4db18f772bcdf6000caca",
+    "daisy @ git+https://github.com/funkelab/daisy@4e7b6cd8353f40c820eda5d0b7f979166c11f97a",
     "funlib.geometry>=0.3",
     "funlib.persistence>=0.7.0",
     "funlib.math",
@@ -81,7 +81,7 @@ indirect = [
 # daisy v2.0.0 is not on PyPI yet; install the Rust-backed package from the
 # funkelab/daisy v2.0 branch. The buildable pyproject (maturin) is at the repo
 # ROOT (python-source = daisy-py/python), so NO #subdirectory is needed.
-daisy = { git = "https://github.com/funkelab/daisy", rev = "627c608d36e29e4867f4db18f772bcdf6000caca" }
+daisy = { git = "https://github.com/funkelab/daisy", rev = "4e7b6cd8353f40c820eda5d0b7f979166c11f97a" }
 
 [project.scripts]
 volara-cli = "volara.cli:cli"

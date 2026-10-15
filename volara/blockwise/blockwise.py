@@ -13,6 +13,7 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.logging import get_log_basedir, set_log_basedir
 
+from ..datasets import MaskDataset
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
@@ -67,6 +68,20 @@ class BlockwiseTask(StrictBaseModel, ABC):
     single block legitimately runs long (e.g. the global mutex watershed) must set
     an explicit large value instead (see ``GraphMWS``). When a block exceeds the
     timeout daisy reclaims it and retries under ``max_retries``.
+    """
+    skip_mask: MaskDataset | None = None
+    """
+    An optional per-block skip mask (a :class:`~volara.datasets.MaskDataset`): a
+    zarr array with one cell per block of this task (see
+    :attr:`block_grid_shape`), nonzero = skip the block, zero = run it. Cell
+    ``(0, 0, ...)`` is the first block of ``write_roi`` whatever the context.
+
+    It is handed to daisy as ``Task(skip_mask=...)``. Masked blocks are reported
+    as skipped and release their downstream dependencies, but are not recorded
+    as done, so the mask applies to the run it is passed to: a later run with a
+    narrower mask (or none) runs the blocks it no longer covers, and blocks that
+    completed stay done. A mask of the wrong shape is rejected before the run
+    starts.
     """
 
     def __hash__(self):
@@ -138,6 +153,25 @@ class BlockwiseTask(StrictBaseModel, ABC):
         return Roi((0,) * self.write_size.dims, self.write_size)
 
     @property
+    def block_grid_shape(self) -> tuple[int, ...]:
+        """
+        The number of blocks per axis: the shape a :attr:`skip_mask` must
+        have. Computed from :attr:`write_roi` and :attr:`write_size` alone, so a
+        mask can be built without building the task: ``fit="valid"`` drops a
+        partial trailing block, ``overhang`` and ``shrink`` keep it, matching
+        ``daisy.Task.block_grid_shape``.
+        """
+        counts = []
+        for total, block in zip(self.write_roi.shape, self.write_size):
+            if block <= 0 or total <= 0:
+                counts.append(0)
+            elif self.fit == "valid":
+                counts.append(int(total // block))
+            else:
+                counts.append(int(-(-total // block)))
+        return tuple(counts)
+
+    @property
     def meta_dir(self) -> Path:
         """
         The path to the meta directory where we will store log files
@@ -153,6 +187,16 @@ class BlockwiseTask(StrictBaseModel, ABC):
         logging purposes.
         """
         return self.meta_dir / "config.json"
+
+    @property
+    def tracking_path(self) -> Path:
+        """
+        The directory daisy keeps this task's block tracking in (which blocks
+        are done, how often each failed). Handed to ``daisy.Task`` as
+        ``tracking_path``; :meth:`drop` removes it with the rest of
+        :attr:`meta_dir` so every block is recomputed.
+        """
+        return self.meta_dir / "blocks_done"
 
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
@@ -305,7 +349,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 read_write_conflict=self.read_write_conflict,
                 fit=self.fit,
                 max_workers=self.num_workers,
-                tracking_path=str(self.meta_dir / "blocks_done"),
+                tracking_path=str(self.tracking_path),
+                skip_mask=(
+                    self.skip_mask.array("r")[:] if self.skip_mask is not None else None
+                ),
                 max_retries=2,
                 timeout=self.block_timeout,
                 upstream_tasks=(
