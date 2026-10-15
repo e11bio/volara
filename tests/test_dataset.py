@@ -42,10 +42,39 @@ def second_zarr_store(tmp_path):
 # --- Test Category 1: Serialization / Deserialization ---
 
 
-def test_raw_serialization_roundtrip(tmp_path):
+@pytest.mark.parametrize(
+    "stack",
+    [
+        "",
+        """
+    stack:
+      dataset_type: raw
+      store: {stack_store}
+      scale_shift: [2.0, 0.0]
+    """,
+        """
+    stack:
+      dataset_type: labels
+      store: {stack_store}
+    """,
+        """
+    stack:
+      dataset_type: mask
+      store: {stack_store}
+    """,
+    ],
+    ids=["no-stack", "stack-raw", "stack-labels", "stack-mask"],
+)
+def test_raw_serialization_roundtrip(tmp_path, stack):
     """
     Test that YAML -> Python A -> Python B ensures equality.
     Checks handling of tuple/list conversion in Pydantic.
+
+    A worker rebuilds its task from the JSON dump in ``config.json``, so the
+    nested ``stack`` dataset has to come back as its own class with its own
+    fields: ``Raw.stack`` is typed with the discriminated union, not the
+    abstract ``Dataset``, which would dump only the base fields and reload as
+    nothing.
     """
     yaml_data = f"""
     dataset_type: raw
@@ -53,7 +82,7 @@ def test_raw_serialization_roundtrip(tmp_path):
     voxel_size: [10, 10, 10]
     scale_shift: [0.5, 10.0]
     channels: 0
-    """
+    """ + stack.format(stack_store=tmp_path / "stack.zarr")
 
     # 1. Load YAML to Dict
     config_dict = yaml.safe_load(yaml_data)
@@ -72,6 +101,21 @@ def test_raw_serialization_roundtrip(tmp_path):
     assert raw_a.scale_shift == (0.5, 10.0)
     # Check that list in yaml became tuple/list correctly based on logic
     assert raw_a.voxel_size == (10, 10, 10) or raw_a.voxel_size == [10, 10, 10]
+
+    # 5. The JSON round trip a spawned worker makes through config.json
+    raw_c = Raw.model_validate_json(raw_a.model_dump_json())
+    assert raw_c.model_dump(mode="json") == raw_a.model_dump(mode="json")
+
+    if stack:
+        expected = config_dict["stack"]
+        for back in (raw_b, raw_c):
+            assert back.stack is not None
+            assert back.stack.dataset_type == expected["dataset_type"]
+            assert type(back.stack) is type(raw_a.stack)
+            if "scale_shift" in expected:
+                assert back.stack.scale_shift == tuple(expected["scale_shift"])
+    else:
+        assert raw_b.stack is None and raw_c.stack is None
 
 
 def test_affs_serialization(tmp_path):
