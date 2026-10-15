@@ -7,7 +7,7 @@ from upath import UPath
 
 from volara.segment_utils import replace_values
 
-from .paths import PydanticUPath, is_local, rm, to_upath
+from .paths import PydanticUPath, rm, to_upath
 from .utils import StrictBaseModel
 
 
@@ -40,10 +40,6 @@ class LUT(StrictBaseModel):
         return self
 
     @property
-    def is_local(self) -> bool:
-        return is_local(self.path)
-
-    @property
     def file(self) -> UPath:
         """The location of this look up table, with the `.npz` suffix."""
         return (
@@ -74,10 +70,6 @@ class LUT(StrictBaseModel):
 
         with self.file.open("wb") as f:
             np.savez_compressed(f, **arrays)
-        if not self.is_local:
-            invalidate = getattr(self.file.fs, "invalidate_cache", None)
-            if invalidate is not None:
-                invalidate(self.file.path)
 
     def load(self) -> np.ndarray | None:
         if not self.file.exists():

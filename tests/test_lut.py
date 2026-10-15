@@ -73,7 +73,6 @@ def test_luts_load(tmp_path):
 def test_lut_uri_local(tmp_path):
     """`uri` is the normalized local path for non-s3 luts."""
     lut = LUT(path=str(tmp_path / "local"))
-    assert lut.is_local
     assert lut.uri == str(tmp_path / "local.npz")
     assert lut.name == "local"
 
@@ -82,7 +81,6 @@ def test_lut_remote_save_load(memory_fs):
     from pathlib import Path
 
     lut = LUT(path="memory://bucket/path/to/data.zarr/lut.npz")
-    assert not lut.is_local
     assert not isinstance(lut.file, Path)  # a remote UPath, no local counterpart
     assert lut.uri == "memory://bucket/path/to/data.zarr/lut.npz"
     assert lut.name == "lut"
@@ -138,14 +136,20 @@ def test_luts_mixed_local_and_remote(tmp_path, memory_fs):
 def test_lut_config_round_trips_as_the_string_it_was_given(tmp_path):
     """`path` serialises as a plain string, so saved configs are unchanged, and
     `s3_kwargs` is still accepted as the former name of `storage_options`."""
-    for given in ("s3://bucket/lut.npz", str(tmp_path / "lut.npz"), tmp_path / "lut.npz"):
+    for given in (
+        "s3://bucket/lut.npz",
+        str(tmp_path / "lut.npz"),
+        tmp_path / "lut.npz",
+    ):
         lut = LUT(path=given)
         assert lut.model_dump()["path"] == str(given)
         assert LUT.model_validate_json(lut.model_dump_json()) == lut
 
     assert LUT.model_json_schema()["properties"]["path"]["type"] == "string"
 
-    lut = LUT.model_validate({"path": "memory://bucket/lut.npz", "s3_kwargs": {"anon": True}})
+    lut = LUT.model_validate(
+        {"path": "memory://bucket/lut.npz", "s3_kwargs": {"anon": True}}
+    )
     assert lut.storage_options == {"anon": True}
     assert lut.path.storage_options == {"anon": True}
     assert "s3_kwargs" not in lut.model_dump()

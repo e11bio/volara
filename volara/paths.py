@@ -128,9 +128,6 @@ def rm(path: UPath | Path, recursive: bool = True) -> None:
         path.fs.rm(path.path, recursive=recursive)
     except FileNotFoundError:
         pass
-    invalidate = getattr(path.fs, "invalidate_cache", None)
-    if invalidate is not None:
-        invalidate(path.path)
 
 
 # --- the cast to a local path ----------------------------------------------
