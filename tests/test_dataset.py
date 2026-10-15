@@ -262,3 +262,28 @@ def test_list_channels_keep_the_array_writeable(tmp_path):
     assert arr.is_writeable
     arr[:] = np.zeros_like(expected)
     np.testing.assert_array_equal(arr[:], np.zeros_like(expected))
+
+
+# --- Test Category 4: Drop ---
+
+
+@pytest.mark.parametrize("as_str", [False, True], ids=["Path", "str"])
+def test_drop_removes_a_local_store(zarr_store, as_str):
+    """`store` is `Path | str`; a local path must be dropped whichever it arrives as."""
+    store = str(zarr_store) if as_str else zarr_store
+    Raw(store=store).drop()
+    assert not zarr_store.exists()
+
+
+@pytest.mark.parametrize("as_str", [False, True], ids=["Path", "str"])
+def test_drop_of_a_missing_local_store_is_a_noop(tmp_path, as_str):
+    path = tmp_path / "never-created.zarr"
+    Raw(store=str(path) if as_str else path).drop()
+    assert not path.exists()
+
+
+def test_drop_refuses_a_non_s3_url_rather_than_silently_skipping():
+    """A non-s3 URL must not be coerced to a Path that never exists (a no-op that
+    looks like success)."""
+    with pytest.raises(ValueError, match="URL this method cannot delete"):
+        Raw(store="gs://bucket/x.zarr").drop()
