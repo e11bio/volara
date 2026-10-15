@@ -331,3 +331,41 @@ def test_a_mask_of_another_dtype_is_cast_by_daisy(tmp_path, dtype):
 
     assert state.skipped_count == 1
     assert sorted(RAN_OFFSETS) == [(0, 0), (10, 0), (30, 0)]
+
+
+def test_a_url_basedir_puts_the_meta_dir_and_tracking_store_in_one_local_place(
+    tmp_path, monkeypatch
+):
+    """``meta_dir``, ``config_file`` and ``tracking_path`` derive from the basedir,
+    so a URL basedir lands them under the remote root as plain local paths; the
+    run writes there, resumes from there, and no ``s3:`` directory appears.
+
+    pytest tests/test_blockwise_base.py::test_a_url_basedir_puts_the_meta_dir_and_tracking_store_in_one_local_place
+    """
+    from volara.logging import set_log_basedir, set_remote_root
+
+    launch_dir = tmp_path / "launch"
+    launch_dir.mkdir()
+    monkeypatch.chdir(launch_dir)
+    set_remote_root(tmp_path / "remote")
+    with pytest.warns(UserWarning):
+        set_log_basedir("s3://bucket/x")
+
+    t = DummyTask()
+    local = (tmp_path / "remote" / "s3" / "bucket" / "x").resolve()
+    assert t.meta_dir == local / "dummy-task-meta"
+    assert t.tracking_path == local / "dummy-task-meta" / "blocks_done"
+    assert type(t.meta_dir) is type(Path())  # a plain pathlib.Path, not a UPath
+
+    first = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert first.completed_count == 1 and first.skipped_count == 0
+    assert t.tracking_path.exists()
+    assert not (launch_dir / "s3:").exists()
+
+    second = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert second.skipped_count == 1
+
+    t.drop(drop_outputs=False)
+    assert not t.meta_dir.exists()
+    third = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert third.skipped_count == 0

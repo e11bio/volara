@@ -326,11 +326,50 @@ def test_drop_of_a_missing_local_store_is_a_noop(tmp_path, as_str):
     assert not path.exists()
 
 
-def test_drop_refuses_a_non_s3_url_rather_than_silently_skipping():
-    """A non-s3 URL must not be coerced to a Path that never exists (a no-op that
-    looks like success)."""
-    with pytest.raises(ValueError, match="URL this method cannot delete"):
-        Raw(store="gs://bucket/x.zarr").drop()
+@pytest.fixture
+def memory_fs():
+    import fsspec
+
+    fs = fsspec.filesystem("memory")
+    fs.store.clear()
+    fs.pseudo_dirs.clear()
+    yield fs
+    fs.store.clear()
+    fs.pseudo_dirs.clear()
+
+
+def test_a_remote_store_is_prepared_written_read_and_dropped(memory_fs):
+    """`store` may be a URL on any fsspec filesystem; every operation goes
+    through the same `UPath`, so nothing is special-cased on `s3://`."""
+    ds = Labels(store="memory://bucket/data.zarr/labels")
+    assert not ds.is_local
+    assert ds.name == "labels"
+    ds.prepare(
+        shape=(4, 4), chunk_shape=(2, 2), offset=(0, 0), voxel_size=(1, 1),
+        units=("nm", "nm"), axis_names=("y", "x"), types=("space", "space"),
+        dtype=np.uint8,
+    )
+    assert memory_fs.exists("/bucket/data.zarr/labels/zarr.json")
+    arr = ds.array("r+")
+    arr[:] = 7
+    np.testing.assert_array_equal(ds.array("r")[:], np.full((4, 4), 7, dtype=np.uint8))
+    ds.drop()
+    assert not memory_fs.exists("/bucket/data.zarr/labels/zarr.json")
+    ds.drop()  # a missing remote store is a no-op
+
+
+def test_store_serialises_as_the_string_it_was_given(tmp_path):
+    for given in ("s3://bucket/x.zarr", str(tmp_path / "x.zarr"), tmp_path / "x.zarr"):
+        ds = Raw(store=given)
+        assert ds.model_dump()["store"] == str(given)
+        assert Raw.model_validate_json(ds.model_dump_json()) == ds
+
+
+def test_s3_kwargs_is_accepted_as_the_former_name_of_storage_options():
+    ds = Raw.model_validate({"store": "memory://bucket/x.zarr", "s3_kwargs": {"anon": True}})
+    assert ds.storage_options == {"anon": True}
+    assert ds.store.storage_options == {"anon": True}  # carried by the UPath itself
+    assert "s3_kwargs" not in ds.model_dump()
 
 
 # --- MaskDataset: a block-grid skip mask ---

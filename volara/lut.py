@@ -1,11 +1,13 @@
 import io
 from collections.abc import Sequence
-from pathlib import Path, PurePosixPath
 
 import numpy as np
+from pydantic import AliasChoices, Field, model_validator
+from upath import UPath
 
 from volara.segment_utils import replace_values
 
+from .paths import PydanticUPath, is_local, rm, to_upath
 from .utils import StrictBaseModel
 
 
@@ -14,113 +16,75 @@ class LUT(StrictBaseModel):
     A class for defining look up tables
     """
 
-    path: Path | str
+    path: PydanticUPath
     """
-    The path at which we will read/write the look up table. Either a local
-    path (`/path/to/data.zarr/lut.npz`) or an s3 uri
-    (`s3://bucket/path/to/data.zarr/lut.npz`). The `.npz` extension will be
-    appended if it is missing from a string path.
+    The path at which we will read/write the look up table: a local path
+    (`/path/to/data.zarr/lut.npz`) or a URL on any fsspec filesystem
+    (`s3://bucket/path/to/data.zarr/lut.npz`). The `.npz` extension is
+    appended if it is missing.
     """
 
-    s3_kwargs: dict | None = None
+    storage_options: dict | None = Field(
+        default=None, validation_alias=AliasChoices("storage_options", "s3_kwargs")
+    )
     """
-    Optional config for S3-compatible stores like Lyve Cloud.
-    Leave as None for standard S3 behavior (credentials from the environment).
-    Only used when `path` is an `s3://` uri.
+    fsspec filesystem options for a remote `path` (credentials, a custom
+    endpoint such as Lyve Cloud, ...). `None` uses the environment.
+    `s3_kwargs` is accepted as the former name.
     """
+
+    @model_validator(mode="after")
+    def _apply_storage_options(self):
+        if self.storage_options:
+            self.path = to_upath(self.path, **self.storage_options)
+        return self
 
     @property
-    def is_s3(self) -> bool:
-        """
-        Whether this look up table lives in an s3 bucket rather than on
-        the local filesystem.
-        """
-        return isinstance(self.path, str) and self.path.startswith("s3://")
+    def is_local(self) -> bool:
+        return is_local(self.path)
 
-    def _s3fs(self):
-        import s3fs  # type: ignore[unresolved-import]
-
-        if self.s3_kwargs is None:
-            return s3fs.S3FileSystem()
-
-        return s3fs.S3FileSystem(**self.s3_kwargs)
+    @property
+    def file(self) -> UPath:
+        """The location of this look up table, with the `.npz` suffix."""
+        return (
+            self.path
+            if self.path.suffix == ".npz"
+            else self.path.with_name(f"{self.path.name}.npz")
+        )
 
     @property
     def uri(self) -> str:
-        """
-        The normalized location of this look up table as a string. This is
-        the only accessor that works for both local and s3 look up tables.
-        """
-        if self.is_s3:
-            path = str(self.path)
-            return path if path.endswith(".npz") else f"{path}.npz"
+        """The normalized location of this look up table as a string."""
         return str(self.file)
 
     @property
     def name(self) -> str:
-        if self.is_s3:
-            return PurePosixPath(self.uri).stem
         return self.file.stem
 
-    @property
-    def file(self) -> Path:
-        if isinstance(self.path, str):
-            if self.is_s3:
-                raise ValueError(
-                    f"{self.path} is an s3 uri and has no local path, use `uri` instead"
-                )
-            return (
-                Path(self.path)
-                if self.path.endswith(".npz")
-                else Path(f"{self.path}.npz")
-            )
-        elif isinstance(self.path, Path):
-            return self.path
-        else:
-            raise TypeError(f"Invalid type for path ({self.path}): {type(self.path)}")
-
     def exists(self) -> bool:
-        if self.is_s3:
-            return self._s3fs().exists(self.uri)
         return self.file.exists()
 
     def drop(self):
-        if self.is_s3:
-            fs = self._s3fs()
-            try:
-                fs.rm(self.uri)
-            except FileNotFoundError:
-                pass
-            fs.invalidate_cache(self.uri)
-        elif self.file.exists():
-            self.file.unlink()
+        rm(self.file, recursive=False)
 
     def save(self, lut: np.ndarray, edges=None):
         arrays = {"fragment_segment_lut": lut.astype(int)}
         if edges is not None:
             arrays["edges"] = edges
 
-        if self.is_s3:
-            fs = self._s3fs()
-            with fs.open(self.uri, "wb") as f:
-                np.savez_compressed(f, **arrays)
-            fs.invalidate_cache(self.uri)
-        else:
-            np.savez_compressed(self.file, **arrays)
+        with self.file.open("wb") as f:
+            np.savez_compressed(f, **arrays)
+        if not self.is_local:
+            invalidate = getattr(self.file.fs, "invalidate_cache", None)
+            if invalidate is not None:
+                invalidate(self.file.path)
 
     def load(self) -> np.ndarray | None:
-        if self.is_s3:
-            fs = self._s3fs()
-            if not fs.exists(self.uri):
-                return None
-            with fs.open(self.uri, "rb") as f:
-                buffer = io.BytesIO(f.read())
-            with np.load(buffer) as data:
-                return data["fragment_segment_lut"]
-
         if not self.file.exists():
             return None
-        with np.load(self.file) as data:
+        with self.file.open("rb") as f:
+            buffer = io.BytesIO(f.read())
+        with np.load(buffer) as data:
             return data["fragment_segment_lut"]
 
     def __add__(self, other):

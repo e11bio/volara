@@ -195,3 +195,29 @@ def test_postgresql_port_is_passed_to_provider(port, monkeypatch):
     db.open("r")
     assert captured["db_port"] == port
     assert PostgreSQL.model_validate_json(db.model_dump_json()).port == port
+
+
+def test_a_sqlite_url_path_is_cast_to_a_local_file(tmp_path):
+    """SQLite needs a real file, so a URL `path` maps to a local file under the
+    remote root with a warning -- never the relative directory `memory:/...`."""
+    from volara.paths import get_remote_root, set_remote_root
+
+    before = get_remote_root()
+    set_remote_root(tmp_path / "remote")
+    try:
+        with pytest.warns(UserWarning, match="SQLite databases live on the local"):
+            db = SQLite(
+                path="memory://bucket/graph.db",
+                node_attrs={"color": 3},
+                edge_attrs={"aff": "float"},
+            )
+            local = db.local
+        assert local == (tmp_path / "remote" / "memory" / "bucket" / "graph.db").resolve()
+        assert db.id == "graph"
+        assert db.model_dump()["path"] == "memory://bucket/graph.db"
+        db.open("w")
+        assert local.exists()
+        db.drop()
+        assert not local.exists()
+    finally:
+        set_remote_root(before)

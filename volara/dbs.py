@@ -6,6 +6,7 @@ from funlib.persistence.graphs import PgSQLGraphDatabase, SQLiteGraphDataBase
 from funlib.persistence.graphs.graph_database import GraphDataBase
 from funlib.persistence.types import Vec
 
+from .paths import PydanticUPath, local_path
 from .utils import StrictBaseModel
 
 AttrsDict = dict[str, Any]
@@ -163,23 +164,32 @@ class SQLite(DB):
     A literal used for pydantic serialization and deserialization of
     DB Union types.
     """
-    path: Path
+    path: PydanticUPath
     """
-    The path to the SQLite db file to use.
+    The path to the SQLite db file to use. SQLite needs a real file with
+    locking, so a URL here is cast to a local path under
+    :func:`volara.paths.get_remote_root` with a warning (see
+    :func:`volara.paths.local_path`); use :class:`PostgreSQL` for a shared
+    remote database.
     """
 
     @property
+    def local(self) -> Path:
+        """The local file behind `path`."""
+        return local_path(self.path, what="SQLite databases")
+
+    @property
     def id(self) -> str:
-        return self.path.stem
+        return self.local.stem
 
     def open(self, mode="r") -> SQLiteGraphDataBase:
         node_attrs, edge_attrs = self.graph_attrs
 
-        if not self.path.parent.exists():
-            self.path.parent.mkdir(parents=True)
+        if not self.local.parent.exists():
+            self.local.parent.mkdir(parents=True)
 
         return SQLiteGraphDataBase(
-            self.path,
+            self.local,
             position_attribute="position",
             node_attrs=node_attrs,
             edge_attrs=edge_attrs,
@@ -187,9 +197,9 @@ class SQLite(DB):
         )
 
     def drop(self) -> None:
-        if self.path.exists():
-            self.path.unlink()
-        meta_path = self.path.parent / f"{self.id}-meta.json"
+        if self.local.exists():
+            self.local.unlink()
+        meta_path = self.local.parent / f"{self.id}-meta.json"
         if meta_path.exists():
             meta_path.unlink()
 
@@ -200,7 +210,7 @@ class SQLite(DB):
         original database.
         """
         spoofed_db = self.__class__(
-            path=self.path.parent / f"spoofed_{self.path.name}",
+            path=self.local.parent / f"spoofed_{self.local.name}",
             **self.model_dump(exclude={"path"}),
         )
         if nodes:
