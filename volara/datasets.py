@@ -309,7 +309,7 @@ class Raw(Dataset):
     dataset_type: Literal["raw"] = "raw"
     ome_norm: Path | str | None = None
     scale_shift: tuple[float, float] | None = None
-    stack: Dataset | None = None
+    stack: "PydanticDataset | None" = None
 
     @property
     def bounds(self) -> list[tuple[float, float]] | None:
@@ -553,6 +553,11 @@ class CloudVolumeWrapper(Dataset):
 
 
 PydanticDataset = Annotated[
-    Union[Raw, Affs, LSD, Labels, CloudVolumeWrapper],
+    Union[Raw, Affs, LSD, Labels, MaskDataset, CloudVolumeWrapper],
     Field(discriminator="dataset_type"),
 ]
+
+# `Raw.stack` is annotated with this union, which is defined below `Raw` and so
+# reaches it as a string. Pydantic would resolve the forward reference on first
+# use; resolving it here keeps `Raw` complete from import.
+Raw.model_rebuild()
