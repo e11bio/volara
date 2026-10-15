@@ -24,7 +24,7 @@ jobs:
 
       - name: Set up uv
         # Install a specific uv version using the installer
-        run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Install pandoc
         uses: pandoc/actions/setup@v1
