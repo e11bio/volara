@@ -1,10 +1,15 @@
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import pytest
+import zarr
 from funlib.geometry import Coordinate, Roi
 
 from volara.blockwise.blockwise import BlockwiseTask
 from volara.blockwise.pipeline import Pipeline
+from volara.datasets import MaskDataset
 
 
 class DummyTask(BlockwiseTask):
@@ -58,6 +63,7 @@ def test_meta_dir_and_config_file(tmp_path):
     t = DummyTask()
     assert t.meta_dir == tmp_path / "logs" / "dummy-task-meta"
     assert t.config_file == tmp_path / "logs" / "dummy-task-meta" / "config.json"
+    assert t.tracking_path == tmp_path / "logs" / "dummy-task-meta" / "blocks_done"
 
 
 def test_drop_removes_meta_dir(tmp_path):
@@ -119,7 +125,7 @@ def test_run_creates_meta_dir_and_tracking_store(tmp_path):
 
     assert state.completed_count == 1
     assert state.failed_count == 0
-    assert (t.meta_dir / "blocks_done").exists()
+    assert t.tracking_path.exists()
 
 
 def test_pipeline_add_operator():
@@ -193,3 +199,135 @@ def test_second_run_skips_blocks_already_done(tmp_path):
     third = t.run_blockwise(multiprocessing=False)[t.task_name]
     assert third.skipped_count == 0
     assert len(PROCESSED_BLOCKS) == 2
+
+
+RAN_OFFSETS: list[tuple[int, ...]] = []
+
+
+class MaskedTask(DummyTask):
+    """Four blocks along z, a configurable context, records which blocks ran."""
+
+    context: tuple[int, int] = (0, 0)
+
+    @property
+    def write_roi(self) -> Roi:
+        return Roi((0, 0), (40, 10))
+
+    @property
+    def context_size(self) -> Coordinate:
+        return Coordinate(self.context)
+
+    @contextmanager
+    def process_block_func(self):
+        def process_block(block):
+            RAN_OFFSETS.append(tuple(int(v) for v in block.write_roi.offset))
+
+        yield process_block
+
+
+def _mask_dataset(path: Path, array: np.ndarray) -> MaskDataset:
+    z = zarr.create_array(
+        store=str(path), shape=array.shape, chunks=array.shape, dtype=array.dtype
+    )
+    z[:] = array
+    return MaskDataset(store=path)
+
+
+def _masked_task(tmp_path, cells, context=(0, 0), **kw) -> MaskedTask:
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    RAN_OFFSETS.clear()
+    mask = np.zeros((4, 1), dtype=np.uint8)
+    for cell, value in cells.items():
+        mask[cell, 0] = value
+    return MaskedTask(
+        context=context,
+        skip_mask=_mask_dataset(tmp_path / f"mask-{len(cells)}.zarr", mask),
+        **kw,
+    )
+
+
+def test_block_grid_shape_matches_daisy(tmp_path):
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    for context in [(0, 0), (10, 10), (15, 5)]:
+        t = MaskedTask(context=context)
+        assert t.block_grid_shape == Coordinate(4, 1)
+        with t.task(multiprocessing=False) as daisy_task:
+            assert list(daisy_task.block_grid_shape) == [4, 1]
+
+
+def test_masked_blocks_are_skipped_and_any_nonzero_value_skips(tmp_path):
+    t = _masked_task(tmp_path, {0: 1, 2: 7})
+
+    state = t.run_blockwise(multiprocessing=False)[t.task_name]
+
+    assert state.skipped_count == 2
+    assert state.completed_count == 4
+    assert sorted(RAN_OFFSETS) == [(10, 0), (30, 0)]
+
+
+def test_mask_cell_zero_is_the_first_block_with_a_block_wide_context(tmp_path):
+    """The context equals the block size here. daisy's tracking grid would put
+    the first block at cell 1; the mask is anchored at the first block."""
+    t = _masked_task(tmp_path, {0: 1}, context=(10, 10))
+
+    t.run_blockwise(multiprocessing=False)
+
+    assert sorted(RAN_OFFSETS) == [(10, 0), (20, 0), (30, 0)]
+
+
+def test_mask_applies_to_one_run_and_done_blocks_stay_done(tmp_path):
+    t = _masked_task(tmp_path, {1: 1, 3: 1})
+    first = t.run_blockwise(multiprocessing=False)[t.task_name]
+    assert first.skipped_count == 2
+    assert sorted(RAN_OFFSETS) == [(0, 0), (20, 0)]
+
+    # Same task without the mask: the two masked blocks run now, the two
+    # done ones are skipped via daisy's tracking store.
+    RAN_OFFSETS.clear()
+    t2 = MaskedTask()
+    second = t2.run_blockwise(multiprocessing=False)[t2.task_name]
+    assert second.skipped_count == 2
+    assert sorted(RAN_OFFSETS) == [(10, 0), (30, 0)]
+
+    RAN_OFFSETS.clear()
+    third = t2.run_blockwise(multiprocessing=False)[t2.task_name]
+    assert third.skipped_count == 4
+    assert RAN_OFFSETS == []
+
+
+def test_mask_of_the_wrong_shape_is_rejected_before_the_run(tmp_path):
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    bad = _mask_dataset(tmp_path / "bad.zarr", np.zeros((5, 1), dtype=np.uint8))
+    t = MaskedTask(skip_mask=bad)
+
+    with pytest.raises(ValueError, match="block grid"):
+        t.run_blockwise(multiprocessing=False)
+    assert not t.tracking_path.exists()
+
+
+def test_skip_mask_round_trips_through_the_task_config(tmp_path):
+    t = _masked_task(tmp_path, {2: 1})
+    rebuilt = MaskedTask.model_validate_json(t.model_dump_json())
+    assert rebuilt.skip_mask == t.skip_mask
+    assert rebuilt.skip_mask.array("r")[:].tolist() == [[0], [0], [1], [0]]
+
+
+@pytest.mark.parametrize("dtype", ["bool", "int32"])
+def test_a_mask_of_another_dtype_is_cast_by_daisy(tmp_path, dtype):
+    from volara.logging import set_log_basedir
+
+    set_log_basedir(tmp_path / "logs")
+    RAN_OFFSETS.clear()
+    mask = np.array([[0], [0], [1], [0]], dtype=dtype)
+    t = MaskedTask(skip_mask=_mask_dataset(tmp_path / "mask.zarr", mask))
+
+    state = t.run_blockwise(multiprocessing=False)[t.task_name]
+
+    assert state.skipped_count == 1
+    assert sorted(RAN_OFFSETS) == [(0, 0), (10, 0), (30, 0)]
