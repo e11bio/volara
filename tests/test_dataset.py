@@ -584,9 +584,14 @@ def test_prepare_judges_an_existing_sharded_array_by_its_write_unit(tmp_path):
         np.testing.assert_array_equal(ds.array("r")[:], 7)
     else:
         # an old funlib compares the INNER chunk and would refuse with a bare PermissionError;
-        # the sharded array is named instead
+        # the sharded array is named instead ...
         with pytest.raises(RuntimeError, match="sharded.*funlib.persistence#40"):
             _prepare(ds, write_shape=(2, 32, 32))
+        # ... except where the inner chunk IS the shard, which that funlib handles correctly
+        _zarr_sharded(tmp_path / "one.zarr", chunks=(2, 32, 32), shards=(2, 32, 32), fill=4)
+        one = Labels(store=tmp_path / "one.zarr")
+        _prepare(one, write_shape=(2, 32, 32))
+        np.testing.assert_array_equal(one.array("r")[:], 4)
 
 
 @needs_sharding
