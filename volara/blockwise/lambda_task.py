@@ -53,9 +53,9 @@ class LambdaTask(BlockwiseTask):
     block_size: PydanticCoordinate | None = None
     """
     Block size in voxels. When omitted, defaults to ``out_data``'s declared
-    stored unit (its ``shard_shape``, else ``chunk_shape``), else to the stored
-    unit of ``out_data`` on disk -- its shard if it is sharded, else its chunk
-    (the usual case for ``init_out=False``) -- else to ``in_data``'s chunk shape.
+    ``chunk_shape`` (its write unit: the shard under ``sharding``), else to the
+    write unit of ``out_data`` on disk -- its shard if it is sharded, else its
+    chunk (the usual case for ``init_out=False``) -- else to ``in_data``'s chunk shape.
     """
     fit: str = "shrink"
     read_write_conflict: bool = False
@@ -94,7 +94,7 @@ class LambdaTask(BlockwiseTask):
             try:
                 # a sharded output must be written a whole shard at a time; its
                 # `chunk_shape` is the inner chunk, which is only a read unit. Read off
-                # zarr itself: funlib < 0.8 has no Array.shard_shape.
+                # zarr itself: a funlib without sharding support reports the inner chunk.
                 block_voxels = Coordinate(stored_unit_of(self.out_data.array("r")))
             except FileNotFoundError:
                 block_voxels = Coordinate(self.in_data.array("r").chunk_shape)

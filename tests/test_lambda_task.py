@@ -364,10 +364,10 @@ def test_lambda_task_skips_non_overlapping_blocks(tmp_path):
     np.testing.assert_array_equal(result, np.zeros((10, 10), dtype=np.uint8))
 
 
-_FUNLIB_SHARDS = "shard_shape" in inspect.signature(prepare_ds).parameters
+_FUNLIB_SHARDS = "sharding" in inspect.signature(prepare_ds).parameters
 needs_sharding = pytest.mark.skipif(
     not _FUNLIB_SHARDS,
-    reason="funlib.persistence here has no prepare_ds(shard_shape=...) (funkelab/funlib.persistence#40)",
+    reason="funlib.persistence here has no prepare_ds(sharding=...) (funkelab/funlib.persistence#40)",
 )
 
 
@@ -386,15 +386,16 @@ def _threshold_input(tmp_path):
 
 @needs_sharding
 def test_lambda_task_blocks_default_to_whole_shards(tmp_path):
-    """With no block_size the block is the declared shard, so every block is one
-    plain put and no two blocks share a stored object."""
+    """With no block_size the block is the declared chunk_shape (the shard), so every block
+    is one plain put and no two blocks share a stored object."""
     in_path, data = _threshold_input(tmp_path)
     task = LambdaTask(
         in_data=Raw(store=in_path),
         out_data=Labels(
             store=tmp_path / "data.zarr" / "out",
-            shard_shape=(16, 16),
-            chunk_shape=(8, 8),
+            chunk_shape=(16, 16),
+            sharding=True,
+            inner_chunk_shape=(8, 8),
         ),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
     )
@@ -424,7 +425,7 @@ def _zarr_sharded_output(store, shape, chunks=(8, 8), shards=(32, 32)):
 
 def test_lambda_task_blocks_follow_an_existing_sharded_output(tmp_path):
     """`init_out=False` sizes blocks off the destination: its shard, never its inner chunk --
-    read off zarr, so on a funlib without Array.shard_shape as well."""
+    read off zarr, so on a funlib without sharding support as well."""
     in_path, data = _threshold_input(tmp_path)
     out_path = tmp_path / "data.zarr" / "out"
     _zarr_sharded_output(out_path, data.shape)
@@ -466,7 +467,10 @@ def test_lambda_task_refuses_a_block_grid_off_the_output_shard_grid(tmp_path):
     assert not out[:32].any()
 
 
-def test_lambda_task_init_out_on_an_undeclared_sharded_output_is_refused_by_name(tmp_path):
+@needs_sharding
+def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shards(tmp_path):
+    """`init_out=True` against an existing sharded output the dataset says nothing about: the
+    block defaults to the on-disk shard, so the write unit matches and the array is reused."""
     in_path, data = _threshold_input(tmp_path)
     out_path = tmp_path / "data.zarr" / "out"
     _zarr_sharded_output(out_path, data.shape)
@@ -474,11 +478,11 @@ def test_lambda_task_init_out_on_an_undeclared_sharded_output_is_refused_by_name
         in_data=Raw(store=in_path),
         out_data=Labels(store=out_path),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        out_array_dtype=np.dtype(np.uint8),   # the existing array's dtype; the default (float32, the input's) would not match it
     )
-    with pytest.raises(ValueError, match="must declare the layout.*shard_shape"):
-        task.init()
-
-
+    assert task.write_size == Coordinate(32, 32)
+    task.run_blockwise(multiprocessing=False)
+    np.testing.assert_array_equal(task.out_data.array("r")[:], (data > 0.5).astype(np.uint8))
 @needs_sharding
 def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
     in_path, _ = _threshold_input(tmp_path)
@@ -486,8 +490,9 @@ def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
         in_data=Raw(store=in_path),
         out_data=Labels(
             store=tmp_path / "data.zarr" / "out",
-            shard_shape=(16, 16),
-            chunk_shape=(8, 8),
+            chunk_shape=(16, 16),
+            sharding=True,
+            inner_chunk_shape=(8, 8),
         ),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
         block_size=Coordinate(8, 8),
@@ -509,8 +514,9 @@ def test_lambda_task_concurrent_workers_write_whole_shards(tmp_path):
         in_data=Raw(store=in_path),
         out_data=Labels(
             store=tmp_path / "data.zarr" / "out",
-            shard_shape=(16, 16),
-            chunk_shape=(8, 8),
+            chunk_shape=(16, 16),
+            sharding=True,
+            inner_chunk_shape=(8, 8),
         ),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
         num_workers=4,
