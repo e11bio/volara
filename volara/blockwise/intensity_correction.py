@@ -55,6 +55,10 @@ class CLAHE(BlockwiseTask):
     def context_size(self) -> Coordinate:
         return self.voxel_size * self.context
 
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [self.out_arr] if self.out_arr is not None else []
+
     def drop_artifacts(self):
         self.out_arr.drop()
 

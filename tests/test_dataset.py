@@ -586,3 +586,19 @@ def test_prepare_accepts_the_declared_layout_of_an_existing_sharded_array(tmp_pa
 def test_a_layout_must_be_positive_per_axis(tmp_path, layout):
     with pytest.raises(ValidationError, match="positive per axis"):
         Labels(store=tmp_path / "x.zarr", **layout)
+
+
+def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
+    """funlib relabels an existing array to the offset it is given; a task whose write roi moved
+    would then anchor its blocks off the array's own grid. Compared in voxels, so an array
+    relabelled to another voxel size (slabreg's physical-nm canvas) still re-enters."""
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 16, 16))
+    _prepare(ds, write_shape=(2, 32, 32))
+    with pytest.raises(ValueError, match="starts at voxel \\(0, 0\\), this task would prepare it at \\(16, 0\\)"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1),
+                   units=("nm", "nm"), axis_names=("c^", "y", "x"),
+                   types=("channel", "space", "space"), dtype=np.uint8)
+    # the same voxel origin under another voxel size is the same array
+    prepare_ds(tmp_path / "x.zarr", (2, 64, 64), offset=(0, 0), voxel_size=(4, 8),
+               axis_names=["c^", "y", "x"], chunk_shape=(2, 16, 16), dtype=np.uint8, mode="a")
+    _prepare(ds, write_shape=(2, 32, 32))
