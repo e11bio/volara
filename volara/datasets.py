@@ -51,12 +51,6 @@ def _voxels(offset, voxel_size):
     return int(offset) // int(voxel_size) if int(offset) % int(voxel_size) == 0 else offset / voxel_size
 
 
-def _describe_layout(chunks, shards) -> str:
-    if shards is None:
-        return f"as chunks {tuple(chunks)}, unsharded"
-    return f"as chunks {tuple(chunks)} in shards {tuple(shards)}"
-
-
 class Dataset(StrictBaseModel, ABC):
     """
     A Dataset base class that defines the common attributes and methods
@@ -396,8 +390,9 @@ class Dataset(StrictBaseModel, ABC):
 
     def _check_stored_layout(self, array: Array, write_shape, stored_chunk) -> None:
         """Refuse unless ``array`` is written in the unit this dataset would write in (its shard
-        if sharded, else its chunk), its inner chunk matches a declared one, and
-        ``write_shape`` is a whole number of that unit per axis. See :meth:`prepare`."""
+        if sharded, else its chunk) and its chunk matches a declared inner chunk; ``write_shape``
+        being a whole number of that unit then follows from :meth:`prepare`'s own check. A sharded
+        array met by a funlib without sharding support is refused by name. See :meth:`prepare`."""
         real_chunks, real_shards = stored_layout(array)
         real_unit = real_shards if real_shards is not None else real_chunks
         if real_unit != tuple(stored_chunk):
@@ -410,21 +405,21 @@ class Dataset(StrictBaseModel, ABC):
                    "the task's write block is the unit)")
                 + ". Declare chunk_shape to match the array, or recreate it."
             )
-        if (
-            self.inner_chunk_shape is not None
-            and real_shards is not None
-            and real_chunks != tuple(self.inner_chunk_shape)
-        ):
+        if self.inner_chunk_shape is not None and real_chunks != tuple(self.inner_chunk_shape):
+            # funlib compares a declared inner chunk to the array's chunks, sharded or not
             raise ValueError(
-                f"Dataset {self.store}: the array on disk has inner chunks {real_chunks}, not "
-                f"the {tuple(self.inner_chunk_shape)} this dataset declares; recreate it or "
-                "declare inner_chunk_shape to match."
+                f"Dataset {self.store}: the array on disk has "
+                f"{'inner chunks' if real_shards is not None else 'chunks (it is not sharded)'} "
+                f"{real_chunks}, not the inner chunks {tuple(self.inner_chunk_shape)} this dataset "
+                "declares; recreate it or declare inner_chunk_shape to match."
             )
-        if any(w % u != 0 for w, u in zip(write_shape, real_unit)):
-            raise ValueError(
-                f"Dataset {self.store}: the block a task writes at once, {tuple(write_shape)} "
-                f"voxels, is not a whole number of the stored units {real_unit} of the array on "
-                "disk per axis; blocks sharing a stored object overwrite each other silently."
+        if real_shards is not None and "sharding" not in inspect.signature(prepare_ds).parameters:
+            # this funlib compares the INNER chunk to the write block and would refuse the
+            # array with a bare PermissionError; say what is going on instead
+            raise RuntimeError(
+                f"Dataset {self.store}: the array on disk is sharded, and the installed "
+                "funlib.persistence cannot write into a sharded array through prepare_ds (it "
+                "compares the inner chunk, not the shard; needs funkelab/funlib.persistence#40)."
             )
 
     def lazy_ops(self, arr: Array) -> None:

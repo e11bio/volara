@@ -579,10 +579,35 @@ def test_prepare_judges_an_existing_sharded_array_by_its_write_unit(tmp_path):
         _prepare(Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 8, 8)), write_shape=(2, 32, 32))
     np.testing.assert_array_equal(ds.array("r")[:], 7), "nothing touched"
     if _FUNLIB_SHARDS:
-        # the whole shard as the block is exactly the safe write; an old funlib compares the
-        # inner chunk instead and refuses on its own
+        # the whole shard as the block is exactly the safe write
         _prepare(ds, write_shape=(2, 32, 32))
         np.testing.assert_array_equal(ds.array("r")[:], 7)
+    else:
+        # an old funlib compares the INNER chunk and would refuse with a bare PermissionError;
+        # the sharded array is named instead
+        with pytest.raises(RuntimeError, match="sharded.*funlib.persistence#40"):
+            _prepare(ds, write_shape=(2, 32, 32))
+
+
+@needs_sharding
+def test_a_declared_inner_chunk_a_plain_array_has_not_got_is_refused_by_name(tmp_path):
+    """funlib compares a declared inner chunk to the array's chunks whether or not it is sharded;
+    volara names it, and accepts a restated chunk (the layout-copy idiom)."""
+    plain = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32))
+    _prepare(plain, write_shape=(2, 32, 32))
+    asks = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True,
+                  inner_chunk_shape=(2, 8, 8))
+    with pytest.raises(ValueError, match="chunks \\(it is not sharded\\) \\(2, 32, 32\\), not the inner chunks"):
+        _prepare(asks, write_shape=(2, 32, 32))
+
+
+@needs_sharding
+def test_a_sharding_dataset_reuses_a_plain_array_with_the_same_unit(tmp_path):
+    """`sharding` is a creation option, the other way round too."""
+    _prepare(Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32)), write_shape=(2, 32, 32))
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True)
+    _prepare(ds, write_shape=(2, 32, 32))
+    assert ds.array("r")._source_data.shards is None, "reused as it is"
 
 
 def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
