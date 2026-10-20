@@ -598,7 +598,21 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1),
                    units=("nm", "nm"), axis_names=("c^", "y", "x"),
                    types=("channel", "space", "space"), dtype=np.uint8)
-    # the same voxel origin under another voxel size is the same array
-    prepare_ds(tmp_path / "x.zarr", (2, 64, 64), offset=(0, 0), voxel_size=(4, 8),
+    # the same voxel origin under another voxel size is the same array -- at a NONZERO origin,
+    # where world and voxel offsets differ (slabreg's canvas: voxel 67, relabelled to nm)
+    ds = Labels(store=tmp_path / "y.zarr", chunk_shape=(2, 16, 16))
+    kw = dict(units=("nm", "nm"), axis_names=("c^", "y", "x"), types=("channel", "space", "space"),
+              dtype=np.uint8)
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    prepare_ds(tmp_path / "y.zarr", (2, 64, 64), offset=(64, 0), voxel_size=(4, 8),
                axis_names=["c^", "y", "x"], chunk_shape=(2, 16, 16), dtype=np.uint8, mode="a")
-    _prepare(ds, write_shape=(2, 32, 32))
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    # a sub-voxel move is a move: not rounded away
+    prepare_ds(tmp_path / "y.zarr", (2, 64, 64), offset=(66, 0), voxel_size=(4, 8),
+               axis_names=["c^", "y", "x"], chunk_shape=(2, 16, 16), dtype=np.uint8, mode="a")
+    with pytest.raises(ValueError, match="axes \\[0\\] differ"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    # different spatial axes are named as such, not as a moved origin
+    with pytest.raises(ValueError, match="spatial axes.*the axes differ"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
+                   units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
