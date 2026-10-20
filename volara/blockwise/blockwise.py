@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+TRACKING_STATS = (
+    "wall_seconds",
+    "cpu_seconds",
+    "peak_rss_bytes",
+    "io_read_bytes",
+    "io_write_bytes",
+)
+"""The per-block resource arrays daisy writes beside the done markers when a
+task runs with ``resource_tracking``."""
+
 
 class BlockwiseTask(StrictBaseModel, ABC):
     roi: PydanticRoi | None = None
@@ -59,6 +69,14 @@ class BlockwiseTask(StrictBaseModel, ABC):
     """
     Whether blocks have read/write dependencies on neighborhing blocks requiring
     a specific ordering to the block processing to compute a seamless result.
+    """
+    resource_tracking: bool = True
+    """
+    Ask daisy to measure every block: wall time, CPU time, peak RSS and IO
+    bytes, measured inside whichever worker ran it. The figures land in the
+    tracking group under :attr:`tracking_path` beside the done markers and are
+    folded per task by :meth:`tracking_summary`; daisy also prints a Resource
+    Utilization panel after the run. Costs a few microseconds per block.
     """
     block_timeout: float | None = None
     """
@@ -192,6 +210,62 @@ class BlockwiseTask(StrictBaseModel, ABC):
         :attr:`meta_dir` so every block is recomputed.
         """
         return self.meta_dir / "blocks_done"
+
+    def tracking_arrays(self) -> dict[str, np.ndarray] | None:
+        """
+        The per-block arrays daisy keeps in the tracking group under
+        :attr:`tracking_path`, flattened to one element per block in grid
+        order: ``done`` and ``failures`` always, and the resource figures
+        (:data:`TRACKING_STATS`) when the task ran with ``resource_tracking``.
+        ``None`` before any run, or after :meth:`drop`.
+        """
+        import zarr
+
+        if not self.tracking_path.exists():
+            return None
+        try:
+            group = zarr.open_group(self.tracking_path, mode="r")
+        except Exception:  # noqa: BLE001 - a half-written group reads as nothing
+            return None
+        arrays = {}
+        for name in ("done", "failures", *TRACKING_STATS):
+            if name in group:
+                arrays[name] = np.asarray(group[name][:]).ravel()
+        return arrays if "done" in arrays else None
+
+    def tracking_summary(self) -> dict | None:
+        """
+        The resource figures of the last run folded over this task's completed
+        blocks: ``blocks`` (done), ``failures`` (failed attempts), and when the
+        run was tracked ``wall_seconds`` and ``cpu_seconds`` (summed over
+        blocks, so ``cpu_seconds / wall_seconds`` reads as the CPU-bound
+        fraction), ``peak_rss_bytes`` (the largest single block), the IO byte
+        counts (summed), and ``mean_block_seconds`` / ``max_block_seconds``.
+        ``None`` when nothing has run.
+        """
+        arrays = self.tracking_arrays()
+        if arrays is None:
+            return None
+        done = arrays["done"] == 1
+        summary: dict = {
+            "blocks": int(done.sum()),
+            "failures": int(arrays["failures"].sum()) if "failures" in arrays else 0,
+            "measured": False,
+        }
+        if "wall_seconds" not in arrays or not done.any():
+            return summary
+        wall = arrays["wall_seconds"][done].astype(float)
+        summary.update(
+            measured=True,
+            wall_seconds=float(wall.sum()),
+            cpu_seconds=float(arrays["cpu_seconds"][done].sum()),
+            peak_rss_bytes=int(arrays["peak_rss_bytes"][done].max()),
+            io_read_bytes=int(arrays["io_read_bytes"][done].sum()),
+            io_write_bytes=int(arrays["io_write_bytes"][done].sum()),
+            mean_block_seconds=float(wall.mean()),
+            max_block_seconds=float(wall.max()),
+        )
+        return summary
 
     def process_roi(self, roi: Roi, context: Coordinate | None = None):
         """
@@ -345,6 +419,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 fit=self.fit,
                 max_workers=self.num_workers,
                 tracking_path=str(self.tracking_path),
+                resource_tracking=self.resource_tracking,
                 skip_mask=(
                     self.skip_mask.array("r")[:] if self.skip_mask is not None else None
                 ),
