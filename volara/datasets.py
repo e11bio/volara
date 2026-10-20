@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
     """``(chunks, shards)`` of the zarr array behind a funlib ``Array``, over every axis;
     ``shards`` is ``None`` for an unsharded array. Read off zarr itself, so it is right on a
-    funlib without ``Array.shard_shape`` too. A non-zarr source has chunks only."""
+    funlib without sharding support too. A non-zarr source has chunks only."""
     source = array._source_data
     chunks = tuple(int(c) for c in getattr(source, "chunks", array.chunk_shape))
     shards = getattr(source, "shards", None)
@@ -139,32 +139,37 @@ class Dataset(StrictBaseModel, ABC):
 
     chunk_shape: PydanticCoordinate | None = None
     """
-    The chunk shape to store this dataset with when a task prepares it, in voxels over EVERY
-    axis of the array, channels included. By default the stored chunk is the block the task
+    The unit this dataset is WRITTEN in, in voxels over EVERY axis of the array, channels
+    included: the zarr chunk, or the shard under `sharding`. By default it is the block the task
     writes at once (its `write_size` in voxels), which is what every task stored before this
     field existed.
 
-    A chunk is one stored object (one file, one S3 key), or one slice of one under
-    `shard_shape`. A block that writes part of an object reads it back, merges and rewrites
-    it, so two blocks sharing an object race and one loses its data silently. A chunk smaller
-    than the write block is therefore allowed only when the block is a whole number of chunks
-    per axis; `prepare` refuses anything else before an array exists.
+    A chunk (or shard) is one stored object (one file, one S3 key). A block that writes part of
+    an object reads it back, merges and rewrites it, so two blocks sharing an object race and
+    one loses its data silently. A chunk smaller than the write block is therefore allowed only
+    when the block is a whole number of chunks per axis; `prepare` refuses anything else before
+    an array exists, and refuses an existing array written in another unit.
     """
 
-    shard_shape: PydanticCoordinate | None = None
+    sharding: bool = False
     """
-    Store this dataset as a zarr v3 sharded array: one stored object per `shard_shape` voxels,
-    holding `chunk_shape`-sized chunks. Over every axis, channels included; each element a
-    multiple of `chunk_shape`, which must be given too.
+    Store this dataset as a zarr v3 sharded array: `chunk_shape` (or the write block) is the
+    SHARD, one stored object holding `inner_chunk_shape` chunks that a reader fetches on their
+    own. Writing is constrained exactly as by a plain chunk, so nothing about block sizing
+    changes; reads of a window with context fetch only the inner chunks they touch. Pick
+    `chunk_shape` as today, the largest block a worker writes comfortably.
 
-    The shard is the unit of writing. A block that covers whole shards is a plain put, with
-    no read-back, which is also the cheapest pattern on S3; a block that covers part of one is
-    a read-modify-write of the whole shard and races every other block sharing it. The task's
-    write block must therefore be a whole number of shards per axis, and `prepare` refuses
-    otherwise. Readers fetch inner chunks, so a large shard costs nothing on the read side.
+    A creation option: an existing array is judged by its write unit alone, so a sharded array
+    is reused by a dataset that does not say `sharding` and vice versa. Needs a
+    funlib.persistence whose `prepare_ds` takes `sharding` (funkelab/funlib.persistence#40);
+    an older install is refused by name.
+    """
 
-    Needs a funlib.persistence whose `prepare_ds` takes `shard_shape`
-    (funkelab/funlib.persistence#40); an older install is refused by name.
+    inner_chunk_shape: PydanticCoordinate | None = None
+    """
+    With `sharding`, the chunk inside each shard, over every axis; must divide `chunk_shape`.
+    Defaults to funlib's (64 per axis, the whole axis where the shard is smaller). Declared
+    against an existing sharded array it must match its inner chunk.
     """
 
     storage_options: dict | None = Field(
@@ -184,43 +189,39 @@ class Dataset(StrictBaseModel, ABC):
 
     @model_validator(mode="after")
     def _check_storage_layout(self):
-        for name in ("chunk_shape", "shard_shape"):
+        for name in ("chunk_shape", "inner_chunk_shape"):
             v = getattr(self, name)
             if v is not None and any(int(c) <= 0 for c in v):
                 raise ValueError(
                     f"Dataset {self.store}: {name} must be positive per axis, got {tuple(v)}."
                 )
-        if self.shard_shape is None:
+        if self.inner_chunk_shape is None:
             return self
-        if self.chunk_shape is None:
+        if not self.sharding:
             raise ValueError(
-                f"Dataset {self.store}: shard_shape={tuple(self.shard_shape)} needs a "
-                f"chunk_shape, the chunk inside each shard."
+                f"Dataset {self.store}: inner_chunk_shape={tuple(self.inner_chunk_shape)} only "
+                "applies with sharding=True."
             )
-        if self.chunk_shape.dims != self.shard_shape.dims:
-            raise ValueError(
-                f"Dataset {self.store}: shard_shape {tuple(self.shard_shape)} and "
-                f"chunk_shape {tuple(self.chunk_shape)} differ in dimensions."
-            )
-        if any(s % c != 0 for s, c in zip(self.shard_shape, self.chunk_shape)):
-            raise ValueError(
-                f"Dataset {self.store}: every shard_shape element must be a multiple of "
-                f"chunk_shape; got shard {tuple(self.shard_shape)} and chunk "
-                f"{tuple(self.chunk_shape)}."
-            )
+        if self.chunk_shape is not None:
+            if self.chunk_shape.dims != self.inner_chunk_shape.dims:
+                raise ValueError(
+                    f"Dataset {self.store}: chunk_shape {tuple(self.chunk_shape)} and "
+                    f"inner_chunk_shape {tuple(self.inner_chunk_shape)} differ in dimensions."
+                )
+            if any(c % i != 0 for c, i in zip(self.chunk_shape, self.inner_chunk_shape)):
+                raise ValueError(
+                    f"Dataset {self.store}: chunk_shape {tuple(self.chunk_shape)} (the shard) "
+                    f"must be a whole number of inner_chunk_shape "
+                    f"{tuple(self.inner_chunk_shape)} per axis."
+                )
         return self
 
     @property
     def stored_unit(self) -> Coordinate | None:
-        """The smallest region a block may write on its own, in voxels, or ``None``
-        when nothing is declared and the stored unit is whatever block the task writes.
-
-        The shard when `shard_shape` is set, else `chunk_shape`. A write that covers
-        whole units is a plain put; one that covers part of a unit reads it back, merges
-        and rewrites it, and races any other writer of that unit.
-        """
-        if self.shard_shape is not None:
-            return self.shard_shape
+        """The unit this dataset declares it is written in (`chunk_shape`: the chunk, or the
+        shard under `sharding`), or ``None`` when it declares none and the unit is whatever
+        block the task writes. A write covering whole units is a plain put; one covering part
+        of a unit reads it back, merges and rewrites it, and races any other writer of it."""
         return self.chunk_shape
 
     @property
@@ -289,18 +290,18 @@ class Dataset(StrictBaseModel, ABC):
         """Create this dataset's array, or reuse a compatible one, for a task to write into.
 
         ``chunk_shape`` here is the block the calling task writes at once, in voxels over
-        every axis of ``shape``; the name predates :attr:`chunk_shape` and
-        :attr:`shard_shape`, which decide how that block is STORED: as one chunk (the
-        default, and what every task did before those fields existed), as several whole
-        chunks, or as whole shards of chunks. Whichever it is, the block must be a whole
-        number of stored units per axis. Anything else is refused here, before an array
-        exists, because a block writing part of a stored object races every other block
-        that shares it and one of them loses its data silently.
+        every axis of ``shape``; :attr:`chunk_shape` on the Dataset decides the unit it is
+        STORED in: one chunk per block (the default, and what every task did before the
+        field existed) or several whole chunks -- and under :attr:`sharding` that unit is a
+        shard of :attr:`inner_chunk_shape` chunks. Whichever it is, the block must be a
+        whole number of stored units per axis. Anything else is refused here, before an
+        array exists, because a block writing part of a stored object races every other
+        block that shares it and one of them loses its data silently.
 
-        An existing array is checked FIRST, against what is on disk: a layout this dataset
-        does not declare (a sharded array met with no ``shard_shape``), chunks that differ,
-        a block that is not whole stored units of it, or an origin that moved, are each
-        refused here by name (``ValueError``) before funlib compares shape and dtype.
+        An existing array is checked FIRST, against what is on disk: written in another
+        unit than this dataset would write in, a declared inner chunk that differs, a block
+        that is not whole units of it, or an origin that moved, are each refused here by
+        name (``ValueError``) before funlib compares shape and dtype.
         """
         write_shape = Coordinate(chunk_shape)
         if write_shape.dims != len(shape):
@@ -309,40 +310,38 @@ class Dataset(StrictBaseModel, ABC):
                 f"element per axis of the array shape {tuple(shape)}."
             )
         stored_chunk = self.chunk_shape if self.chunk_shape is not None else write_shape
-        unit = self.stored_unit
-        if unit is not None:
-            unit_name = "shard" if self.shard_shape is not None else "chunk"
-            if unit.dims != write_shape.dims:
-                raise ValueError(
-                    f"Dataset {self.store}: {unit_name}_shape {tuple(unit)} must have one "
-                    f"element per axis of the array shape {tuple(shape)}, like the write "
-                    f"block {tuple(write_shape)}."
-                )
-            if any(w % u != 0 for w, u in zip(write_shape, unit)):
-                raise ValueError(
-                    f"Dataset {self.store}: the block a task writes at once, "
-                    f"{tuple(write_shape)} voxels, is not a whole number of {unit_name}s of "
-                    f"{tuple(unit)} per axis. A {unit_name} is one stored object, so blocks "
-                    f"sharing one would overwrite each other's data silently; make the "
-                    f"task's write size a multiple of the {unit_name}, or the {unit_name} a "
-                    f"divisor of the write size."
-                )
+        unit_name = "shard" if self.sharding else "chunk"
+        if stored_chunk.dims != write_shape.dims:
+            raise ValueError(
+                f"Dataset {self.store}: chunk_shape {tuple(stored_chunk)} must have one "
+                f"element per axis of the array shape {tuple(shape)}, like the write block "
+                f"{tuple(write_shape)}."
+            )
+        if any(w % u != 0 for w, u in zip(write_shape, stored_chunk)):
+            raise ValueError(
+                f"Dataset {self.store}: the block a task writes at once, "
+                f"{tuple(write_shape)} voxels, is not a whole number of {unit_name}s of "
+                f"{tuple(stored_chunk)} per axis. A {unit_name} is one stored object, so blocks "
+                f"sharing one would overwrite each other's data silently; make the "
+                f"task's write size a multiple of the {unit_name}, or the {unit_name} a "
+                f"divisor of the write size."
+            )
 
         kwargs = dict(self.zarr_kwargs)
-        if self.shard_shape is not None:
-            if "shard_shape" not in inspect.signature(prepare_ds).parameters:
+        if self.sharding:
+            if "sharding" not in inspect.signature(prepare_ds).parameters:
                 raise RuntimeError(
-                    f"Dataset {self.store} declares shard_shape, but the installed "
+                    f"Dataset {self.store} declares sharding, but the installed "
                     f"funlib.persistence cannot create a sharded array: its prepare_ds has "
-                    f"no shard_shape parameter (needs funkelab/funlib.persistence#40)."
+                    f"no sharding parameter (needs funkelab/funlib.persistence#40)."
                 )
-            kwargs["shard_shape"] = self.shard_shape
+            kwargs["sharding"] = True
+            if self.inner_chunk_shape is not None:
+                kwargs["inner_chunk_shape"] = self.inner_chunk_shape
 
-        # ⛔ Against the array that is actually there, BEFORE funlib sees it. funlib compares the
-        # inner chunk and, with no shard_shape given, does not care whether the array is sharded
-        # -- so an existing sharded array would be reused by a dataset that declares no shard,
-        # and its blocks (sized to the chunk) would then share shards; and where funlib does
-        # refuse (a chunk mismatch) it names neither the layout nor the knob.
+        # ⛔ Against the array that is actually there, BEFORE funlib sees it: a funlib without
+        # sharding support compares the inner chunk, not the write unit, and where it refuses it
+        # names neither the layout nor the knob.
         try:
             existing = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
         except FileNotFoundError:
@@ -396,27 +395,31 @@ class Dataset(StrictBaseModel, ABC):
         array._source_data.attrs.update(self.attrs)
 
     def _check_stored_layout(self, array: Array, write_shape, stored_chunk) -> None:
-        """Refuse unless ``array`` is stored as this dataset declares and ``write_shape`` is a
-        whole number of its stored units per axis. See :meth:`prepare`."""
+        """Refuse unless ``array`` is written in the unit this dataset would write in (its shard
+        if sharded, else its chunk), its inner chunk matches a declared one, and
+        ``write_shape`` is a whole number of that unit per axis. See :meth:`prepare`."""
         real_chunks, real_shards = stored_layout(array)
-        declared_shards = None if self.shard_shape is None else tuple(self.shard_shape)
-        if real_shards != declared_shards:
-            raise ValueError(
-                f"Dataset {self.store}: the array on disk is stored "
-                f"{_describe_layout(real_chunks, real_shards)}, but this dataset would store it "
-                f"{_describe_layout(tuple(stored_chunk), declared_shards)}"
-                + ("" if self.stored_unit is not None else " (it declares no layout, so the "
-                   "task's write block is the chunk)")
-                + ". A dataset must declare the layout of the array it writes into "
-                "(shard_shape=..., chunk_shape=...), or the array must be recreated."
-            )
-        if real_chunks != tuple(stored_chunk):
-            raise ValueError(
-                f"Dataset {self.store}: the array on disk has chunks {real_chunks}, not the "
-                f"{tuple(stored_chunk)} this dataset would store; recreate it or declare "
-                "chunk_shape to match."
-            )
         real_unit = real_shards if real_shards is not None else real_chunks
+        if real_unit != tuple(stored_chunk):
+            raise ValueError(
+                f"Dataset {self.store}: the array on disk is written in "
+                f"{'shards' if real_shards is not None else 'chunks'} of {real_unit}, but this "
+                f"dataset would write in {'shards' if self.sharding else 'chunks'} of "
+                f"{tuple(stored_chunk)}"
+                + ("" if self.chunk_shape is not None else " (it declares no chunk_shape, so "
+                   "the task's write block is the unit)")
+                + ". Declare chunk_shape to match the array, or recreate it."
+            )
+        if (
+            self.inner_chunk_shape is not None
+            and real_shards is not None
+            and real_chunks != tuple(self.inner_chunk_shape)
+        ):
+            raise ValueError(
+                f"Dataset {self.store}: the array on disk has inner chunks {real_chunks}, not "
+                f"the {tuple(self.inner_chunk_shape)} this dataset declares; recreate it or "
+                "declare inner_chunk_shape to match."
+            )
         if any(w % u != 0 for w, u in zip(write_shape, real_unit)):
             raise ValueError(
                 f"Dataset {self.store}: the block a task writes at once, {tuple(write_shape)} "
