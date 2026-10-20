@@ -4,7 +4,7 @@ from typing import Literal
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
-from ..datasets import Dataset, PydanticDataset
+from ..datasets import Dataset, PydanticDataset, stored_unit_of
 from ..utils import PydanticCallable, PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -52,9 +52,10 @@ class LambdaTask(BlockwiseTask):
     """
     block_size: PydanticCoordinate | None = None
     """
-    Block size in voxels. When omitted, defaults to ``out_data``'s
-    chunk shape if it exists on disk (the usual case for
-    ``init_out=False``), else falls back to ``in_data``'s chunk shape.
+    Block size in voxels. When omitted, defaults to ``out_data``'s declared
+    stored unit (its ``shard_shape``, else ``chunk_shape``), else to the stored
+    unit of ``out_data`` on disk -- its shard if it is sharded, else its chunk
+    (the usual case for ``init_out=False``) -- else to ``in_data``'s chunk shape.
     """
     fit: str = "shrink"
     read_write_conflict: bool = False
@@ -91,12 +92,10 @@ class LambdaTask(BlockwiseTask):
             block_voxels = Coordinate(self.out_data.stored_unit)
         else:
             try:
-                out = self.out_data.array("r")
                 # a sharded output must be written a whole shard at a time; its
-                # `chunk_shape` is the inner chunk, which is only a read unit
-                block_voxels = Coordinate(
-                    getattr(out, "shard_shape", None) or out.chunk_shape
-                )
+                # `chunk_shape` is the inner chunk, which is only a read unit. Read off
+                # zarr itself: funlib < 0.8 has no Array.shard_shape.
+                block_voxels = Coordinate(stored_unit_of(self.out_data.array("r")))
             except FileNotFoundError:
                 block_voxels = Coordinate(self.in_data.array("r").chunk_shape)
         return block_voxels * self.voxel_size
