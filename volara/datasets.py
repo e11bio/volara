@@ -413,7 +413,11 @@ class Dataset(StrictBaseModel, ABC):
                 f"{real_chunks}, not the inner chunks {tuple(self.inner_chunk_shape)} this dataset "
                 "declares; recreate it or declare inner_chunk_shape to match."
             )
-        if real_shards is not None and "sharding" not in inspect.signature(prepare_ds).parameters:
+        if (
+            real_shards is not None
+            and real_chunks != real_shards   # one chunk per shard: the inner chunk IS the unit
+            and "sharding" not in inspect.signature(prepare_ds).parameters
+        ):
             # this funlib compares the INNER chunk to the write block and would refuse the
             # array with a bare PermissionError; say what is going on instead
             raise RuntimeError(
