@@ -599,7 +599,7 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
                    units=("nm", "nm"), axis_names=("c^", "y", "x"),
                    types=("channel", "space", "space"), dtype=np.uint8)
     # the same voxel origin under another voxel size is the same array -- at a NONZERO origin,
-    # where world and voxel offsets differ (slabreg's canvas: voxel 67, relabelled to nm)
+    # where world and voxel offsets differ (as slabreg's canvas, relabelled to nm)
     ds = Labels(store=tmp_path / "y.zarr", chunk_shape=(2, 16, 16))
     kw = dict(units=("nm", "nm"), axis_names=("c^", "y", "x"), types=("channel", "space", "space"),
               dtype=np.uint8)

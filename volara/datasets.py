@@ -46,6 +46,8 @@ def stored_unit_of(array: Array) -> tuple[int, ...]:
 
 def _voxels(offset, voxel_size):
     """A world offset in voxels, as an int where it is one."""
+    if int(voxel_size) == 0:
+        return offset
     return int(offset) // int(voxel_size) if int(offset) % int(voxel_size) == 0 else offset / voxel_size
 
 
