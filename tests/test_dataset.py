@@ -496,7 +496,8 @@ def test_prepare_refuses_a_write_block_that_is_not_whole_shards(tmp_path):
     _prepare(ds, write_shape=(2, 64, 64))
     arr = ds.array("r+")
     assert arr.shard_shape == Coordinate(2, 32, 32)  # ty: ignore[unresolved-attribute]
-    assert arr.chunk_shape == Coordinate(2, 8, 8)
+    assert arr.chunk_shape == Coordinate(2, 32, 32), "funlib's chunk_shape is the WRITE unit: the shard"
+    assert arr.inner_chunk_shape == Coordinate(2, 8, 8)  # ty: ignore[unresolved-attribute]
 
     # a second prepare against the same layout reuses the array ...
     arr[:] = 3

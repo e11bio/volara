@@ -405,7 +405,8 @@ def test_lambda_task_blocks_default_to_whole_shards(tmp_path):
 
     out = task.out_data.array("r")
     assert out.shard_shape == Coordinate(16, 16)  # ty: ignore[unresolved-attribute]
-    assert out.chunk_shape == Coordinate(8, 8)
+    assert out.chunk_shape == Coordinate(16, 16), "funlib's chunk_shape is the WRITE unit: the shard"
+    assert out.inner_chunk_shape == Coordinate(8, 8)  # ty: ignore[unresolved-attribute]
     np.testing.assert_array_equal(out[:], (data > 0.5).astype(np.uint8))
 
 
