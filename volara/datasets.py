@@ -290,9 +290,10 @@ class Dataset(StrictBaseModel, ABC):
         exists, because a block writing part of a stored object races every other block
         that shares it and one of them loses its data silently.
 
-        An existing array whose chunks or shards differ from the declared layout is a
-        data incompatibility that funlib refuses (``PermissionError``), as a differing
-        shape or dtype is.
+        An existing array is checked FIRST, against what is on disk: a layout this dataset
+        does not declare (a sharded array met with no ``shard_shape``), chunks that differ,
+        a block that is not whole stored units of it, or an origin that moved, are each
+        refused here by name (``ValueError``) before funlib compares shape and dtype.
         """
         write_shape = Coordinate(chunk_shape)
         if write_shape.dims != len(shape):
@@ -341,6 +342,21 @@ class Dataset(StrictBaseModel, ABC):
             existing = None
         if existing is not None:
             self._check_stored_layout(existing, write_shape, stored_chunk)
+            # ⛔ funlib relabels an existing array to the offset it is given, so a task whose
+            # write roi moved would have its blocks anchored off the array's own grid with no
+            # error. Compared in VOXELS: a finished array may carry another voxel size than the
+            # one a task prepares with (slabreg relabels its canvas to physical nm).
+            have = tuple(
+                int(round(o / v)) for o, v in zip(existing.roi.offset, existing.voxel_size)
+            )
+            want = tuple(int(round(o / v)) for o, v in zip(offset, voxel_size))
+            if have != want:
+                raise ValueError(
+                    f"Dataset {self.store}: the array on disk starts at voxel {have}, this "
+                    f"task would prepare it at {want}. Its blocks would then sit off the "
+                    "array's own stored grid; recreate the array or keep the roi it was "
+                    "created with."
+                )
 
         array = prepare_ds(
             self.prepared_store,
@@ -367,10 +383,12 @@ class Dataset(StrictBaseModel, ABC):
         if real_shards != declared_shards:
             raise ValueError(
                 f"Dataset {self.store}: the array on disk is stored "
-                f"{_describe_layout(real_chunks, real_shards)}, but this dataset declares "
-                f"{_describe_layout(tuple(stored_chunk), declared_shards)}. A dataset must "
-                "declare the layout of the array it writes into (shard_shape=..., "
-                "chunk_shape=...), or the array must be recreated."
+                f"{_describe_layout(real_chunks, real_shards)}, but this dataset would store it "
+                f"{_describe_layout(tuple(stored_chunk), declared_shards)}"
+                + ("" if self.stored_unit is not None else " (it declares no layout, so the "
+                   "task's write block is the chunk)")
+                + ". A dataset must declare the layout of the array it writes into "
+                "(shard_shape=..., chunk_shape=...), or the array must be recreated."
             )
         if real_chunks != tuple(stored_chunk):
             raise ValueError(

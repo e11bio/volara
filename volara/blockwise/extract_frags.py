@@ -18,7 +18,7 @@ from scipy.ndimage import (
 from skimage.measure import label as relabel
 from skimage.segmentation import watershed
 
-from ..datasets import Affs, Labels, Raw
+from ..datasets import Affs, Dataset, Labels, Raw
 from ..dbs import PostgreSQL, SQLite
 from ..segment_utils import replace_values
 from ..utils import PydanticCoordinate
@@ -262,6 +262,10 @@ class ExtractFrags(BlockwiseTask):
     @property
     def voxel_size(self) -> Coordinate:
         return self.affs_data.array("r").voxel_size
+
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        return [self.frags_data]
 
     def drop_artifacts(self):
         self.frags_data.drop()
