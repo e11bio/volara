@@ -86,9 +86,17 @@ class LambdaTask(BlockwiseTask):
     def write_size(self) -> Coordinate:
         if self.block_size is not None:
             block_voxels = Coordinate(self.block_size)
+        elif self.out_data.stored_unit is not None:
+            # a declared shard (or chunk) is the unit a block must write whole
+            block_voxels = Coordinate(self.out_data.stored_unit)
         else:
             try:
-                block_voxels = Coordinate(self.out_data.array("r").chunk_shape)
+                out = self.out_data.array("r")
+                # a sharded output must be written a whole shard at a time; its
+                # `chunk_shape` is the inner chunk, which is only a read unit
+                block_voxels = Coordinate(
+                    getattr(out, "shard_shape", None) or out.chunk_shape
+                )
             except FileNotFoundError:
                 block_voxels = Coordinate(self.in_data.array("r").chunk_shape)
         return block_voxels * self.voxel_size
