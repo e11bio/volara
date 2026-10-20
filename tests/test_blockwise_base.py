@@ -369,3 +369,21 @@ def test_a_url_basedir_puts_the_meta_dir_and_tracking_store_in_one_local_place(
     assert not t.meta_dir.exists()
     third = t.run_blockwise(multiprocessing=False)[t.task_name]
     assert third.skipped_count == 0
+
+
+def test_every_writing_task_lists_what_it_writes(tmp_path):
+    """`check_output_block_grids` only sees `output_datasets`; a task that writes an array but
+    lists none (or lists its INPUT) is unchecked and can race silently. Pinned per task, built
+    without validation so only the property is under test."""
+    from volara.blockwise import CLAHE, ApplyShift, ExtractFrags
+    from volara.datasets import Labels, Raw
+
+    a, b, c = (Raw(store=tmp_path / f"{n}.zarr") for n in "abc")
+    assert [d.store for d in CLAHE.model_construct(out_arr=a).output_datasets] == [a.store]
+    assert CLAHE.model_construct(out_arr=None).output_datasets == []
+    frags = Labels(store=tmp_path / "frags.zarr")
+    assert [d.store for d in ExtractFrags.model_construct(frags_data=frags).output_datasets] == [frags.store]
+    shift = ApplyShift.model_construct(shifts=a, aligned=b, interp_shifts=None)
+    assert [d.store for d in shift.output_datasets] == [b.store], "shifts is its INPUT"
+    shift = ApplyShift.model_construct(shifts=a, aligned=b, interp_shifts=c)
+    assert [d.store for d in shift.output_datasets] == [b.store, c.store]

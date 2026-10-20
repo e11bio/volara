@@ -44,6 +44,11 @@ def stored_unit_of(array: Array) -> tuple[int, ...]:
     return shards if shards is not None else chunks
 
 
+def _voxels(offset, voxel_size):
+    """A world offset in voxels, as an int where it is one."""
+    return int(offset) // int(voxel_size) if int(offset) % int(voxel_size) == 0 else offset / voxel_size
+
+
 def _describe_layout(chunks, shards) -> str:
     if shards is None:
         return f"as chunks {tuple(chunks)}, unsharded"
@@ -346,16 +351,29 @@ class Dataset(StrictBaseModel, ABC):
             # write roi moved would have its blocks anchored off the array's own grid with no
             # error. Compared in VOXELS: a finished array may carry another voxel size than the
             # one a task prepares with (slabreg relabels its canvas to physical nm).
-            have = tuple(
-                int(round(o / v)) for o, v in zip(existing.roi.offset, existing.voxel_size)
-            )
-            want = tuple(int(round(o / v)) for o, v in zip(offset, voxel_size))
-            if have != want:
+            if existing.roi.dims != len(tuple(offset)):
+                raise ValueError(
+                    f"Dataset {self.store}: the array on disk has {existing.roi.dims} spatial "
+                    f"axes ({list(existing.axis_names)}), this task prepares {len(tuple(offset))}; "
+                    "the axes differ, not the layout. Recreate the array."
+                )
+            # exact, in voxels: o_have / v_have == o_want / v_want, cross-multiplied so a
+            # sub-voxel move is not rounded away
+            moved = [
+                d
+                for d, (oh, vh, ow, vw) in enumerate(
+                    zip(existing.roi.offset, existing.voxel_size, offset, voxel_size)
+                )
+                if int(oh) * int(vw) != int(ow) * int(vh)
+            ]
+            if moved:
+                have = tuple(_voxels(o, v) for o, v in zip(existing.roi.offset, existing.voxel_size))
+                want = tuple(_voxels(o, v) for o, v in zip(offset, voxel_size))
                 raise ValueError(
                     f"Dataset {self.store}: the array on disk starts at voxel {have}, this "
-                    f"task would prepare it at {want}. Its blocks would then sit off the "
-                    "array's own stored grid; recreate the array or keep the roi it was "
-                    "created with."
+                    f"task would prepare it at {want} (axes {moved} differ). Its blocks would "
+                    "then sit off the array's own stored grid; recreate the array or keep the "
+                    "roi it was created with."
                 )
 
         array = prepare_ds(
