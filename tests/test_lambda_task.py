@@ -467,6 +467,7 @@ def test_lambda_task_refuses_a_block_grid_off_the_output_shard_grid(tmp_path):
     assert not out[:32].any()
 
 
+
 @needs_sharding
 def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shards(tmp_path):
     """`init_out=True` against an existing sharded output the dataset says nothing about: the
