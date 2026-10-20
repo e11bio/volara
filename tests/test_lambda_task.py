@@ -1,3 +1,4 @@
+import inspect
 import os
 import shutil
 
@@ -360,3 +361,115 @@ def test_lambda_task_skips_non_overlapping_blocks(tmp_path):
     # The region should remain zeros (untouched)
     result = task.out_data.array("r")[Roi((10, 10), (10, 10))]
     np.testing.assert_array_equal(result, np.zeros((10, 10), dtype=np.uint8))
+
+
+_FUNLIB_SHARDS = "shard_shape" in inspect.signature(prepare_ds).parameters
+needs_sharding = pytest.mark.skipif(
+    not _FUNLIB_SHARDS,
+    reason="funlib.persistence here has no prepare_ds(shard_shape=...) (funkelab/funlib.persistence#40)",
+)
+
+
+def _threshold_input(tmp_path):
+    data = np.linspace(0, 1, 64 * 64, dtype=np.float32).reshape(64, 64)
+    in_path = tmp_path / "data.zarr" / "raw"
+    prepare_ds(
+        in_path,
+        shape=data.shape,
+        voxel_size=Coordinate(1, 1),
+        dtype=data.dtype,
+        mode="w",
+    )[:] = data
+    return in_path, data
+
+
+@needs_sharding
+def test_lambda_task_blocks_default_to_whole_shards(tmp_path):
+    """With no block_size the block is the declared shard, so every block is one
+    plain put and no two blocks share a stored object."""
+    in_path, data = _threshold_input(tmp_path)
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(
+            store=tmp_path / "data.zarr" / "out",
+            shard_shape=(16, 16),
+            chunk_shape=(8, 8),
+        ),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+    )
+    assert task.write_size == Coordinate(16, 16)
+    assert task.block_grid_shape == Coordinate(4, 4)
+
+    task.run_blockwise(multiprocessing=False)
+
+    out = task.out_data.array("r")
+    assert out.shard_shape == Coordinate(16, 16)  # ty: ignore[unresolved-attribute]
+    assert out.chunk_shape == Coordinate(8, 8)
+    np.testing.assert_array_equal(out[:], (data > 0.5).astype(np.uint8))
+
+
+@needs_sharding
+def test_lambda_task_blocks_follow_an_existing_sharded_output(tmp_path):
+    """`init_out=False` sizes blocks off the destination: its shard, never its inner chunk."""
+    in_path, data = _threshold_input(tmp_path)
+    out_path = tmp_path / "data.zarr" / "out"
+    prepare_ds(
+        out_path,
+        shape=data.shape,
+        voxel_size=Coordinate(1, 1),
+        chunk_shape=(8, 8),
+        shard_shape=(32, 32),
+        dtype=np.uint8,
+        mode="w",
+    )
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        init_out=False,
+    )
+    assert task.write_size == Coordinate(32, 32)
+
+
+@needs_sharding
+def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
+    in_path, _ = _threshold_input(tmp_path)
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(
+            store=tmp_path / "data.zarr" / "out",
+            shard_shape=(16, 16),
+            chunk_shape=(8, 8),
+        ),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        block_size=Coordinate(8, 8),
+    )
+    with pytest.raises(ValueError, match="not a whole number of shards"):
+        task.init()
+    assert not (tmp_path / "data.zarr" / "out").exists()
+
+
+@needs_sharding
+def test_lambda_task_concurrent_workers_write_whole_shards(tmp_path):
+    """Four LocalWorker processes writing 16 shard-sized blocks into one sharded
+    array: with blocks aligned to shards there is nothing to race over.
+
+    pytest tests/test_lambda_task.py::test_lambda_task_concurrent_workers_write_whole_shards
+    """
+    in_path, data = _threshold_input(tmp_path)
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(
+            store=tmp_path / "data.zarr" / "out",
+            shard_shape=(16, 16),
+            chunk_shape=(8, 8),
+        ),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        num_workers=4,
+        worker_config=LocalWorker(),
+    )
+    states = task.run_blockwise(multiprocessing=True)
+    assert states[task.task_name].failed_count == 0
+    np.testing.assert_array_equal(
+        task.out_data.array("r")[:], (data > 0.5).astype(np.uint8)
+    )
