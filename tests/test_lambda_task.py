@@ -408,20 +408,24 @@ def test_lambda_task_blocks_default_to_whole_shards(tmp_path):
     np.testing.assert_array_equal(out[:], (data > 0.5).astype(np.uint8))
 
 
-@needs_sharding
+def _zarr_sharded_output(store, shape, chunks=(8, 8), shards=(32, 32)):
+    """A sharded destination built by zarr itself, so this runs on funlib 0.7.0 too."""
+    import zarr
+
+    z = zarr.create_array(
+        store=str(store), shape=shape, chunks=chunks, shards=shards, dtype="uint8", zarr_format=3
+    )
+    z.attrs.update({"offset": [0, 0], "voxel_size": [1, 1], "axis_names": ["y", "x"],
+                    "units": ["nm", "nm"], "types": ["space", "space"]})
+    return z
+
+
 def test_lambda_task_blocks_follow_an_existing_sharded_output(tmp_path):
-    """`init_out=False` sizes blocks off the destination: its shard, never its inner chunk."""
+    """`init_out=False` sizes blocks off the destination: its shard, never its inner chunk --
+    read off zarr, so on a funlib without Array.shard_shape as well."""
     in_path, data = _threshold_input(tmp_path)
     out_path = tmp_path / "data.zarr" / "out"
-    prepare_ds(
-        out_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        chunk_shape=(8, 8),
-        shard_shape=(32, 32),
-        dtype=np.uint8,
-        mode="w",
-    )
+    _zarr_sharded_output(out_path, data.shape)
     task = LambdaTask(
         in_data=Raw(store=in_path),
         out_data=Labels(store=out_path),
@@ -429,6 +433,48 @@ def test_lambda_task_blocks_follow_an_existing_sharded_output(tmp_path):
         init_out=False,
     )
     assert task.write_size == Coordinate(32, 32)
+
+    task.run_blockwise(multiprocessing=False)
+    np.testing.assert_array_equal(task.out_data.array("r")[:], (data > 0.5).astype(np.uint8))
+
+
+def test_lambda_task_refuses_a_block_grid_off_the_output_shard_grid(tmp_path):
+    """Size is not enough: daisy anchors blocks at write_roi.offset. A window patch whose roi
+    starts mid-shard would have every block straddle two shards, racing its neighbours."""
+    in_path, data = _threshold_input(tmp_path)
+    out_path = tmp_path / "data.zarr" / "out"
+    _zarr_sharded_output(out_path, data.shape)
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        init_out=False,
+        roi=Roi((16, 0), (32, 64)),
+    )
+    assert task.write_size == Coordinate(32, 32)
+    with pytest.raises(ValueError, match="off the shard grid on axes \\[0\\]"):
+        task.run_blockwise(multiprocessing=False)
+    assert not task.out_data.array("r")[:].any(), "refused before any block ran"
+
+    # the same window on the grid is fine, and only that window is written
+    aligned = task.model_copy(update={"roi": Roi((32, 0), (32, 64))})
+    aligned.run_blockwise(multiprocessing=False)
+    out = aligned.out_data.array("r")[:]
+    np.testing.assert_array_equal(out[32:], (data > 0.5).astype(np.uint8)[32:])
+    assert not out[:32].any()
+
+
+def test_lambda_task_init_out_on_an_undeclared_sharded_output_is_refused_by_name(tmp_path):
+    in_path, data = _threshold_input(tmp_path)
+    out_path = tmp_path / "data.zarr" / "out"
+    _zarr_sharded_output(out_path, data.shape)
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out_path),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+    )
+    with pytest.raises(ValueError, match="must declare the layout.*shard_shape"):
+        task.init()
 
 
 @needs_sharding

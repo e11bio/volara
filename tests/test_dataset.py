@@ -501,12 +501,14 @@ def test_prepare_refuses_a_write_block_that_is_not_whole_shards(tmp_path):
     arr[:] = 3
     _prepare(ds, write_shape=(2, 32, 32))
     np.testing.assert_array_equal(ds.array("r")[:], 3)
-    # ... and a different layout is a data incompatibility, not a silent reuse
+    # ... and a different layout is refused by name before funlib sees it (funlib would refuse
+    # the chunk mismatch too, as a bare PermissionError, and not a shard mismatch at all)
     other = Labels(
         store=tmp_path / "x.zarr", shard_shape=(2, 64, 64), chunk_shape=(2, 8, 8)
     )
-    with pytest.raises(PermissionError):
+    with pytest.raises(ValueError, match="must declare the layout of the array it writes into"):
         _prepare(other, write_shape=(2, 64, 64))
+    np.testing.assert_array_equal(ds.array("r")[:], 3)
 
 
 def test_prepare_names_a_funlib_that_cannot_shard(tmp_path, monkeypatch):
@@ -521,3 +523,66 @@ def test_prepare_names_a_funlib_that_cannot_shard(tmp_path, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="no shard_shape parameter"):
         _prepare(ds, write_shape=(2, 32, 32))
+
+
+def _zarr_sharded(store, shape=(2, 64, 64), chunks=(2, 8, 8), shards=(2, 32, 32), fill=0):
+    """A zarr v3 SHARDED array with funlib's attrs, built by zarr itself so the tests run on a
+    funlib that cannot create one (0.7.0)."""
+    import zarr
+
+    z = zarr.create_array(
+        store=str(store), shape=shape, chunks=chunks, shards=shards, dtype="uint8", zarr_format=3
+    )
+    z.attrs.update(
+        {"offset": [0, 0], "voxel_size": [1, 1], "axis_names": ["c^", "y", "x"],
+         "units": ["nm", "nm"], "types": ["channel", "space", "space"]}
+    )
+    z[:] = fill
+    return z
+
+
+def test_stored_layout_reads_zarr_itself(tmp_path):
+    """Right on a funlib without Array.shard_shape: the shard comes off the zarr array."""
+    from funlib.persistence import open_ds
+
+    from volara.datasets import stored_layout, stored_unit_of
+
+    _zarr_sharded(tmp_path / "s.zarr")
+    arr = open_ds(tmp_path / "s.zarr")
+    assert stored_layout(arr) == ((2, 8, 8), (2, 32, 32))
+    assert stored_unit_of(arr) == (2, 32, 32)
+    prepare_ds(tmp_path / "p.zarr", (8, 8), chunk_shape=(4, 4), mode="w")
+    assert stored_layout(open_ds(tmp_path / "p.zarr")) == ((4, 4), None)
+    assert stored_unit_of(open_ds(tmp_path / "p.zarr")) == (4, 4)
+
+
+@pytest.mark.parametrize("layout", [{}, {"chunk_shape": (2, 8, 8)}], ids=["nothing", "chunk-only"])
+def test_prepare_refuses_an_existing_sharded_array_the_dataset_does_not_declare(tmp_path, layout):
+    """funlib with no shard_shape given does not care whether the array is sharded, so it would
+    reuse this one; the blocks, sized to the chunk, would then share shards. Refused by name."""
+    _zarr_sharded(tmp_path / "x.zarr", fill=7)
+    ds = Labels(store=tmp_path / "x.zarr", **layout)
+    with pytest.raises(ValueError, match="must declare the layout of the array it writes into"):
+        _prepare(ds, write_shape=(2, 8, 8))
+    with pytest.raises(ValueError, match="must declare the layout"):
+        _prepare(ds, write_shape=(2, 32, 32))   # block == shard, still undeclared
+    np.testing.assert_array_equal(ds.array("r")[:], 7), "nothing touched"
+
+
+@needs_sharding
+def test_prepare_accepts_the_declared_layout_of_an_existing_sharded_array(tmp_path):
+    _zarr_sharded(tmp_path / "x.zarr", fill=7)
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 8, 8), shard_shape=(2, 32, 32))
+    _prepare(ds, write_shape=(2, 32, 32))
+    np.testing.assert_array_equal(ds.array("r")[:], 7)
+    with pytest.raises(ValueError, match="not a whole number of shards"):
+        _prepare(ds, write_shape=(2, 16, 16))
+
+
+@pytest.mark.parametrize("layout", [{"chunk_shape": (0, 8, 8)},
+                                    {"chunk_shape": (0, 8, 8), "shard_shape": (2, 8, 8)},
+                                    {"chunk_shape": (2, 8, 8), "shard_shape": (2, 0, 8)}],
+                         ids=["chunk", "chunk-under-shard", "shard"])
+def test_a_layout_must_be_positive_per_axis(tmp_path, layout):
+    with pytest.raises(ValidationError, match="positive per axis"):
+        Labels(store=tmp_path / "x.zarr", **layout)

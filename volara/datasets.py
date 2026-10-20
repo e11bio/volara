@@ -27,6 +27,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
+    """``(chunks, shards)`` of the zarr array behind a funlib ``Array``, over every axis;
+    ``shards`` is ``None`` for an unsharded array. Read off zarr itself, so it is right on a
+    funlib without ``Array.shard_shape`` too. A non-zarr source has chunks only."""
+    source = array._source_data
+    chunks = tuple(int(c) for c in getattr(source, "chunks", array.chunk_shape))
+    shards = getattr(source, "shards", None)
+    return chunks, None if shards is None else tuple(int(s) for s in shards)
+
+
+def stored_unit_of(array: Array) -> tuple[int, ...]:
+    """The smallest region a block may write on its own: the shard when the array is sharded,
+    else the chunk. Over every axis of the array."""
+    chunks, shards = stored_layout(array)
+    return shards if shards is not None else chunks
+
+
+def _describe_layout(chunks, shards) -> str:
+    if shards is None:
+        return f"as chunks {tuple(chunks)}, unsharded"
+    return f"as chunks {tuple(chunks)} in shards {tuple(shards)}"
+
+
 class Dataset(StrictBaseModel, ABC):
     """
     A Dataset base class that defines the common attributes and methods
@@ -154,6 +177,12 @@ class Dataset(StrictBaseModel, ABC):
 
     @model_validator(mode="after")
     def _check_storage_layout(self):
+        for name in ("chunk_shape", "shard_shape"):
+            v = getattr(self, name)
+            if v is not None and any(int(c) <= 0 for c in v):
+                raise ValueError(
+                    f"Dataset {self.store}: {name} must be positive per axis, got {tuple(v)}."
+                )
         if self.shard_shape is None:
             return self
         if self.chunk_shape is None:
@@ -301,6 +330,18 @@ class Dataset(StrictBaseModel, ABC):
                 )
             kwargs["shard_shape"] = self.shard_shape
 
+        # ⛔ Against the array that is actually there, BEFORE funlib sees it. funlib compares the
+        # inner chunk and, with no shard_shape given, does not care whether the array is sharded
+        # -- so an existing sharded array would be reused by a dataset that declares no shard,
+        # and its blocks (sized to the chunk) would then share shards; and where funlib does
+        # refuse (a chunk mismatch) it names neither the layout nor the knob.
+        try:
+            existing = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None:
+            self._check_stored_layout(existing, write_shape, stored_chunk)
+
         array = prepare_ds(
             self.prepared_store,
             shape=shape,
@@ -314,7 +355,36 @@ class Dataset(StrictBaseModel, ABC):
             mode="a",
             **kwargs,
         )
+        # and the array funlib handed back, created or reused, is stored as declared
+        self._check_stored_layout(array, write_shape, stored_chunk)
         array._source_data.attrs.update(self.attrs)
+
+    def _check_stored_layout(self, array: Array, write_shape, stored_chunk) -> None:
+        """Refuse unless ``array`` is stored as this dataset declares and ``write_shape`` is a
+        whole number of its stored units per axis. See :meth:`prepare`."""
+        real_chunks, real_shards = stored_layout(array)
+        declared_shards = None if self.shard_shape is None else tuple(self.shard_shape)
+        if real_shards != declared_shards:
+            raise ValueError(
+                f"Dataset {self.store}: the array on disk is stored "
+                f"{_describe_layout(real_chunks, real_shards)}, but this dataset declares "
+                f"{_describe_layout(tuple(stored_chunk), declared_shards)}. A dataset must "
+                "declare the layout of the array it writes into (shard_shape=..., "
+                "chunk_shape=...), or the array must be recreated."
+            )
+        if real_chunks != tuple(stored_chunk):
+            raise ValueError(
+                f"Dataset {self.store}: the array on disk has chunks {real_chunks}, not the "
+                f"{tuple(stored_chunk)} this dataset would store; recreate it or declare "
+                "chunk_shape to match."
+            )
+        real_unit = real_shards if real_shards is not None else real_chunks
+        if any(w % u != 0 for w, u in zip(write_shape, real_unit)):
+            raise ValueError(
+                f"Dataset {self.store}: the block a task writes at once, {tuple(write_shape)} "
+                f"voxels, is not a whole number of the stored units {real_unit} of the array on "
+                "disk per axis; blocks sharing a stored object overwrite each other silently."
+            )
 
     def lazy_ops(self, arr: Array) -> None:
         """
