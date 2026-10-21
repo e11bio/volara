@@ -641,3 +641,14 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
     with pytest.raises(ValueError, match="spatial axes.*the axes differ"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
                    units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
+
+
+def test_voxels_leaves_a_world_offset_alone_under_a_zero_voxel_size():
+    """The origin comparison in `prepare` works in voxels; an axis with voxel size 0 cannot be
+    divided through, so its offset is compared as given. An exact division is an int, an inexact
+    one a float, so (6, 3) and (7, 2) never compare equal to each other's voxel count."""
+    from volara.datasets import _voxels
+
+    assert _voxels(6, 0) == 6
+    assert _voxels(6, 3) == 2 and isinstance(_voxels(6, 3), int)
+    assert _voxels(7, 2) == 3.5
