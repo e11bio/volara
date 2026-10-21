@@ -13,7 +13,7 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.logging import get_log_basedir, set_log_basedir
 
-from ..datasets import MaskDataset
+from ..datasets import Dataset, MaskDataset, stored_layout
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
@@ -144,6 +144,59 @@ class BlockwiseTask(StrictBaseModel, ABC):
         to a clean state equivalent to not having run the task at all
         """
         pass
+
+    @property
+    def output_datasets(self) -> list[Dataset]:
+        """The datasets this task writes block by block. The base task knows none; a
+        subclass lists its own so :meth:`check_output_block_grids` can hold every block to
+        the stored layout of the array it writes into."""
+        return []
+
+    def check_output_block_grids(self) -> None:
+        """⛔ Every block must cover WHOLE stored units (chunks, or shards) of every output
+        array, and sit ON that array's unit grid. A block that writes part of a stored object
+        reads it back, merges and rewrites it, so two blocks sharing an object overwrite each
+        other with no error.
+
+        Size alone is not enough: daisy anchors the block grid at ``write_roi.offset``, which
+        is not the array's origin for a task that patches a window of an existing array
+        (``LambdaTask(init_out=False, roi=...)``) or whose ``roi`` is cut inside its input.
+        Checked here, on the driver, against the array actually on disk, before a worker
+        starts; an output that does not exist yet is skipped (nothing has prepared it)."""
+        for ds in self.output_datasets:
+            try:
+                arr = ds.array("r")
+            except FileNotFoundError:
+                continue
+            chunks, shards = stored_layout(arr)
+            unit = shards if shards is not None else chunks
+            dims = arr.voxel_size.dims
+            spatial_unit = unit[len(unit) - dims :]
+            block = self.write_size / arr.voxel_size
+            off = (self.write_roi.offset - arr.roi.offset) / arr.voxel_size
+            bad_size = [d for d in range(dims) if block[d] % spatial_unit[d] != 0]
+            bad_off = [d for d in range(dims) if off[d] % spatial_unit[d] != 0]
+            if bad_size or bad_off:
+                what = "shards" if shards is not None else "chunks"
+                raise ValueError(
+                    f"{self.task_name}: blocks do not tile the {what} of {ds.store}. The "
+                    f"array is stored in {what} of {tuple(spatial_unit)} voxels (spatial); "
+                    f"this task writes {tuple(block)}-voxel blocks from a grid anchored "
+                    f"{tuple(off)} voxels from the array origin"
+                    + (
+                        f" -- the block is not a whole number of {what} on axes {bad_size}"
+                        if bad_size
+                        else ""
+                    )
+                    + (
+                        f" -- the grid is off the {what[:-1]} grid on axes {bad_off}"
+                        if bad_off
+                        else ""
+                    )
+                    + ". Blocks sharing a stored object overwrite each other silently; "
+                    "make the block a multiple of the unit and start the write roi on the "
+                    "unit grid."
+                )
 
     @property
     def block_write_roi(self) -> Roi:
@@ -315,6 +368,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         with benchmark_logger.trace("init"):
             self.meta_dir.mkdir(parents=True, exist_ok=True)
             self.init()
+            self.check_output_block_grids()
 
             context = self.context_size
             if not isinstance(context, Coordinate):

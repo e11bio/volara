@@ -1,4 +1,6 @@
+import inspect
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -392,3 +394,261 @@ def test_mask_dataset_round_trips_and_reads_like_any_dataset(tmp_path):
     assert rebuilt.dataset_type == "mask"
     assert rebuilt == dataset
     assert rebuilt.array("r")[:].tolist() == array.tolist()
+
+
+# --- Storage layout: chunk_shape (the write unit), sharding, inner_chunk_shape ------------------
+
+_FUNLIB_SHARDS = "sharding" in inspect.signature(prepare_ds).parameters
+needs_sharding = pytest.mark.skipif(
+    not _FUNLIB_SHARDS,
+    reason="funlib.persistence here has no prepare_ds(sharding=...) (funkelab/funlib.persistence#40)",
+)
+
+
+def _prepare(ds, write_shape, shape=(2, 64, 64)):
+    """`Dataset.prepare` as a task calls it: `chunk_shape` is the block it writes."""
+    ds.prepare(
+        shape=shape,
+        chunk_shape=write_shape,
+        offset=(0, 0),
+        voxel_size=(1, 1),
+        units=("nm", "nm"),
+        axis_names=("c^", "y", "x"),
+        types=("channel", "space", "space"),
+        dtype=np.uint8,
+    )
+
+
+@pytest.mark.parametrize(
+    "layout, problem",
+    [
+        ({"inner_chunk_shape": (2, 8, 8)}, "only applies with sharding=True"),
+        ({"sharding": True, "chunk_shape": (2, 32, 32), "inner_chunk_shape": (8, 8)},
+         "differ in dimensions"),
+        ({"sharding": True, "chunk_shape": (2, 32, 32), "inner_chunk_shape": (2, 12, 12)},
+         "whole number of inner_chunk_shape"),
+        ({"chunk_shape": (0, 8, 8)}, "positive per axis"),
+        ({"sharding": True, "chunk_shape": (2, 8, 8), "inner_chunk_shape": (2, 0, 8)},
+         "positive per axis"),
+    ],
+    ids=["inner-without-sharding", "dims", "not-a-multiple", "zero-chunk", "zero-inner"],
+)
+def test_a_layout_is_validated_at_construction(tmp_path, layout, problem):
+    with pytest.raises(ValidationError, match=problem):
+        Labels(store=tmp_path / "x.zarr", **layout)
+
+
+def test_stored_unit_is_the_declared_chunk_shape(tmp_path):
+    store = tmp_path / "x.zarr"
+    assert Labels(store=store).stored_unit is None
+    assert Labels(store=store, chunk_shape=(2, 8, 8)).stored_unit == Coordinate(2, 8, 8)
+    assert Labels(store=store, chunk_shape=(2, 32, 32), sharding=True).stored_unit == Coordinate(2, 32, 32)
+
+
+def test_the_layout_rides_in_the_config_a_worker_rebuilds(tmp_path):
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True,
+                inner_chunk_shape=(2, 8, 8))
+    again = Labels.model_validate_json(ds.model_dump_json())
+    assert (again.chunk_shape, again.sharding, again.inner_chunk_shape) == (
+        Coordinate(2, 32, 32), True, Coordinate(2, 8, 8))
+    assert again == ds
+
+
+def test_prepare_stores_the_write_block_as_one_chunk_by_default(tmp_path):
+    ds = Labels(store=tmp_path / "x.zarr")
+    _prepare(ds, write_shape=(2, 16, 16))
+    arr = ds.array("r")
+    assert arr.chunk_shape == Coordinate(2, 16, 16)
+    assert arr._source_data.shards is None
+
+
+def test_prepare_refuses_a_write_block_that_is_not_whole_chunks(tmp_path):
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 16, 16))
+    with pytest.raises(ValueError, match="not a whole number of chunks"):
+        _prepare(ds, write_shape=(2, 24, 24))
+    assert not (tmp_path / "x.zarr").exists(), "refused before anything was created"
+
+    _prepare(ds, write_shape=(2, 32, 32))
+    arr = ds.array("r")
+    assert arr.chunk_shape == Coordinate(2, 16, 16), "the declared chunk, not the block"
+    assert arr._source_data.shards is None
+
+
+def test_prepare_refuses_a_write_block_with_the_wrong_dimensions(tmp_path):
+    ds = Labels(store=tmp_path / "x.zarr")
+    with pytest.raises(ValueError, match="one element per axis"):
+        _prepare(ds, write_shape=(16, 16))
+    ds = Labels(store=tmp_path / "y.zarr", chunk_shape=(16, 16))
+    with pytest.raises(ValueError, match="one element per axis"):
+        _prepare(ds, write_shape=(2, 16, 16))
+
+
+@needs_sharding
+def test_prepare_shards_at_the_chunk_shape(tmp_path):
+    """Under `sharding` the declared chunk_shape is the shard: the write unit stays one knob."""
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True,
+                inner_chunk_shape=(2, 8, 8))
+    with pytest.raises(ValueError, match="not a whole number of shards"):
+        _prepare(ds, write_shape=(2, 16, 16))
+    assert not (tmp_path / "x.zarr").exists()
+
+    _prepare(ds, write_shape=(2, 64, 64))
+    arr = ds.array("r+")
+    assert arr.chunk_shape == arr.shard_shape == Coordinate(2, 32, 32)
+    assert arr.inner_chunk_shape == Coordinate(2, 8, 8)
+
+    # a second prepare against the same layout reuses the array ...
+    arr[:] = 3
+    _prepare(ds, write_shape=(2, 32, 32))
+    np.testing.assert_array_equal(ds.array("r")[:], 3)
+    # ... a dataset saying nothing about sharding reuses it too (a creation option) ...
+    _prepare(Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32)), write_shape=(2, 32, 32))
+    np.testing.assert_array_equal(ds.array("r")[:], 3)
+    # ... and another write unit, or another inner chunk, is refused by name
+    other = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 64, 64), sharding=True)
+    with pytest.raises(ValueError, match="written in shards of \\(2, 32, 32\\).*shards of \\(2, 64, 64\\)"):
+        _prepare(other, write_shape=(2, 64, 64))
+    inner = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True,
+                   inner_chunk_shape=(2, 16, 16))
+    with pytest.raises(ValueError, match="inner chunks \\(2, 8, 8\\)"):
+        _prepare(inner, write_shape=(2, 32, 32))
+    np.testing.assert_array_equal(ds.array("r")[:], 3)
+
+
+@needs_sharding
+def test_prepare_shards_with_funlibs_default_inner_chunk(tmp_path):
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 128, 128), sharding=True)
+    _prepare(ds, write_shape=(2, 128, 128), shape=(2, 256, 256))
+    arr = ds.array("r")
+    assert arr.chunk_shape == Coordinate(2, 128, 128)
+    assert arr.inner_chunk_shape == Coordinate(2, 64, 64)
+
+
+def test_prepare_names_a_funlib_that_cannot_shard(tmp_path, monkeypatch):
+    import volara.datasets as datasets
+
+    def prepare_ds_without_sharding(store, shape, chunk_shape=None, **kwargs):
+        raise AssertionError("must not be reached")
+
+    monkeypatch.setattr(datasets, "prepare_ds", prepare_ds_without_sharding)
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True)
+    with pytest.raises(RuntimeError, match="no sharding parameter"):
+        _prepare(ds, write_shape=(2, 32, 32))
+
+
+def _zarr_sharded(store, shape=(2, 64, 64), chunks=(2, 8, 8), shards=(2, 32, 32), fill=0):
+    """A zarr v3 SHARDED array with funlib's attrs, built by zarr itself so the tests run on a
+    funlib that cannot create one (0.7.0)."""
+    import zarr
+
+    z = zarr.create_array(
+        store=str(store), shape=shape, chunks=chunks, shards=shards, dtype="uint8", zarr_format=3
+    )
+    z.attrs.update(
+        {"offset": [0, 0], "voxel_size": [1, 1], "axis_names": ["c^", "y", "x"],
+         "units": ["nm", "nm"], "types": ["channel", "space", "space"]}
+    )
+    z[:] = fill
+    return z
+
+
+def test_stored_layout_reads_zarr_itself(tmp_path):
+    """Right on a funlib without sharding support: the shard comes off the zarr array."""
+    from funlib.persistence import open_ds
+
+    from volara.datasets import stored_layout, stored_unit_of
+
+    _zarr_sharded(tmp_path / "s.zarr")
+    arr = open_ds(tmp_path / "s.zarr")
+    assert stored_layout(arr) == ((2, 8, 8), (2, 32, 32))
+    assert stored_unit_of(arr) == (2, 32, 32)
+    prepare_ds(tmp_path / "p.zarr", (8, 8), chunk_shape=(4, 4), mode="w")
+    assert stored_layout(open_ds(tmp_path / "p.zarr")) == ((4, 4), None)
+    assert stored_unit_of(open_ds(tmp_path / "p.zarr")) == (4, 4)
+
+
+def test_prepare_judges_an_existing_sharded_array_by_its_write_unit(tmp_path):
+    """An existing sharded array met by a dataset declaring nothing: the task's write block is
+    the unit. Blocks of the shard cover whole shards and are fine; blocks of the inner chunk
+    would share shards and are refused by name, whatever an older funlib would compare."""
+    _zarr_sharded(tmp_path / "x.zarr", fill=7)
+    ds = Labels(store=tmp_path / "x.zarr")
+    with pytest.raises(ValueError, match="written in shards of \\(2, 32, 32\\).*chunks of \\(2, 8, 8\\)"):
+        _prepare(ds, write_shape=(2, 8, 8))
+    with pytest.raises(ValueError, match="written in shards"):
+        _prepare(Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 8, 8)), write_shape=(2, 32, 32))
+    np.testing.assert_array_equal(ds.array("r")[:], 7), "nothing touched"
+    if _FUNLIB_SHARDS:
+        # the whole shard as the block is exactly the safe write
+        _prepare(ds, write_shape=(2, 32, 32))
+        np.testing.assert_array_equal(ds.array("r")[:], 7)
+    else:
+        # an old funlib compares the INNER chunk and would refuse with a bare PermissionError;
+        # the sharded array is named instead ...
+        with pytest.raises(RuntimeError, match="sharded.*funlib.persistence#40"):
+            _prepare(ds, write_shape=(2, 32, 32))
+        # ... except where the inner chunk IS the shard, which that funlib handles correctly
+        _zarr_sharded(tmp_path / "one.zarr", chunks=(2, 32, 32), shards=(2, 32, 32), fill=4)
+        one = Labels(store=tmp_path / "one.zarr")
+        _prepare(one, write_shape=(2, 32, 32))
+        np.testing.assert_array_equal(one.array("r")[:], 4)
+
+
+@needs_sharding
+def test_a_declared_inner_chunk_a_plain_array_has_not_got_is_refused_by_name(tmp_path):
+    """funlib compares a declared inner chunk to the array's chunks whether or not it is sharded;
+    volara names it, and accepts a restated chunk (the layout-copy idiom)."""
+    plain = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32))
+    _prepare(plain, write_shape=(2, 32, 32))
+    asks = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True,
+                  inner_chunk_shape=(2, 8, 8))
+    with pytest.raises(ValueError, match="chunks \\(it is not sharded\\) \\(2, 32, 32\\), not the inner chunks"):
+        _prepare(asks, write_shape=(2, 32, 32))
+
+
+@needs_sharding
+def test_a_sharding_dataset_reuses_a_plain_array_with_the_same_unit(tmp_path):
+    """`sharding` is a creation option, the other way round too."""
+    _prepare(Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32)), write_shape=(2, 32, 32))
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 32, 32), sharding=True)
+    _prepare(ds, write_shape=(2, 32, 32))
+    assert ds.array("r")._source_data.shards is None, "reused as it is"
+
+
+def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
+    """funlib relabels an existing array to the offset it is given; a task whose write roi moved
+    would then anchor its blocks off the array's own grid. Compared in voxels, so an array
+    relabelled to another voxel size (slabreg's physical-nm canvas) still re-enters."""
+    ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 16, 16))
+    _prepare(ds, write_shape=(2, 32, 32))
+    kw: dict[str, Any] = dict(units=("nm", "nm"), axis_names=("c^", "y", "x"),
+                              types=("channel", "space", "space"), dtype=np.uint8)
+    with pytest.raises(ValueError, match="starts at voxel \\(0, 0\\), this task would prepare it at \\(16, 0\\)"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    # the same voxel origin under another voxel size is the same array -- at a NONZERO origin,
+    # where world and voxel offsets differ (as slabreg's canvas, relabelled to nm)
+    ds = Labels(store=tmp_path / "y.zarr", chunk_shape=(2, 16, 16))
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    prepare_ds(tmp_path / "y.zarr", (2, 64, 64), offset=Coordinate(64, 0), voxel_size=Coordinate(4, 8),
+               axis_names=["c^", "y", "x"], chunk_shape=(2, 16, 16), dtype=np.uint8, mode="a")
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    # a sub-voxel move is a move: not rounded away
+    prepare_ds(tmp_path / "y.zarr", (2, 64, 64), offset=Coordinate(66, 0), voxel_size=Coordinate(4, 8),
+               axis_names=["c^", "y", "x"], chunk_shape=(2, 16, 16), dtype=np.uint8, mode="a")
+    with pytest.raises(ValueError, match="axes \\[0\\] differ"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    # different spatial axes are named as such, not as a moved origin
+    with pytest.raises(ValueError, match="spatial axes.*the axes differ"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
+                   units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
+
+
+def test_voxels_leaves_a_world_offset_alone_under_a_zero_voxel_size():
+    """The origin comparison in `prepare` works in voxels; an axis with voxel size 0 cannot be
+    divided through, so its offset is compared as given. An exact division is an int, an inexact
+    one a float, so (6, 3) and (7, 2) never compare equal to each other's voxel count."""
+    from volara.datasets import _voxels
+
+    assert _voxels(6, 0) == 6
+    assert _voxels(6, 3) == 2 and isinstance(_voxels(6, 3), int)
+    assert _voxels(7, 2) == 3.5
