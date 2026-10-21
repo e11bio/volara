@@ -387,3 +387,20 @@ def test_every_writing_task_lists_what_it_writes(tmp_path):
     assert [d.store for d in shift.output_datasets] == [b.store], "shifts is its INPUT"
     shift = ApplyShift.model_construct(shifts=a, aligned=b, interp_shifts=c)
     assert [d.store for d in shift.output_datasets] == [b.store, c.store]
+
+
+def test_the_grid_check_skips_an_output_nothing_has_prepared_yet(tmp_path):
+    """`check_output_block_grids` reads the array ON DISK. An output that does not exist yet has
+    no layout to check (an `init_out=False` task over a store its caller creates later); the
+    check must pass over it and must not create it."""
+    from volara.datasets import Raw
+
+    class Unprepared(DummyTask):
+        task_type: Literal["unprepared"] = "unprepared"  # type: ignore[assignment]
+
+        @property
+        def output_datasets(self):
+            return [Raw(store=tmp_path / "not-there.zarr")]
+
+    Unprepared().check_output_block_grids()
+    assert not (tmp_path / "not-there.zarr").exists(), "the check must not create the output"
