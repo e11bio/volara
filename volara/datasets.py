@@ -32,7 +32,7 @@ def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None
     ``shards`` is ``None`` for an unsharded array. Read off zarr itself, so it is right on a
     funlib without sharding support too. A non-zarr source has chunks only."""
     source = array._source_data
-    chunks = tuple(int(c) for c in getattr(source, "chunks", array.chunk_shape))
+    chunks = tuple(int(c) for c in getattr(source, "chunks", array.data.chunksize))
     shards = getattr(source, "shards", None)
     return chunks, None if shards is None else tuple(int(s) for s in shards)
 

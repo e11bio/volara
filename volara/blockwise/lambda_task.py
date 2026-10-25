@@ -97,7 +97,9 @@ class LambdaTask(BlockwiseTask):
                 # chunk as `chunk_shape`, and that is only a read unit.
                 block_voxels = Coordinate(stored_unit_of(self.out_data.array("r")))
             except FileNotFoundError:
-                block_voxels = Coordinate(self.in_data.array("r").chunk_shape)
+                # the input's stored unit, read off zarr too: `Array.chunk_shape` is
+                # None on a view the input's lazy ops moved off the chunk grid
+                block_voxels = Coordinate(stored_unit_of(self.in_data.array("r")))
         return block_voxels * self.voxel_size
 
     @property
