@@ -4,7 +4,7 @@ from typing import Literal
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 
-from ..datasets import Dataset, PydanticDataset, stored_unit_of
+from ..datasets import Dataset, PydanticDataset, spatial_unit_of
 from ..utils import PydanticCallable, PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -95,11 +95,11 @@ class LambdaTask(BlockwiseTask):
                 # a sharded output must be written a whole shard at a time. Read the unit
                 # off zarr itself: a funlib without sharding support reports the inner
                 # chunk as `chunk_shape`, and that is only a read unit.
-                block_voxels = Coordinate(stored_unit_of(self.out_data.array("r")))
+                block_voxels = Coordinate(spatial_unit_of(self.out_data.array("r")))
             except FileNotFoundError:
                 # the input's stored unit, read off zarr too: `Array.chunk_shape` is
                 # None on a view the input's lazy ops moved off the chunk grid
-                block_voxels = Coordinate(stored_unit_of(self.in_data.array("r")))
+                block_voxels = Coordinate(spatial_unit_of(self.in_data.array("r")))
         return block_voxels * self.voxel_size
 
     @property

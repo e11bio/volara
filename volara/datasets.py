@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
+import zarr
 from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
@@ -28,27 +29,50 @@ logger = logging.getLogger(__name__)
 
 
 def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
-    """``(chunks, shards)`` of the zarr array behind a funlib ``Array``, over every axis;
-    ``shards`` is ``None`` for an unsharded array. Read off zarr itself, so it is right on a
-    funlib without sharding support too. A non-zarr source has chunks only."""
+    """``(chunks, shards)`` of the zarr array behind a funlib ``Array``, over every STORED
+    axis (a lazy op that collapsed one does not remove it here); ``shards`` is ``None`` for an
+    unsharded array. Read off zarr itself, so it is right on a funlib without sharding support
+    too. A source that is not a zarr array (in memory, or dask-backed as CloudVolume's) has its
+    own chunking and no shards."""
     source = array._source_data
-    chunks = tuple(int(c) for c in getattr(source, "chunks", array.data.chunksize))
-    shards = getattr(source, "shards", None)
-    return chunks, None if shards is None else tuple(int(s) for s in shards)
+    if isinstance(source, zarr.Array):
+        shards = source.shards
+        return tuple(int(c) for c in source.chunks), (
+            None if shards is None else tuple(int(s) for s in shards)
+        )
+    chunks = getattr(
+        source, "chunksize", None
+    )  # a dask array; `.chunks` is per-block there
+    if chunks is None:
+        chunks = array.data.chunksize
+    return tuple(int(c) for c in chunks), None
 
 
 def stored_unit_of(array: Array) -> tuple[int, ...]:
     """The smallest region a block may write on its own: the shard when the array is sharded,
-    else the chunk. Over every axis of the array."""
+    else the chunk. Over every stored axis of the array."""
     chunks, shards = stored_layout(array)
     return shards if shards is not None else chunks
+
+
+def spatial_unit_of(array: Array) -> tuple[int, ...]:
+    """:func:`stored_unit_of` over the array's space and time axes only, in stored order: the
+    unit a block size in voxels applies to. Channel axes drop out whether the view kept them
+    or a lazy op (``channels=``) collapsed them, and wherever they sit (CloudVolume's is last)."""
+    unit = stored_unit_of(array)
+    types = array._metadata.types  # one per STORED axis, collapsed or not
+    return tuple(u for u, t in zip(unit, types) if t in ("space", "time"))
 
 
 def _voxels(offset, voxel_size):
     """A world offset in voxels, as an int where it is one."""
     if int(voxel_size) == 0:
         return offset
-    return int(offset) // int(voxel_size) if int(offset) % int(voxel_size) == 0 else offset / voxel_size
+    return (
+        int(offset) // int(voxel_size)
+        if int(offset) % int(voxel_size) == 0
+        else offset / voxel_size
+    )
 
 
 class Dataset(StrictBaseModel, ABC):
@@ -202,7 +226,9 @@ class Dataset(StrictBaseModel, ABC):
                     f"Dataset {self.store}: chunk_shape {tuple(self.chunk_shape)} and "
                     f"inner_chunk_shape {tuple(self.inner_chunk_shape)} differ in dimensions."
                 )
-            if any(c % i != 0 for c, i in zip(self.chunk_shape, self.inner_chunk_shape)):
+            if any(
+                c % i != 0 for c, i in zip(self.chunk_shape, self.inner_chunk_shape)
+            ):
                 raise ValueError(
                     f"Dataset {self.store}: chunk_shape {tuple(self.chunk_shape)} (the shard) "
                     f"must be a whole number of inner_chunk_shape "
@@ -362,7 +388,10 @@ class Dataset(StrictBaseModel, ABC):
                 if int(oh) * int(vw) != int(ow) * int(vh)
             ]
             if moved:
-                have = tuple(_voxels(o, v) for o, v in zip(existing.roi.offset, existing.voxel_size))
+                have = tuple(
+                    _voxels(o, v)
+                    for o, v in zip(existing.roi.offset, existing.voxel_size)
+                )
                 want = tuple(_voxels(o, v) for o, v in zip(offset, voxel_size))
                 raise ValueError(
                     f"Dataset {self.store}: the array on disk starts at voxel {have}, this "
@@ -401,11 +430,17 @@ class Dataset(StrictBaseModel, ABC):
                 f"{'shards' if real_shards is not None else 'chunks'} of {real_unit}, but this "
                 f"dataset would write in {'shards' if self.sharding else 'chunks'} of "
                 f"{tuple(stored_chunk)}"
-                + ("" if self.chunk_shape is not None else " (it declares no chunk_shape, so "
-                   "the task's write block is the unit)")
+                + (
+                    ""
+                    if self.chunk_shape is not None
+                    else " (it declares no chunk_shape, so "
+                    "the task's write block is the unit)"
+                )
                 + ". Declare chunk_shape to match the array, or recreate it."
             )
-        if self.inner_chunk_shape is not None and real_chunks != tuple(self.inner_chunk_shape):
+        if self.inner_chunk_shape is not None and real_chunks != tuple(
+            self.inner_chunk_shape
+        ):
             # funlib compares a declared inner chunk to the array's chunks, sharded or not
             raise ValueError(
                 f"Dataset {self.store}: the array on disk has "
@@ -415,7 +450,8 @@ class Dataset(StrictBaseModel, ABC):
             )
         if (
             real_shards is not None
-            and real_chunks != real_shards   # one chunk per shard: the inner chunk IS the unit
+            and real_chunks
+            != real_shards  # one chunk per shard: the inner chunk IS the unit
             and "sharding" not in inspect.signature(prepare_ds).parameters
         ):
             # this funlib compares the INNER chunk to the write block and would refuse the

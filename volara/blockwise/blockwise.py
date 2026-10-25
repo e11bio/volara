@@ -13,7 +13,7 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.logging import get_log_basedir, set_log_basedir
 
-from ..datasets import Dataset, MaskDataset, stored_layout
+from ..datasets import Dataset, MaskDataset, spatial_unit_of, stored_layout
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
@@ -176,9 +176,8 @@ class BlockwiseTask(StrictBaseModel, ABC):
             except FileNotFoundError:
                 continue
             chunks, shards = stored_layout(arr)
-            unit = shards if shards is not None else chunks
+            spatial_unit = spatial_unit_of(arr)
             dims = arr.voxel_size.dims
-            spatial_unit = unit[len(unit) - dims :]
             block = self.write_size / arr.voxel_size
             off = (self.write_roi.offset - arr.roi.offset) / arr.voxel_size
             bad_size = [d for d in range(dims) if block[d] % spatial_unit[d] != 0]

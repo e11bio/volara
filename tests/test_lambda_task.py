@@ -371,13 +371,14 @@ needs_sharding = pytest.mark.skipif(
 )
 
 
-def _threshold_input(tmp_path):
+def _threshold_input(tmp_path, chunk_shape=None):
     data = np.linspace(0, 1, 64 * 64, dtype=np.float32).reshape(64, 64)
     in_path = tmp_path / "data.zarr" / "raw"
     prepare_ds(
         in_path,
         shape=data.shape,
         voxel_size=Coordinate(1, 1),
+        chunk_shape=chunk_shape,
         dtype=data.dtype,
         mode="w",
     )[:] = data
@@ -406,7 +407,9 @@ def test_lambda_task_blocks_default_to_whole_shards(tmp_path):
 
     out = task.out_data.array("r")
     assert out.shard_shape == Coordinate(16, 16)  # ty: ignore[unresolved-attribute]
-    assert out.chunk_shape == Coordinate(16, 16), "funlib's chunk_shape is the WRITE unit: the shard"
+    assert out.chunk_shape == Coordinate(16, 16), (
+        "funlib's chunk_shape is the WRITE unit: the shard"
+    )
     assert out.inner_chunk_shape == Coordinate(8, 8)  # ty: ignore[unresolved-attribute]
     np.testing.assert_array_equal(out[:], (data > 0.5).astype(np.uint8))
 
@@ -416,10 +419,22 @@ def _zarr_sharded_output(store, shape, chunks=(8, 8), shards=(32, 32)):
     import zarr
 
     z = zarr.create_array(
-        store=str(store), shape=shape, chunks=chunks, shards=shards, dtype="uint8", zarr_format=3
+        store=str(store),
+        shape=shape,
+        chunks=chunks,
+        shards=shards,
+        dtype="uint8",
+        zarr_format=3,
     )
-    z.attrs.update({"offset": [0, 0], "voxel_size": [1, 1], "axis_names": ["y", "x"],
-                    "units": ["nm", "nm"], "types": ["space", "space"]})
+    z.attrs.update(
+        {
+            "offset": [0, 0],
+            "voxel_size": [1, 1],
+            "axis_names": ["y", "x"],
+            "units": ["nm", "nm"],
+            "types": ["space", "space"],
+        }
+    )
     return z
 
 
@@ -438,7 +453,9 @@ def test_lambda_task_blocks_follow_an_existing_sharded_output(tmp_path):
     assert task.write_size == Coordinate(32, 32)
 
     task.run_blockwise(multiprocessing=False)
-    np.testing.assert_array_equal(task.out_data.array("r")[:], (data > 0.5).astype(np.uint8))
+    np.testing.assert_array_equal(
+        task.out_data.array("r")[:], (data > 0.5).astype(np.uint8)
+    )
 
 
 def test_lambda_task_refuses_a_block_grid_off_the_output_shard_grid(tmp_path):
@@ -468,7 +485,9 @@ def test_lambda_task_refuses_a_block_grid_off_the_output_shard_grid(tmp_path):
 
 
 @needs_sharding
-def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shards(tmp_path):
+def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shards(
+    tmp_path,
+):
     """`init_out=True` against an existing sharded output the dataset says nothing about: the
     block defaults to the on-disk shard, so the write unit matches and the array is reused."""
     in_path, data = _threshold_input(tmp_path)
@@ -478,11 +497,17 @@ def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shard
         in_data=Raw(store=in_path),
         out_data=Labels(store=out_path),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        out_array_dtype=np.dtype(np.uint8),   # the existing array's dtype; the default (float32, the input's) would not match it
+        out_array_dtype=np.dtype(
+            np.uint8
+        ),  # the existing array's dtype; the default (float32, the input's) would not match it
     )
     assert task.write_size == Coordinate(32, 32)
     task.run_blockwise(multiprocessing=False)
-    np.testing.assert_array_equal(task.out_data.array("r")[:], (data > 0.5).astype(np.uint8))
+    np.testing.assert_array_equal(
+        task.out_data.array("r")[:], (data > 0.5).astype(np.uint8)
+    )
+
+
 @needs_sharding
 def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
     in_path, _ = _threshold_input(tmp_path)
@@ -542,7 +567,9 @@ def test_lambda_task_refuses_a_block_that_splits_the_output_shard(tmp_path):
         init_out=False,
         block_size=Coordinate(16, 16),
     )
-    with pytest.raises(ValueError, match="not a whole number of shards on axes \\[0, 1\\]"):
+    with pytest.raises(
+        ValueError, match="not a whole number of shards on axes \\[0, 1\\]"
+    ):
         task.run_blockwise(multiprocessing=False)
     assert not task.out_data.array("r")[:].any()
 
@@ -554,39 +581,79 @@ def test_the_block_grid_is_checked_against_the_arrays_own_origin(tmp_path):
 
     data = np.linspace(0, 1, 96 * 64, dtype=np.float32).reshape(96, 64)
     in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(in_path, shape=data.shape, offset=(16, 0), voxel_size=Coordinate(1, 1),
-               dtype=data.dtype, mode="w")[:] = data
+    prepare_ds(
+        in_path,
+        shape=data.shape,
+        offset=(16, 0),
+        voxel_size=Coordinate(1, 1),
+        dtype=data.dtype,
+        mode="w",
+    )[:] = data
     out_path = tmp_path / "data.zarr" / "out"
-    z = zarr.create_array(store=str(out_path), shape=data.shape, chunks=(8, 8), shards=(32, 32),
-                          dtype="uint8", zarr_format=3)
-    z.attrs.update({"offset": [16, 0], "voxel_size": [1, 1], "axis_names": ["y", "x"],
-                    "units": ["nm", "nm"], "types": ["space", "space"]})
+    z = zarr.create_array(
+        store=str(out_path),
+        shape=data.shape,
+        chunks=(8, 8),
+        shards=(32, 32),
+        dtype="uint8",
+        zarr_format=3,
+    )
+    z.attrs.update(
+        {
+            "offset": [16, 0],
+            "voxel_size": [1, 1],
+            "axis_names": ["y", "x"],
+            "units": ["nm", "nm"],
+            "types": ["space", "space"],
+        }
+    )
 
     def task(roi):
-        return LambdaTask(in_data=Raw(store=in_path), out_data=Labels(store=out_path),
-                          lambda_func=lambda x: (x > 0.5).astype(np.uint8), init_out=False,
-                          roi=roi)
+        return LambdaTask(
+            in_data=Raw(store=in_path),
+            out_data=Labels(store=out_path),
+            lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+            init_out=False,
+            roi=roi,
+        )
 
     # [48, 80) is 32 voxels into an array that starts at 16: on its shard grid
     task(Roi((48, 0), (32, 64))).run_blockwise(multiprocessing=False)
     out = task(None).out_data.array("r")
-    np.testing.assert_array_equal(out[Roi((48, 0), (32, 64))], (data > 0.5).astype(np.uint8)[32:64])
+    np.testing.assert_array_equal(
+        out[Roi((48, 0), (32, 64))], (data > 0.5).astype(np.uint8)[32:64]
+    )
     # [32, 64) is a multiple of the shard from the WORLD origin, but 16 voxels into the array
     with pytest.raises(ValueError, match="off the shard grid on axes \\[0\\]"):
         task(Roi((32, 0), (32, 64))).run_blockwise(multiprocessing=False)
 
 
-def test_the_grid_check_reads_the_spatial_trailing_axes_of_a_channelled_output(tmp_path):
+def test_the_grid_check_reads_the_spatial_trailing_axes_of_a_channelled_output(
+    tmp_path,
+):
     """A channel-leading output: the unit's spatial part is its TRAILING axes."""
     import zarr
 
     from volara.blockwise.blockwise import BlockwiseTask
 
     out_path = tmp_path / "out.zarr"
-    z = zarr.create_array(store=str(out_path), shape=(2, 64, 64), chunks=(1, 8, 8),
-                          shards=(1, 32, 16), dtype="uint8", zarr_format=3)
-    z.attrs.update({"offset": [0, 0], "voxel_size": [1, 1], "axis_names": ["c^", "y", "x"],
-                    "units": ["nm", "nm"], "types": ["channel", "space", "space"]})
+    z = zarr.create_array(
+        store=str(out_path),
+        shape=(2, 64, 64),
+        chunks=(1, 8, 8),
+        shards=(1, 32, 16),
+        dtype="uint8",
+        zarr_format=3,
+    )
+    z.attrs.update(
+        {
+            "offset": [0, 0],
+            "voxel_size": [1, 1],
+            "axis_names": ["c^", "y", "x"],
+            "units": ["nm", "nm"],
+            "types": ["channel", "space", "space"],
+        }
+    )
 
     class _Writer(BlockwiseTask):
         task_type: str = "writer"
@@ -621,6 +688,84 @@ def test_the_grid_check_reads_the_spatial_trailing_axes_of_a_channelled_output(t
         def drop_artifacts(self):
             pass
 
-    _Writer(out=Labels(store=out_path)).check_output_block_grids()   # (32, 16) tiles (32, 16)
-    with pytest.raises(ValueError, match="not a whole number of shards on axes \\[1\\]"):
-        _Writer(out=Labels(store=out_path), block=Coordinate(32, 8)).check_output_block_grids()
+    _Writer(
+        out=Labels(store=out_path)
+    ).check_output_block_grids()  # (32, 16) tiles (32, 16)
+    with pytest.raises(
+        ValueError, match="not a whole number of shards on axes \\[1\\]"
+    ):
+        _Writer(
+            out=Labels(store=out_path), block=Coordinate(32, 8)
+        ).check_output_block_grids()
+
+
+def _channelled_input(tmp_path, chunks=(1, 16, 16)):
+    """A (C, Y, X) input stored one channel per chunk."""
+    import zarr
+
+    in_path = tmp_path / "data.zarr" / "cyx"
+    z = zarr.create_array(
+        store=str(in_path),
+        shape=(2, 64, 64),
+        chunks=chunks,
+        dtype="float32",
+        zarr_format=3,
+    )
+    z.attrs.update(
+        {
+            "offset": [0, 0],
+            "voxel_size": [1, 1],
+            "axis_names": ["c^", "y", "x"],
+            "units": ["nm", "nm"],
+            "types": ["channel", "space", "space"],
+        }
+    )
+    z[:] = np.linspace(0, 1, 2 * 64 * 64, dtype=np.float32).reshape(2, 64, 64)
+    return in_path
+
+
+@pytest.mark.parametrize("channels", [0, [0], [1]])
+def test_the_default_block_follows_a_channel_collapsed_input(tmp_path, channels):
+    """With no block_size and no output yet, the block is the INPUT's stored unit over its
+    spatial axes: a `channels=` collapse leaves the chunk's channel axis on disk, and the
+    block must not carry it into a product with the 2-D voxel size."""
+    in_path = _channelled_input(tmp_path)
+    task = LambdaTask(
+        in_data=Raw(store=in_path, channels=channels),
+        out_data=Raw(store=tmp_path / "data.zarr" / "out"),
+        lambda_func=lambda x: x,
+    )
+    assert task.write_size == Coordinate(16, 16)
+    task.run_blockwise(multiprocessing=False)
+    expected = np.linspace(0, 1, 2 * 64 * 64, dtype=np.float32).reshape(2, 64, 64)
+    ch = channels if isinstance(channels, int) else channels[0]
+    np.testing.assert_array_equal(task.out_data.array("r")[:], expected[ch])
+
+
+@pytest.mark.parametrize("op", ["scale_shift", "flip"])
+def test_the_default_block_follows_an_input_with_a_lazy_op(tmp_path, op):
+    """A normalisation or a flip is a lazy op on the input view; the stored unit is read off
+    the zarr array, which the op does not touch (funlib #40 reports no chunk_shape there)."""
+    in_path, data = _threshold_input(tmp_path, chunk_shape=Coordinate(16, 16))
+    kw = {"scale_shift": dict(scale_shift=(2.0, 0.0)), "flip": dict(flip=[0])}[op]
+    task = LambdaTask(
+        in_data=Raw(store=in_path, **kw),
+        out_data=Raw(store=tmp_path / "data.zarr" / "out"),
+        lambda_func=lambda x: x,
+    )
+    assert task.write_size == Coordinate(16, 16)
+
+
+def test_the_default_block_follows_a_channel_collapsed_existing_output(tmp_path):
+    """The same over an existing output opened through `channels=`: the block is its stored
+    unit over the spatial axes, not over every stored axis. (Only the block size is under
+    test: funlib cannot write through an int-collapsed view, so the run itself is not.)"""
+    in_path, data = _threshold_input(tmp_path)
+    out_path = _channelled_input(tmp_path)
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Raw(store=out_path, channels=1),
+        init_out=False,
+        lambda_func=lambda x: x,
+    )
+    assert task.write_size == Coordinate(16, 16)
