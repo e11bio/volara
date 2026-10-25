@@ -40,9 +40,7 @@ def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None
         return tuple(int(c) for c in source.chunks), (
             None if shards is None else tuple(int(s) for s in shards)
         )
-    chunks = getattr(
-        source, "chunksize", None
-    )  # a dask array; `.chunks` is per-block there
+    chunks = getattr(source, "chunksize", None)  # a dask array; `.chunks` is per-block there
     if chunks is None:
         chunks = array.data.chunksize
     return tuple(int(c) for c in chunks), None
@@ -68,11 +66,7 @@ def _voxels(offset, voxel_size):
     """A world offset in voxels, as an int where it is one."""
     if int(voxel_size) == 0:
         return offset
-    return (
-        int(offset) // int(voxel_size)
-        if int(offset) % int(voxel_size) == 0
-        else offset / voxel_size
-    )
+    return int(offset) // int(voxel_size) if int(offset) % int(voxel_size) == 0 else offset / voxel_size
 
 
 class Dataset(StrictBaseModel, ABC):
@@ -226,9 +220,7 @@ class Dataset(StrictBaseModel, ABC):
                     f"Dataset {self.store}: chunk_shape {tuple(self.chunk_shape)} and "
                     f"inner_chunk_shape {tuple(self.inner_chunk_shape)} differ in dimensions."
                 )
-            if any(
-                c % i != 0 for c, i in zip(self.chunk_shape, self.inner_chunk_shape)
-            ):
+            if any(c % i != 0 for c, i in zip(self.chunk_shape, self.inner_chunk_shape)):
                 raise ValueError(
                     f"Dataset {self.store}: chunk_shape {tuple(self.chunk_shape)} (the shard) "
                     f"must be a whole number of inner_chunk_shape "
@@ -388,10 +380,7 @@ class Dataset(StrictBaseModel, ABC):
                 if int(oh) * int(vw) != int(ow) * int(vh)
             ]
             if moved:
-                have = tuple(
-                    _voxels(o, v)
-                    for o, v in zip(existing.roi.offset, existing.voxel_size)
-                )
+                have = tuple(_voxels(o, v) for o, v in zip(existing.roi.offset, existing.voxel_size))
                 want = tuple(_voxels(o, v) for o, v in zip(offset, voxel_size))
                 raise ValueError(
                     f"Dataset {self.store}: the array on disk starts at voxel {have}, this "
@@ -430,17 +419,11 @@ class Dataset(StrictBaseModel, ABC):
                 f"{'shards' if real_shards is not None else 'chunks'} of {real_unit}, but this "
                 f"dataset would write in {'shards' if self.sharding else 'chunks'} of "
                 f"{tuple(stored_chunk)}"
-                + (
-                    ""
-                    if self.chunk_shape is not None
-                    else " (it declares no chunk_shape, so "
-                    "the task's write block is the unit)"
-                )
+                + ("" if self.chunk_shape is not None else " (it declares no chunk_shape, so "
+                   "the task's write block is the unit)")
                 + ". Declare chunk_shape to match the array, or recreate it."
             )
-        if self.inner_chunk_shape is not None and real_chunks != tuple(
-            self.inner_chunk_shape
-        ):
+        if self.inner_chunk_shape is not None and real_chunks != tuple(self.inner_chunk_shape):
             # funlib compares a declared inner chunk to the array's chunks, sharded or not
             raise ValueError(
                 f"Dataset {self.store}: the array on disk has "
@@ -450,8 +433,7 @@ class Dataset(StrictBaseModel, ABC):
             )
         if (
             real_shards is not None
-            and real_chunks
-            != real_shards  # one chunk per shard: the inner chunk IS the unit
+            and real_chunks != real_shards   # one chunk per shard: the inner chunk IS the unit
             and "sharding" not in inspect.signature(prepare_ds).parameters
         ):
             # this funlib compares the INNER chunk to the write block and would refuse the
