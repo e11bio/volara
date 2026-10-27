@@ -20,8 +20,8 @@ sys.path.insert(0, os.path.abspath("../.."))
 # -- Project information -----------------------------------------------------
 
 project = "Volara"
-copyright = "2024, William Patton, Arlo Sheridan"
-author = "William Patton, Arlo Sheridan"
+copyright = "2024, William Patton, Arlo Sheridan, Jeff Rhoades, Jakob Troidl, Andrew Champion"
+author = "William Patton, Arlo Sheridan, Jeff Rhoades, Jakob Troidl, Andrew Champion"
 
 
 # -- General configuration ---------------------------------------------------

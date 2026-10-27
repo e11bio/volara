@@ -8,6 +8,9 @@ description = "A package for common blockwise computations for large microscopy 
 authors = [
     { name = "William Patton", email = "wllmpttn24@gmail.com" },
     { name = "Arlo Sheridan", email = "arlo@e11.bio" },
+    { name = "Jeff Rhoades", email = "jeffr@e11.bio" },
+    { name = "Jakob Troidl", email = "jtroidl@g.harvard.edu" },
+    { name = "Andrew Champion", email = "andrew.champion@gmail.com" },
 ]
 license = { text = "MIT" }
 readme = "README.md"

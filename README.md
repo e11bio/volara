@@ -34,7 +34,7 @@ To cite this repository please use the following bibtex entry:
 
 ```
 @software{volara2025github,
-  author = {Will Patton and Arlo Sheridan},
+  author = {Will Patton and Arlo Sheridan and Jeff Rhoades and Jakob Troidl and Andrew Champion},
   title = {Volara: Block-wise operations for large volumetric datasets},
   url = {https://github.com/e11bio/volara},
   version = {1.0},
