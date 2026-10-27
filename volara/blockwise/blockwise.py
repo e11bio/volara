@@ -60,6 +60,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
     Whether blocks have read/write dependencies on neighborhing blocks requiring
     a specific ordering to the block processing to compute a seamless result.
     """
+    resource_tracking: bool = True
+    """
+    Ask daisy to measure every block: wall time, CPU time, peak RSS and IO
+    bytes of the worker process while it ran the block. The figures land in
+    the tracking group under :attr:`tracking_path` beside the done markers,
+    and daisy prints them in its Resource Utilization panel after the run.
+    """
     block_timeout: float | None = None
     """
     Per-block timeout in seconds. ``None`` (the default) delegates to daisy's
@@ -345,6 +352,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 fit=self.fit,
                 max_workers=self.num_workers,
                 tracking_path=str(self.tracking_path),
+                resource_tracking=self.resource_tracking,
                 skip_mask=(
                     self.skip_mask.array("r")[:] if self.skip_mask is not None else None
                 ),
