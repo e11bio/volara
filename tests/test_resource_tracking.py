@@ -11,6 +11,11 @@ from volara.blockwise.lambda_task import LambdaTask
 from volara.datasets import Labels, Raw
 
 
+def _array(task, name):
+    """One per-block array of the task's tracking group, flattened."""
+    return np.asarray(zarr.open_array(task.tracking_path / name, mode="r")[:]).ravel()
+
+
 def _task(tmp_path, **kwargs):
     data = np.linspace(0, 1, 400, dtype=np.float32).reshape(40, 10)
     in_path = tmp_path / "data.zarr" / "raw"
@@ -37,16 +42,14 @@ def test_every_block_is_measured_by_default(tmp_path, multiprocessing):
 
     task.run_blockwise(multiprocessing=multiprocessing)
 
-    group = zarr.open_group(task.tracking_path, mode="r")
-    assert np.asarray(group["done"][:]).sum() == 4
-    assert (np.asarray(group["wall_seconds"][:]) > 0).all()
-    assert (np.asarray(group["peak_rss_bytes"][:]) > 0).all()
+    assert _array(task, "done").sum() == 4
+    assert (_array(task, "wall_seconds") > 0).all()
+    assert (_array(task, "peak_rss_bytes") > 0).all()
 
 
 def test_tracking_off_keeps_only_the_done_markers(tmp_path):
     task = _task(tmp_path, resource_tracking=False)
     task.run_blockwise(multiprocessing=False)
 
-    group = zarr.open_group(task.tracking_path, mode="r")
-    assert np.asarray(group["done"][:]).sum() == 4
-    assert "wall_seconds" not in group
+    assert _array(task, "done").sum() == 4
+    assert "wall_seconds" not in zarr.open_group(task.tracking_path, mode="r")
