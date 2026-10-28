@@ -369,3 +369,41 @@ def test_a_url_basedir_puts_the_meta_dir_and_tracking_store_in_one_local_place(
     assert not t.meta_dir.exists()
     third = t.run_blockwise(multiprocessing=False)[t.task_name]
     assert third.skipped_count == 0
+
+
+SEEN_SCHEDULERS: list[str | None] = []
+
+
+class SchedulerRecordingTask(DummyTask):
+    """Records the array scheduler in force during setup and per block."""
+
+    @contextmanager
+    def process_block_func(self):
+        from volara.datasets import current_array_scheduler
+
+        SEEN_SCHEDULERS.append(current_array_scheduler())
+
+        def process_block(block):
+            SEEN_SCHEDULERS.append(current_array_scheduler())
+
+        yield process_block
+
+
+@pytest.mark.parametrize("scheduler", ["single-threaded", "threads", None])
+def test_workers_open_arrays_with_the_task_array_scheduler(scheduler):
+    from volara.datasets import current_array_scheduler
+
+    SEEN_SCHEDULERS.clear()
+    task = SchedulerRecordingTask(array_scheduler=scheduler)
+    task.process_roi(Roi((0, 0), (10, 10)))
+    # setup and the block both ran under the task's scheduler, and it is gone after
+    assert SEEN_SCHEDULERS == [scheduler, scheduler]
+    assert current_array_scheduler() is None
+
+
+def test_array_scheduler_defaults_to_single_threaded_and_round_trips():
+    assert DummyTask().array_scheduler == "single-threaded"
+    dumped = DummyTask(array_scheduler=None).model_dump_json()
+    assert DummyTask.model_validate_json(dumped).array_scheduler is None
+    with pytest.raises(ValueError):
+        DummyTask(array_scheduler="distributed")

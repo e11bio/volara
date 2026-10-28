@@ -1,6 +1,8 @@
 import logging
 import time
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Literal, Sequence, Union
 
@@ -20,6 +22,37 @@ from .ops import (
 )
 from .paths import PydanticUPath, is_local, rm, to_upath, zarr_store
 from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
+
+ArraySchedulerName = Literal["single-threaded", "synchronous", "threads", "processes"]
+"""A dask scheduler name accepted by ``dask.compute(scheduler=...)``."""
+
+_array_scheduler: ContextVar[ArraySchedulerName | None] = ContextVar(
+    "volara_array_scheduler", default=None
+)
+
+
+@contextmanager
+def array_scheduler(scheduler: ArraySchedulerName | None):
+    """Open every array within this context with the given dask scheduler.
+
+    :meth:`Dataset.array` hands the current value to ``funlib.persistence.open_ds``
+    as ``scheduler``, which is what the returned ``Array`` computes its reads with.
+    ``None`` (the default outside any context) leaves the choice to dask. Workers
+    run under :attr:`~volara.blockwise.BlockwiseTask.array_scheduler`, which is
+    ``"single-threaded"`` by default: daisy already runs one block per worker, so
+    dask's thread pool would only add contention inside each worker.
+    """
+    token = _array_scheduler.set(scheduler)
+    try:
+        yield
+    finally:
+        _array_scheduler.reset(token)
+
+
+def current_array_scheduler() -> ArraySchedulerName | None:
+    """The scheduler :meth:`Dataset.array` will open arrays with right now."""
+    return _array_scheduler.get()
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -230,6 +263,7 @@ class Dataset(StrictBaseModel, ABC):
         arr = open_ds(
             self.prepared_store,
             mode=mode,
+            scheduler=_array_scheduler.get(),
             **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
             **self.zarr_kwargs,
         )
