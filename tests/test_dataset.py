@@ -345,8 +345,13 @@ def test_a_remote_store_is_prepared_written_read_and_dropped(memory_fs):
     assert not ds.is_local
     assert ds.name == "labels"
     ds.prepare(
-        shape=(4, 4), chunk_shape=(2, 2), offset=(0, 0), voxel_size=(1, 1),
-        units=("nm", "nm"), axis_names=("y", "x"), types=("space", "space"),
+        shape=(4, 4),
+        chunk_shape=(2, 2),
+        offset=(0, 0),
+        voxel_size=(1, 1),
+        units=("nm", "nm"),
+        axis_names=("y", "x"),
+        types=("space", "space"),
         dtype=np.uint8,
     )
     assert memory_fs.exists("/bucket/data.zarr/labels/zarr.json")
@@ -366,7 +371,9 @@ def test_store_serialises_as_the_string_it_was_given(tmp_path):
 
 
 def test_s3_kwargs_is_accepted_as_the_former_name_of_storage_options():
-    ds = Raw.model_validate({"store": "memory://bucket/x.zarr", "s3_kwargs": {"anon": True}})
+    ds = Raw.model_validate(
+        {"store": "memory://bucket/x.zarr", "s3_kwargs": {"anon": True}}
+    )
     assert ds.storage_options == {"anon": True}
     assert ds.store.storage_options == {"anon": True}  # carried by the UPath itself
     assert "s3_kwargs" not in ds.model_dump()
@@ -392,3 +399,23 @@ def test_mask_dataset_round_trips_and_reads_like_any_dataset(tmp_path):
     assert rebuilt.dataset_type == "mask"
     assert rebuilt == dataset
     assert rebuilt.array("r")[:].tolist() == array.tolist()
+
+
+def test_array_scheduler_context_reaches_open_ds(zarr_store):
+    from volara.datasets import array_scheduler, current_array_scheduler
+
+    ds = Raw(store=zarr_store)
+    assert current_array_scheduler() is None
+    assert ds.array("r").scheduler is None  # dask's choice, as before
+
+    with array_scheduler("single-threaded"):
+        assert current_array_scheduler() == "single-threaded"
+        arr = ds.array("r")
+        assert arr.scheduler == "single-threaded"
+        assert arr[arr.roi].shape == (2, 10, 10)
+        with array_scheduler(None):
+            assert ds.array("r").scheduler is None
+        assert ds.array("r").scheduler == "single-threaded"
+
+    assert current_array_scheduler() is None
+    assert ds.array("r").scheduler is None
