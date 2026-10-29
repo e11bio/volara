@@ -1,4 +1,3 @@
-import inspect
 import os
 import shutil
 
@@ -364,12 +363,6 @@ def test_lambda_task_skips_non_overlapping_blocks(tmp_path):
     np.testing.assert_array_equal(result, np.zeros((10, 10), dtype=np.uint8))
 
 
-_FUNLIB_SHARDS = "sharding" in inspect.signature(prepare_ds).parameters
-needs_sharding = pytest.mark.skipif(
-    not _FUNLIB_SHARDS,
-    reason="funlib.persistence here has no prepare_ds(sharding=...) (funkelab/funlib.persistence#40)",
-)
-
 
 def _threshold_input(tmp_path, chunk_shape=None):
     data = np.linspace(0, 1, 64 * 64, dtype=np.float32).reshape(64, 64)
@@ -385,7 +378,6 @@ def _threshold_input(tmp_path, chunk_shape=None):
     return in_path, data
 
 
-@needs_sharding
 def test_lambda_task_blocks_default_to_whole_shards(tmp_path):
     """With no block_size the block is the declared chunk_shape (the shard), so every block
     is one plain put and no two blocks share a stored object."""
@@ -426,7 +418,7 @@ def _zarr_sharded_output(store, shape, chunks=(8, 8), shards=(32, 32)):
 
 def test_lambda_task_blocks_follow_an_existing_sharded_output(tmp_path):
     """`init_out=False` sizes blocks off the destination: its shard, never its inner chunk --
-    read off zarr, so on a funlib without sharding support as well."""
+    read off zarr."""
     in_path, data = _threshold_input(tmp_path)
     out_path = tmp_path / "data.zarr" / "out"
     _zarr_sharded_output(out_path, data.shape)
@@ -468,7 +460,6 @@ def test_lambda_task_refuses_a_block_grid_off_the_output_shard_grid(tmp_path):
     assert not out[:32].any()
 
 
-@needs_sharding
 def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shards(tmp_path):
     """`init_out=True` against an existing sharded output the dataset says nothing about: the
     block defaults to the on-disk shard, so the write unit matches and the array is reused."""
@@ -484,7 +475,6 @@ def test_lambda_task_init_out_on_an_undeclared_sharded_output_writes_whole_shard
     assert task.write_size == Coordinate(32, 32)
     task.run_blockwise(multiprocessing=False)
     np.testing.assert_array_equal(task.out_data.array("r")[:], (data > 0.5).astype(np.uint8))
-@needs_sharding
 def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
     in_path, _ = _threshold_input(tmp_path)
     task = LambdaTask(
@@ -503,7 +493,6 @@ def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
     assert not (tmp_path / "data.zarr" / "out").exists()
 
 
-@needs_sharding
 def test_lambda_task_concurrent_workers_write_whole_shards(tmp_path):
     """Four LocalWorker processes writing 16 shard-sized blocks into one sharded
     array: with blocks aligned to shards there is nothing to race over.
@@ -673,7 +662,7 @@ def test_the_default_block_follows_a_channel_collapsed_input(tmp_path, channels)
 @pytest.mark.parametrize("op", ["scale_shift", "flip"])
 def test_the_default_block_follows_an_input_with_a_lazy_op(tmp_path, op):
     """A normalisation or a flip is a lazy op on the input view; the stored unit is read off
-    the zarr array, which the op does not touch (funlib #40 reports no chunk_shape there)."""
+    the zarr array, which the op does not touch (funlib reports no chunk_shape there)."""
     in_path, data = _threshold_input(tmp_path, chunk_shape=Coordinate(16, 16))
     kw = {"scale_shift": dict(scale_shift=(2.0, 0.0)), "flip": dict(flip=[0])}[op]
     task = LambdaTask(

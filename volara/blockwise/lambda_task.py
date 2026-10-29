@@ -92,9 +92,8 @@ class LambdaTask(BlockwiseTask):
             block_voxels = Coordinate(self.out_data.stored_unit)
         else:
             try:
-                # a sharded output must be written a whole shard at a time. Read the unit
-                # off zarr itself: a funlib without sharding support reports the inner
-                # chunk as `chunk_shape`, and that is only a read unit.
+                # a sharded output must be written a whole shard at a time: the unit
+                # comes off zarr itself
                 block_voxels = Coordinate(spatial_unit_of(self.out_data.array("r")))
             except FileNotFoundError:
                 # the input's stored unit, read off zarr too: `Array.chunk_shape` is

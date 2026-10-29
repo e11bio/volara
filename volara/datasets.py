@@ -1,4 +1,3 @@
-import inspect
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -31,8 +30,7 @@ logger = logging.getLogger(__name__)
 def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
     """``(chunks, shards)`` of the zarr array behind a funlib ``Array``, over every STORED
     axis (a lazy op that collapsed one does not remove it here); ``shards`` is ``None`` for an
-    unsharded array. Read off zarr itself, so it is right on a funlib without sharding support
-    too. A source that is not a zarr array (in memory, or dask-backed as CloudVolume's) has its
+    unsharded array. Read off zarr itself. A source that is not a zarr array (in memory, or dask-backed as CloudVolume's) has its
     own chunking and no shards."""
     source = array._source_data
     if isinstance(source, zarr.Array):
@@ -172,9 +170,7 @@ class Dataset(StrictBaseModel, ABC):
     `chunk_shape` as today, the largest block a worker writes comfortably.
 
     A creation option: an existing array is judged by its write unit alone, so a sharded array
-    is reused by a dataset that does not say `sharding` and vice versa. Needs a
-    funlib.persistence whose `prepare_ds` takes `sharding` (funkelab/funlib.persistence#40);
-    an older install is refused by name.
+    is reused by a dataset that does not say `sharding` and vice versa.
     """
 
     inner_chunk_shape: PydanticCoordinate | None = None
@@ -341,12 +337,6 @@ class Dataset(StrictBaseModel, ABC):
 
         kwargs = dict(self.zarr_kwargs)
         if self.sharding:
-            if "sharding" not in inspect.signature(prepare_ds).parameters:
-                raise RuntimeError(
-                    f"Dataset {self.store} declares sharding, but the installed "
-                    f"funlib.persistence cannot create a sharded array: its prepare_ds has "
-                    f"no sharding parameter (needs funkelab/funlib.persistence#40)."
-                )
             kwargs["sharding"] = True
             if self.inner_chunk_shape is not None:
                 kwargs["inner_chunk_shape"] = self.inner_chunk_shape
@@ -409,8 +399,8 @@ class Dataset(StrictBaseModel, ABC):
     def _check_stored_layout(self, array: Array, write_shape, stored_chunk) -> None:
         """Refuse unless ``array`` is written in the unit this dataset would write in (its shard
         if sharded, else its chunk) and its chunk matches a declared inner chunk; ``write_shape``
-        being a whole number of that unit then follows from :meth:`prepare`'s own check. A sharded
-        array met by a funlib without sharding support is refused by name. See :meth:`prepare`."""
+        being a whole number of that unit then follows from :meth:`prepare`'s own check. See
+        :meth:`prepare`."""
         real_chunks, real_shards = stored_layout(array)
         real_unit = real_shards if real_shards is not None else real_chunks
         if real_unit != tuple(stored_chunk):
@@ -430,18 +420,6 @@ class Dataset(StrictBaseModel, ABC):
                 f"{'inner chunks' if real_shards is not None else 'chunks (it is not sharded)'} "
                 f"{real_chunks}, not the inner chunks {tuple(self.inner_chunk_shape)} this dataset "
                 "declares; recreate it or declare inner_chunk_shape to match."
-            )
-        if (
-            real_shards is not None
-            and real_chunks != real_shards   # one chunk per shard: the inner chunk IS the unit
-            and "sharding" not in inspect.signature(prepare_ds).parameters
-        ):
-            # this funlib compares the INNER chunk to the write block and would refuse the
-            # array with a bare PermissionError; say what is going on instead
-            raise RuntimeError(
-                f"Dataset {self.store}: the array on disk is sharded, and the installed "
-                "funlib.persistence cannot write into a sharded array through prepare_ds (it "
-                "compares the inner chunk, not the shard; needs funkelab/funlib.persistence#40)."
             )
 
     def lazy_ops(self, arr: Array) -> None:
