@@ -455,9 +455,17 @@ def test_prepare_stores_the_write_block_as_one_chunk_by_default(tmp_path):
     assert arr._source_data.shards is None
 
 
-def test_prepare_stores_the_declared_chunk_not_the_block(tmp_path):
-    """Whether the block is whole chunks is the task's check (`check_output_block_grids`)."""
+def test_prepare_refuses_a_write_block_that_is_not_whole_chunks(tmp_path):
+    """The one layout check funlib cannot make: it never sees the block."""
     ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 16, 16))
+    with pytest.raises(ValueError, match="not a whole number of the chunks"):
+        _prepare(ds, write_shape=(2, 24, 24))
+    assert not (tmp_path / "x.zarr").exists(), "refused before anything was created"
+    sharded = Labels(store=tmp_path / "s.zarr", chunk_shape=(2, 32, 32), sharding=True)
+    with pytest.raises(ValueError, match="not a whole number of the shards"):
+        _prepare(sharded, write_shape=(2, 16, 16))
+    assert not (tmp_path / "s.zarr").exists()
+
     _prepare(ds, write_shape=(2, 32, 32))
     arr = ds.array("r")
     assert arr.chunk_shape == Coordinate(2, 16, 16)
@@ -568,17 +576,25 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
     with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
     # the same voxel origin under another voxel size is the same array -- at a NONZERO origin,
-    # where world and voxel offsets differ (as slabreg's canvas, relabelled to nm)
+    # where world and voxel offsets differ (as slabreg's canvas, relabelled to nm), and whether
+    # the TASK's voxel size is 1 or not
     ds = Labels(store=tmp_path / "y.zarr", chunk_shape=(2, 16, 16))
     ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
     prepare_ds(tmp_path / "y.zarr", (2, 64, 64), offset=Coordinate(64, 0), voxel_size=Coordinate(4, 8),
                axis_names=["c^", "y", "x"], chunk_shape=Coordinate(2, 16, 16), dtype=np.uint8, mode="a")
     ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(32, 0), voxel_size=(2, 2), **kw)
+    with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(34, 0), voxel_size=(2, 2), **kw)
     # a sub-voxel move is a move: not rounded away
     prepare_ds(tmp_path / "y.zarr", (2, 64, 64), offset=Coordinate(66, 0), voxel_size=Coordinate(4, 8),
                axis_names=["c^", "y", "x"], chunk_shape=Coordinate(2, 16, 16), dtype=np.uint8, mode="a")
     with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
+    # another spatial rank over the same total shape: funlib would relabel the axes over the data
+    with pytest.raises(ValueError, match="another number of spatial axes"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
+                   units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
 
 
 def test_stored_layout_of_a_non_zarr_array_is_its_own_chunking_with_no_shards():

@@ -143,8 +143,8 @@ class Dataset(StrictBaseModel, ABC):
     chunk_shape: PydanticCoordinate | None = None
     """
     The write-safe chunk shape the array is stored in, over every axis (channels included);
-    the shard shape under `sharding`. Defaults to the block the task writes. A block must be a
-    whole number of these per axis (`BlockwiseTask.check_output_block_grids`).
+    the shard shape under `sharding`. Defaults to the block the task writes, which must be a
+    whole number of these per axis.
     """
 
     sharding: bool = False
@@ -155,7 +155,8 @@ class Dataset(StrictBaseModel, ABC):
 
     inner_chunk_shape: PydanticCoordinate | None = None
     """
-    With `sharding`, the chunk inside each shard. Defaults to funlib's (64 per axis).
+    With `sharding`, the chunk inside each shard. Defaults to funlib's: 64 per axis, or the
+    whole axis where the shard is smaller (a larger shard axis must be a multiple of 64).
     """
 
     storage_options: dict | None = Field(
@@ -246,8 +247,20 @@ class Dataset(StrictBaseModel, ABC):
 
         ``chunk_shape`` is the block the task writes; the array is stored in
         :attr:`chunk_shape` units (the block, by default), sharded under :attr:`sharding`.
-        funlib refuses an existing array stored in another unit.
+        funlib validates the layout and refuses an existing array stored in another unit. Two
+        things it cannot check are checked here: the block must be a whole number of stored
+        units (funlib never sees the block; blocks sharing a stored object overwrite each
+        other silently), and an existing array's origin must not have moved in voxels.
         """
+        block = Coordinate(chunk_shape)
+        unit = self.chunk_shape if self.chunk_shape is not None else block
+        if any(b % u != 0 for b, u in zip(block, unit)):
+            raise ValueError(
+                f"Dataset {self.store}: the task writes {tuple(block)}-voxel blocks, which is "
+                f"not a whole number of the {'shards' if self.sharding else 'chunks'} of "
+                f"{tuple(unit)} the array is stored in. Blocks sharing a stored object overwrite "
+                "each other silently; make the write size a multiple of chunk_shape."
+            )
         kwargs = dict(self.zarr_kwargs)
         if self.sharding:
             kwargs["sharding"] = True
@@ -267,7 +280,7 @@ class Dataset(StrictBaseModel, ABC):
             units=units,
             axis_names=axis_names,
             types=types,
-            chunk_shape=self.chunk_shape or Coordinate(chunk_shape),
+            chunk_shape=unit,
             dtype=dtype,
             mode="a",
             **kwargs,
@@ -275,12 +288,11 @@ class Dataset(StrictBaseModel, ABC):
         array._source_data.attrs.update(self.attrs)
 
     def _refuse_moved_origin(self, existing: Array, offset, voxel_size) -> None:
-        """funlib relabels an existing array to the offset it is given, so a task whose roi
-        moved would anchor its blocks off the grid of the data already written, with no error.
-        The one thing funlib does not check. In VOXELS (cross-multiplied, so a sub-voxel move is
-        not rounded away): the same voxel origin under another voxel size is the same array."""
-        if existing.roi.dims != len(tuple(offset)):
-            return  # another rank: funlib refuses the shape
+        """funlib does not compare an existing array's offset: a task whose roi moved is
+        accepted (and the array relabelled, if other metadata changed with it), so its blocks
+        would sit off the grid of the data already written, with no error. Compared in VOXELS,
+        cross-multiplied so a sub-voxel move is not rounded away: the same voxel origin under
+        another voxel size is the same array. Another spatial rank is refused the same way."""
         moved = [
             d
             for d, (oh, vh, ow, vw) in enumerate(
@@ -288,13 +300,15 @@ class Dataset(StrictBaseModel, ABC):
             )
             if int(oh) * int(vw) != int(ow) * int(vh)
         ]
-        if moved:
+        other_rank = existing.roi.dims != len(tuple(offset))
+        if moved or other_rank:
             raise ValueError(
                 f"Dataset {self.store}: the array on disk starts at {tuple(existing.roi.offset)} "
                 f"(voxel size {tuple(existing.voxel_size)}); this task would prepare it at "
-                f"{tuple(offset)} (voxel size {tuple(voxel_size)}), another voxel origin on axes "
-                f"{moved}. Its blocks would sit off the grid of the data already written; "
-                "recreate the array or keep the roi it was created with."
+                f"{tuple(offset)} (voxel size {tuple(voxel_size)}): another voxel origin"
+                + (", with another number of spatial axes" if other_rank else f" on axes {moved}")
+                + ". Its blocks would sit off the grid of the data already written; recreate "
+                "the array or keep the roi it was created with."
             )
 
     def lazy_ops(self, arr: Array) -> None:

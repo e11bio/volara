@@ -488,12 +488,9 @@ def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
         block_size=Coordinate(8, 8),
     )
-    task.init()  # the array is created as declared; the block check is the task's, before any write
-    with pytest.raises(ValueError, match="not a whole number of shards"):
-        task.check_output_block_grids()
-    out = task.out_data.array("r")
-    assert out.shard_shape == Coordinate(16, 16)  # ty: ignore[unresolved-attribute]
-    assert not out[:].any(), "nothing written"
+    with pytest.raises(ValueError, match="not a whole number of the shards"):
+        task.init()
+    assert not (tmp_path / "data.zarr" / "out").exists(), "refused before anything was created"
 
 
 def test_lambda_task_concurrent_workers_write_whole_shards(tmp_path):
@@ -689,3 +686,24 @@ def test_the_default_block_follows_a_channel_collapsed_existing_output(tmp_path)
         lambda_func=lambda x: x,
     )
     assert task.write_size == Coordinate(16, 16)
+
+
+
+def test_a_refused_grid_leaves_an_existing_output_untouched(tmp_path):
+    """The grid check runs BEFORE init: a task whose blocks do not tile an existing output is
+    refused without init relabelling the array's metadata first."""
+    in_path, _ = _threshold_input(tmp_path)
+    out = tmp_path / "data.zarr" / "out"
+    prepare_ds(out, shape=(64, 64), voxel_size=Coordinate(1, 1), units=["nm", "nm"],
+               chunk_shape=Coordinate(16, 16), dtype=np.uint8, mode="w")
+    task = LambdaTask(
+        in_data=Raw(store=in_path, voxel_size=(1, 1), units=["um", "um"]),
+        out_data=Labels(store=out, chunk_shape=(16, 16)),
+        lambda_func=lambda x: x.astype(np.uint8),
+        block_size=Coordinate(24, 24),
+    )
+    with pytest.raises(ValueError, match="not a whole number of"):
+        task.run_blockwise(multiprocessing=False)
+    from funlib.persistence import open_ds
+
+    assert list(open_ds(out).units) == ["nm", "nm"], "not relabelled by init"
