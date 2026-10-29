@@ -270,8 +270,13 @@ class Dataset(StrictBaseModel, ABC):
             existing = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
         except FileNotFoundError:
             existing = None
-        if existing is not None and tuple(existing.shape) == tuple(shape):
-            # any other shape funlib refuses itself
+        if (
+            existing is not None
+            and tuple(existing.shape) == tuple(shape)
+            and existing.roi.dims == len(tuple(offset))
+        ):
+            # funlib refuses any other shape itself; another spatial rank over the same shape
+            # is a relabel of the axes it makes by design
             self._refuse_moved_origin(existing, offset, voxel_size)
         array = prepare_ds(
             self.prepared_store,
@@ -289,11 +294,10 @@ class Dataset(StrictBaseModel, ABC):
         array._source_data.attrs.update(self.attrs)
 
     def _refuse_moved_origin(self, existing: Array, offset, voxel_size) -> None:
-        """For an existing array of the same shape, which funlib accepts: it does not compare
-        the offset (a task whose roi moved is accepted, and the array relabelled if other
-        metadata changed with it), and it relabels the axes over the data when their number
-        changed. Either leaves the blocks off the grid of the data already written, with no
-        error. Compared in VOXELS, cross-multiplied so a sub-voxel move is not rounded away:
+        """The one thing funlib does not compare on an existing array of the same shape: its
+        offset. A task whose roi moved is accepted (and the array relabelled, if other metadata
+        changed with it), and its blocks then sit off the grid of the data already written, with
+        no error. Compared in VOXELS, cross-multiplied so a sub-voxel move is not rounded away:
         the same voxel origin under another voxel size is the same array."""
         moved = [
             d
@@ -302,15 +306,13 @@ class Dataset(StrictBaseModel, ABC):
             )
             if int(oh) * int(vw) != int(ow) * int(vh)
         ]
-        other_rank = existing.roi.dims != len(tuple(offset))
-        if moved or other_rank:
+        if moved:
             raise ValueError(
                 f"Dataset {self.store}: the array on disk starts at {tuple(existing.roi.offset)} "
                 f"(voxel size {tuple(existing.voxel_size)}); this task would prepare it at "
-                f"{tuple(offset)} (voxel size {tuple(voxel_size)}): another voxel origin"
-                + (", with another number of spatial axes" if other_rank else f" on axes {moved}")
-                + ". Its blocks would sit off the grid of the data already written; recreate "
-                "the array or keep the roi it was created with."
+                f"{tuple(offset)} (voxel size {tuple(voxel_size)}): another voxel origin on axes "
+                f"{moved}. Its blocks would sit off the grid of the data already written; "
+                "recreate the array or keep the roi it was created with."
             )
 
     def lazy_ops(self, arr: Array) -> None:

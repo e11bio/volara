@@ -566,9 +566,9 @@ def test_a_sharding_dataset_reuses_a_plain_array_with_the_same_unit(tmp_path):
 
 
 def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
-    """funlib relabels an existing array to the offset it is given; a task whose write roi moved
-    would then anchor its blocks off the array's own grid. Compared in voxels, so an array
-    relabelled to another voxel size (slabreg's physical-nm canvas) still re-enters."""
+    """funlib does not compare an existing array's offset, so a task whose write roi moved would
+    anchor its blocks off the array's own grid. Compared in voxels, so an array relabelled to
+    another voxel size (slabreg's physical-nm canvas) still re-enters."""
     ds = Labels(store=tmp_path / "x.zarr", chunk_shape=(2, 16, 16))
     _prepare(ds, write_shape=(2, 32, 32))
     kw: dict[str, Any] = dict(units=("nm", "nm"), axis_names=("c^", "y", "x"),
@@ -591,17 +591,21 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
                axis_names=["c^", "y", "x"], chunk_shape=Coordinate(2, 16, 16), dtype=np.uint8, mode="a")
     with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
-    # another spatial rank over the same total shape and the SAME origin: funlib would relabel
-    # the axes over the data (another shape it refuses itself, so volara leaves that to it)
+    # a fraction on the TASK's side is a move too
+    ds = Labels(store=tmp_path / "f.zarr", chunk_shape=(2, 16, 16))
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(1, 0), voxel_size=(1, 1), **kw)
+    with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
+        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(3, 0), voxel_size=(2, 2), **kw)
+    # what is left to funlib: another shape is refused by it, another spatial rank over the same
+    # shape is a relabel of the axes it makes by design
     ds = Labels(store=tmp_path / "r.zarr", chunk_shape=(2, 16, 16))
     _prepare(ds, write_shape=(2, 32, 32))
-    with pytest.raises(ValueError, match="another number of spatial axes"):
-        ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
-                   units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
-    assert list(ds.array("r").axis_names) == ["c^", "y", "x"], "not relabelled"
     with pytest.raises(PermissionError, match="not compatible"):
         ds.prepare(shape=(64, 64, 64), chunk_shape=(32, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
                    units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
+               units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
+    assert list(ds.array("r").axis_names) == ["z", "y", "x"]
 
 
 def test_stored_layout_of_a_non_zarr_array_is_its_own_chunking_with_no_shards():
