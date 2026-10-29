@@ -602,21 +602,27 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
     ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
     with pytest.raises(PermissionError, match="not compatible"):
         ds.prepare(shape=(2, 128, 128), chunk_shape=(2, 32, 32), offset=(32, 0), voxel_size=(1, 1), **kw)
-    # ... another spatial rank, or spatial axes in other positions, is a relabel of the axes
-    # funlib makes by design, and the origin check does not pair axes that moved
-    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 16, 0), voxel_size=(1, 1, 1),
-               units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
-    assert list(ds.array("r").axis_names) == ["z", "y", "x"]
+    # ... spatial axes in other positions (each storage axis keeping its voxel origin) is a
+    # relabel of the axes funlib makes by design, which the origin check must not pair by
+    # ordinal and refuse ...
     ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 16), voxel_size=(1, 1),
                units=("nm", "nm"), axis_names=("y", "x", "c^"), types=("space", "space", "channel"),
                dtype=np.uint8)
     assert list(ds.array("r").axis_names) == ["y", "x", "c^"]
-    # a group at the store is funlib's to refuse (or, empty, to overwrite)
+    # ... and so is another spatial rank
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 16, 0), voxel_size=(1, 1, 1),
+               units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
+    assert list(ds.array("r").axis_names) == ["z", "y", "x"]
+    # a group at the store is funlib's: a real one refused, the empty placeholder an interrupted
+    # sharded "w-" create leaves overwritten
     import zarr
 
     zarr.open_group(str(tmp_path / "g.zarr"), mode="w", zarr_format=3).attrs["kept"] = True
     with pytest.raises(TypeError, match="got Group"):
         _prepare(Labels(store=tmp_path / "g.zarr"), write_shape=(2, 32, 32))
+    zarr.open_group(str(tmp_path / "e.zarr"), mode="w", zarr_format=3)
+    _prepare(Labels(store=tmp_path / "e.zarr", chunk_shape=(2, 32, 32), sharding=True), write_shape=(2, 32, 32))
+    assert Labels(store=tmp_path / "e.zarr").array("r").shard_shape == Coordinate(2, 32, 32)
 
 
 def test_stored_layout_of_a_non_zarr_array_is_its_own_chunking_with_no_shards():

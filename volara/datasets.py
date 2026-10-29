@@ -250,7 +250,8 @@ class Dataset(StrictBaseModel, ABC):
         funlib validates the layout and refuses an existing array stored in another unit. Two
         things it cannot check are checked here: the block must be a whole number of stored
         units (funlib never sees the block; blocks sharing a stored object overwrite each
-        other silently), and an existing array's origin must not have moved in voxels.
+        other silently), and an existing array of the same shape and axis layout must not
+        have had its origin moved in voxels (funlib never compares the offset).
         """
         block = Coordinate(chunk_shape)
         unit = self.chunk_shape if self.chunk_shape is not None else block
@@ -277,7 +278,8 @@ class Dataset(StrictBaseModel, ABC):
             and [t in ("space", "time") for t in existing._metadata.types] == spatial
         ):
             # funlib refuses another shape itself, and relabels moved or renamed axes by
-            # design; this compares the origin of axes that are spatial on both sides
+            # design; the origin is compared only when the space/time axes sit in the same
+            # positions on both sides
             self._refuse_moved_origin(existing, offset, voxel_size)
         array = prepare_ds(
             self.prepared_store,
