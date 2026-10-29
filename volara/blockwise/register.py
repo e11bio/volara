@@ -197,8 +197,7 @@ class ApplyShift(BlockwiseTask):
 
     @property
     def output_datasets(self) -> list[Dataset]:
-        # what this task WRITES; `shifts` is its input
-        return [self.aligned] + ([self.interp_shifts] if self.interp_shifts is not None else [])
+        return [self.shifts]
 
     def drop_artifacts(self):
         self.aligned.drop()

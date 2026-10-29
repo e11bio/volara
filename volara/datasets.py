@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Annotated, Literal, Sequence, Union
 
 import numpy as np
-import zarr
 from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
@@ -25,39 +24,6 @@ from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseMod
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-
-
-def stored_layout(array: Array) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
-    """``(chunks, shards)`` of the zarr array behind a funlib ``Array``, over every STORED
-    axis (a lazy op that collapsed one does not remove it here); ``shards`` is ``None`` for an
-    unsharded array. Read off zarr itself. A source that is not a zarr array (in memory, or dask-backed as CloudVolume's) has its
-    own chunking and no shards."""
-    source = array._source_data
-    if isinstance(source, zarr.Array):
-        shards = source.shards
-        return tuple(int(c) for c in source.chunks), (
-            None if shards is None else tuple(int(s) for s in shards)
-        )
-    chunks = getattr(source, "chunksize", None)  # a dask array; `.chunks` is per-block there
-    if chunks is None:
-        chunks = array.data.chunksize
-    return tuple(int(c) for c in chunks), None
-
-
-def stored_unit_of(array: Array) -> tuple[int, ...]:
-    """The smallest region a block may write on its own: the shard when the array is sharded,
-    else the chunk. Over every stored axis of the array."""
-    chunks, shards = stored_layout(array)
-    return shards if shards is not None else chunks
-
-
-def spatial_unit_of(array: Array) -> tuple[int, ...]:
-    """:func:`stored_unit_of` over the array's space and time axes only, in stored order: the
-    unit a block size in voxels applies to. Channel axes drop out whether the view kept them
-    or a lazy op (``channels=``) collapsed them, and wherever they sit (CloudVolume's is last)."""
-    unit = stored_unit_of(array)
-    types = array._metadata.types  # one per STORED axis, collapsed or not
-    return tuple(u for u, t in zip(unit, types) if t in ("space", "time"))
 
 
 class Dataset(StrictBaseModel, ABC):
@@ -140,23 +106,10 @@ class Dataset(StrictBaseModel, ABC):
 
     zarr_kwargs: dict = Field(default_factory=dict)
 
-    chunk_shape: PydanticCoordinate | None = None
-    """
-    The write-safe chunk shape the array is stored in, over every axis (channels included);
-    the shard shape under `sharding`. Defaults to the block the task writes, which must be a
-    whole number of these per axis.
-    """
-
-    sharding: bool = False
-    """
-    Store the array zarr v3 sharded: `chunk_shape` is the shard, `inner_chunk_shape` the chunk
-    inside it. A creation option; an existing array is compared by its write-safe chunk shape.
-    """
-
     inner_chunk_shape: PydanticCoordinate | None = None
     """
-    With `sharding`, the chunk inside each shard. Defaults to funlib's: 64 per axis, or the
-    whole axis where the shard is smaller (a larger shard axis must be a multiple of 64).
+    When set, the array is stored zarr v3 sharded: each block the task writes is one
+    shard, made of chunks of this shape (over every axis, channels included).
     """
 
     storage_options: dict | None = Field(
@@ -173,12 +126,6 @@ class Dataset(StrictBaseModel, ABC):
         if self.storage_options:
             self.store = to_upath(self.store, **self.storage_options)
         return self
-
-    @property
-    def stored_unit(self) -> Coordinate | None:
-        """The declared :attr:`chunk_shape` (the shard under `sharding`); ``None`` when the
-        block the task writes is the unit."""
-        return self.chunk_shape
 
     @property
     def is_local(self) -> bool:
@@ -243,44 +190,10 @@ class Dataset(StrictBaseModel, ABC):
         types: Sequence[str],
         dtype,
     ) -> None:
-        """Create this dataset's array, or reuse a compatible one, for a task to write into.
-
-        ``chunk_shape`` is the block the task writes; the array is stored in
-        :attr:`chunk_shape` units (the block, by default), sharded under :attr:`sharding`.
-        funlib validates the layout and refuses an existing array stored in another unit. Two
-        things it cannot check are checked here: the block must be a whole number of stored
-        units (funlib never sees the block; blocks sharing a stored object overwrite each
-        other silently), and an existing array of the same shape and axis layout must not
-        have had its origin moved in voxels (funlib never compares the offset).
-        """
-        block = Coordinate(chunk_shape)
-        unit = self.chunk_shape if self.chunk_shape is not None else block
-        if any(b % u != 0 for b, u in zip(block, unit)):
-            raise ValueError(
-                f"Dataset {self.store}: the task writes {tuple(block)}-voxel blocks, which is "
-                f"not a whole number of the {'shards' if self.sharding else 'chunks'} of "
-                f"{tuple(unit)} the array is stored in. Blocks sharing a stored object overwrite "
-                "each other silently; make the write size a multiple of chunk_shape."
-            )
         kwargs = dict(self.zarr_kwargs)
-        if self.sharding:
-            kwargs["sharding"] = True
         if self.inner_chunk_shape is not None:
+            kwargs["sharding"] = True
             kwargs["inner_chunk_shape"] = self.inner_chunk_shape
-        try:
-            existing = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
-        except (FileNotFoundError, TypeError):
-            existing = None  # nothing, or a group: funlib's to recover from or refuse
-        spatial = [t in ("space", "time") for t in types]
-        if (
-            existing is not None
-            and tuple(existing.shape) == tuple(shape)
-            and [t in ("space", "time") for t in existing._metadata.types] == spatial
-        ):
-            # funlib refuses another shape itself, and relabels moved or renamed axes by
-            # design; the origin is compared only when the space/time axes sit in the same
-            # positions on both sides
-            self._refuse_moved_origin(existing, offset, voxel_size)
         array = prepare_ds(
             self.prepared_store,
             shape=shape,
@@ -289,34 +202,12 @@ class Dataset(StrictBaseModel, ABC):
             units=units,
             axis_names=axis_names,
             types=types,
-            chunk_shape=unit,
+            chunk_shape=chunk_shape,
             dtype=dtype,
             mode="a",
             **kwargs,
         )
         array._source_data.attrs.update(self.attrs)
-
-    def _refuse_moved_origin(self, existing: Array, offset, voxel_size) -> None:
-        """The one thing funlib does not compare on an existing array of the same shape: its
-        offset. A task whose roi moved is accepted (and the array relabelled, if other metadata
-        changed with it), and its blocks then sit off the grid of the data already written, with
-        no error. Compared in VOXELS, cross-multiplied so a sub-voxel move is not rounded away:
-        the same voxel origin under another voxel size is the same array."""
-        moved = [
-            d
-            for d, (oh, vh, ow, vw) in enumerate(
-                zip(existing.roi.offset, existing.voxel_size, offset, voxel_size)
-            )
-            if int(oh) * int(vw) != int(ow) * int(vh)
-        ]
-        if moved:
-            raise ValueError(
-                f"Dataset {self.store}: the array on disk starts at {tuple(existing.roi.offset)} "
-                f"(voxel size {tuple(existing.voxel_size)}); this task would prepare it at "
-                f"{tuple(offset)} (voxel size {tuple(voxel_size)}): another voxel origin on axes "
-                f"{moved}. Its blocks would sit off the grid of the data already written; "
-                "recreate the array or keep the roi it was created with."
-            )
 
     def lazy_ops(self, arr: Array) -> None:
         """
