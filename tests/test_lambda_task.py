@@ -488,9 +488,12 @@ def test_lambda_task_refuses_a_block_size_that_splits_a_shard(tmp_path):
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
         block_size=Coordinate(8, 8),
     )
+    task.init()  # the array is created as declared; the block check is the task's, before any write
     with pytest.raises(ValueError, match="not a whole number of shards"):
-        task.init()
-    assert not (tmp_path / "data.zarr" / "out").exists()
+        task.check_output_block_grids()
+    out = task.out_data.array("r")
+    assert out.shard_shape == Coordinate(16, 16)  # ty: ignore[unresolved-attribute]
+    assert not out[:].any(), "nothing written"
 
 
 def test_lambda_task_concurrent_workers_write_whole_shards(tmp_path):
