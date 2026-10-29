@@ -270,7 +270,8 @@ class Dataset(StrictBaseModel, ABC):
             existing = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
         except FileNotFoundError:
             existing = None
-        if existing is not None:
+        if existing is not None and tuple(existing.shape) == tuple(shape):
+            # any other shape funlib refuses itself
             self._refuse_moved_origin(existing, offset, voxel_size)
         array = prepare_ds(
             self.prepared_store,
@@ -288,11 +289,12 @@ class Dataset(StrictBaseModel, ABC):
         array._source_data.attrs.update(self.attrs)
 
     def _refuse_moved_origin(self, existing: Array, offset, voxel_size) -> None:
-        """funlib does not compare an existing array's offset: a task whose roi moved is
-        accepted (and the array relabelled, if other metadata changed with it), so its blocks
-        would sit off the grid of the data already written, with no error. Compared in VOXELS,
-        cross-multiplied so a sub-voxel move is not rounded away: the same voxel origin under
-        another voxel size is the same array. Another spatial rank is refused the same way."""
+        """For an existing array of the same shape, which funlib accepts: it does not compare
+        the offset (a task whose roi moved is accepted, and the array relabelled if other
+        metadata changed with it), and it relabels the axes over the data when their number
+        changed. Either leaves the blocks off the grid of the data already written, with no
+        error. Compared in VOXELS, cross-multiplied so a sub-voxel move is not rounded away:
+        the same voxel origin under another voxel size is the same array."""
         moved = [
             d
             for d, (oh, vh, ow, vw) in enumerate(

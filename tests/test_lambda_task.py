@@ -689,9 +689,10 @@ def test_the_default_block_follows_a_channel_collapsed_existing_output(tmp_path)
 
 
 
-def test_a_refused_grid_leaves_an_existing_output_untouched(tmp_path):
-    """The grid check runs BEFORE init: a task whose blocks do not tile an existing output is
-    refused without init relabelling the array's metadata first."""
+def test_a_refused_block_leaves_an_existing_output_untouched(tmp_path):
+    """`Dataset.prepare` refuses the block before funlib sees the array, so a task whose blocks
+    do not tile an existing output leaves its metadata as it was (funlib would relabel the units
+    here before anything else could refuse)."""
     in_path, _ = _threshold_input(tmp_path)
     out = tmp_path / "data.zarr" / "out"
     prepare_ds(out, shape=(64, 64), voxel_size=Coordinate(1, 1), units=["nm", "nm"],
@@ -707,3 +708,21 @@ def test_a_refused_grid_leaves_an_existing_output_untouched(tmp_path):
     from funlib.persistence import open_ds
 
     assert list(open_ds(out).units) == ["nm", "nm"], "not relabelled by init"
+
+
+def test_an_existing_output_relabelled_to_another_voxel_size_is_still_written(tmp_path):
+    """The same voxel grid under another voxel size (slabreg relabels its canvas to physical nm)
+    is the same array: the grid check must read the metadata init leaves, not the stale one."""
+    in_path, data = _threshold_input(tmp_path)
+    out = tmp_path / "data.zarr" / "out"
+    prepare_ds(out, shape=(64, 64), offset=Coordinate(0, 0), voxel_size=Coordinate(2, 2),
+               units=["nm", "nm"], chunk_shape=Coordinate(16, 16), dtype=np.uint8, mode="w")
+    task = LambdaTask(
+        in_data=Raw(store=in_path),
+        out_data=Labels(store=out),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        block_size=Coordinate(16, 16),
+        out_array_dtype=np.dtype(np.uint8),
+    )
+    task.run_blockwise(multiprocessing=False)
+    np.testing.assert_array_equal(task.out_data.array("r")[:], (data > 0.5).astype(np.uint8))

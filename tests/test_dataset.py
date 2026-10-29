@@ -591,9 +591,16 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
                axis_names=["c^", "y", "x"], chunk_shape=Coordinate(2, 16, 16), dtype=np.uint8, mode="a")
     with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
-    # another spatial rank over the same total shape: funlib would relabel the axes over the data
+    # another spatial rank over the same total shape and the SAME origin: funlib would relabel
+    # the axes over the data (another shape it refuses itself, so volara leaves that to it)
+    ds = Labels(store=tmp_path / "r.zarr", chunk_shape=(2, 16, 16))
+    _prepare(ds, write_shape=(2, 32, 32))
     with pytest.raises(ValueError, match="another number of spatial axes"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
+                   units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
+    assert list(ds.array("r").axis_names) == ["c^", "y", "x"], "not relabelled"
+    with pytest.raises(PermissionError, match="not compatible"):
+        ds.prepare(shape=(64, 64, 64), chunk_shape=(32, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
                    units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
 
 

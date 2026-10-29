@@ -373,9 +373,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
         with benchmark_logger.trace("init"):
             self.meta_dir.mkdir(parents=True, exist_ok=True)
-            # before init, so an EXISTING output the blocks do not tile is refused untouched
-            # (init would relabel it); again after, for the outputs init created
-            self.check_output_block_grids()
             self.init()
             self.check_output_block_grids()
 
