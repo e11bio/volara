@@ -268,15 +268,16 @@ class Dataset(StrictBaseModel, ABC):
             kwargs["inner_chunk_shape"] = self.inner_chunk_shape
         try:
             existing = open_ds(self.prepared_store, mode="r", **self.zarr_kwargs)
-        except FileNotFoundError:
-            existing = None
+        except (FileNotFoundError, TypeError):
+            existing = None  # nothing, or a group: funlib's to recover from or refuse
+        spatial = [t in ("space", "time") for t in types]
         if (
             existing is not None
             and tuple(existing.shape) == tuple(shape)
-            and existing.roi.dims == len(tuple(offset))
+            and [t in ("space", "time") for t in existing._metadata.types] == spatial
         ):
-            # funlib refuses any other shape itself; another spatial rank over the same shape
-            # is a relabel of the axes it makes by design
+            # funlib refuses another shape itself, and relabels moved or renamed axes by
+            # design; this compares the origin of axes that are spatial on both sides
             self._refuse_moved_origin(existing, offset, voxel_size)
         array = prepare_ds(
             self.prepared_store,

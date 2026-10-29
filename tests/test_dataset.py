@@ -596,16 +596,27 @@ def test_prepare_refuses_an_existing_array_at_another_origin(tmp_path):
     ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(1, 0), voxel_size=(1, 1), **kw)
     with pytest.raises(ValueError, match="another voxel origin on axes \\[0\\]"):
         ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(3, 0), voxel_size=(2, 2), **kw)
-    # what is left to funlib: another shape is refused by it, another spatial rank over the same
-    # shape is a relabel of the axes it makes by design
+    # what is left to funlib, at a NONZERO origin so the gates are what lets each through:
+    # another shape (same rank, moved origin) is refused by funlib, not by the origin check ...
     ds = Labels(store=tmp_path / "r.zarr", chunk_shape=(2, 16, 16))
-    _prepare(ds, write_shape=(2, 32, 32))
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(16, 0), voxel_size=(1, 1), **kw)
     with pytest.raises(PermissionError, match="not compatible"):
-        ds.prepare(shape=(64, 64, 64), chunk_shape=(32, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
-                   units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
-    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 0, 0), voxel_size=(1, 1, 1),
+        ds.prepare(shape=(2, 128, 128), chunk_shape=(2, 32, 32), offset=(32, 0), voxel_size=(1, 1), **kw)
+    # ... another spatial rank, or spatial axes in other positions, is a relabel of the axes
+    # funlib makes by design, and the origin check does not pair axes that moved
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 16, 0), voxel_size=(1, 1, 1),
                units=("nm",) * 3, axis_names=("z", "y", "x"), types=("space",) * 3, dtype=np.uint8)
     assert list(ds.array("r").axis_names) == ["z", "y", "x"]
+    ds.prepare(shape=(2, 64, 64), chunk_shape=(2, 32, 32), offset=(0, 16), voxel_size=(1, 1),
+               units=("nm", "nm"), axis_names=("y", "x", "c^"), types=("space", "space", "channel"),
+               dtype=np.uint8)
+    assert list(ds.array("r").axis_names) == ["y", "x", "c^"]
+    # a group at the store is funlib's to refuse (or, empty, to overwrite)
+    import zarr
+
+    zarr.open_group(str(tmp_path / "g.zarr"), mode="w", zarr_format=3).attrs["kept"] = True
+    with pytest.raises(TypeError, match="got Group"):
+        _prepare(Labels(store=tmp_path / "g.zarr"), write_shape=(2, 32, 32))
 
 
 def test_stored_layout_of_a_non_zarr_array_is_its_own_chunking_with_no_shards():
