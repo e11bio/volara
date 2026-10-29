@@ -106,6 +106,19 @@ class Dataset(StrictBaseModel, ABC):
 
     zarr_kwargs: dict = Field(default_factory=dict)
 
+    sharding: bool = True
+    """
+    Store the array zarr v3 sharded: each block the task writes is one shard, made of
+    smaller inner chunks. ``False`` stores one chunk per block. An existing array is
+    reused either way if its write unit (shard or chunk) is the block.
+    """
+
+    inner_chunk_shape: PydanticCoordinate | None = None
+    """
+    With ``sharding``, the chunk inside each shard, over every axis (channels included).
+    Defaults to funlib's: per axis, the largest divisor of the block up to 64 voxels.
+    """
+
     storage_options: dict | None = Field(
         default=None, validation_alias=AliasChoices("storage_options", "s3_kwargs")
     )
@@ -184,7 +197,11 @@ class Dataset(StrictBaseModel, ABC):
         types: Sequence[str],
         dtype,
     ) -> None:
-        # prepare ds
+        kwargs = dict(self.zarr_kwargs)
+        if self.sharding:
+            kwargs["sharding"] = True
+            if self.inner_chunk_shape is not None:
+                kwargs["inner_chunk_shape"] = self.inner_chunk_shape
         array = prepare_ds(
             self.prepared_store,
             shape=shape,
@@ -196,7 +213,7 @@ class Dataset(StrictBaseModel, ABC):
             chunk_shape=chunk_shape,
             dtype=dtype,
             mode="a",
-            **self.zarr_kwargs,
+            **kwargs,
         )
         array._source_data.attrs.update(self.attrs)
 

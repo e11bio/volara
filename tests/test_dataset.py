@@ -392,3 +392,45 @@ def test_mask_dataset_round_trips_and_reads_like_any_dataset(tmp_path):
     assert rebuilt.dataset_type == "mask"
     assert rebuilt == dataset
     assert rebuilt.array("r")[:].tolist() == array.tolist()
+
+
+# --- Sharding ---
+
+
+def _prepare_64(ds):
+    ds.prepare(
+        shape=(64, 64, 64),
+        chunk_shape=(32, 32, 32),
+        offset=(0, 0, 0),
+        voxel_size=(1, 1, 1),
+        units=["nm", "nm", "nm"],
+        axis_names=["z", "y", "x"],
+        types=["space", "space", "space"],
+        dtype=np.uint8,
+    )
+
+
+def test_inner_chunk_shape_shards_the_array(tmp_path):
+    ds = Raw(store=tmp_path / "sharded.zarr", inner_chunk_shape=(8, 8, 8))
+    assert Raw.model_validate_json(ds.model_dump_json()).inner_chunk_shape == (8, 8, 8)
+
+    _prepare_64(ds)
+    stored = zarr.open_array(str(tmp_path / "sharded.zarr"), mode="r")
+    assert stored.shards == (32, 32, 32)  # one shard per block
+    assert stored.chunks == (8, 8, 8)
+
+    _prepare_64(ds)  # an existing compatible array is reused
+
+
+def test_sharded_by_default(tmp_path):
+    _prepare_64(Raw(store=tmp_path / "default.zarr"))
+    stored = zarr.open_array(str(tmp_path / "default.zarr"), mode="r")
+    assert stored.shards == (32, 32, 32)
+    assert stored.chunks == (32, 32, 32)  # funlib's default: the whole axis up to 64
+
+
+def test_sharding_false_is_unsharded(tmp_path):
+    _prepare_64(Raw(store=tmp_path / "plain.zarr", sharding=False))
+    stored = zarr.open_array(str(tmp_path / "plain.zarr"), mode="r")
+    assert stored.shards is None
+    assert stored.chunks == (32, 32, 32)

@@ -25,7 +25,7 @@ dependencies = [
     # daisy v2 (Rust rewrite); 2.0.1 measures block resources process-wide
     "daisy>=2.0.1,<3",
     "funlib.geometry>=0.3",
-    "funlib.persistence>=0.7.0",
+    "funlib.persistence>=0.8.1",  # prepare_ds(sharding=) with a default inner chunk for any block size
     "funlib.math",
     "mwatershed>=0.5.2",
     "pydantic>=2.6.3",
