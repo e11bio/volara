@@ -422,8 +422,15 @@ def test_inner_chunk_shape_shards_the_array(tmp_path):
     _prepare_64(ds)  # an existing compatible array is reused
 
 
-def test_no_inner_chunk_shape_is_unsharded(tmp_path):
-    _prepare_64(Raw(store=tmp_path / "plain.zarr"))
+def test_sharded_by_default(tmp_path):
+    _prepare_64(Raw(store=tmp_path / "default.zarr"))
+    stored = zarr.open_array(str(tmp_path / "default.zarr"), mode="r")
+    assert stored.shards == (32, 32, 32)
+    assert stored.chunks == (32, 32, 32)  # funlib's default: the whole axis up to 64
+
+
+def test_sharding_false_is_unsharded(tmp_path):
+    _prepare_64(Raw(store=tmp_path / "plain.zarr", sharding=False))
     stored = zarr.open_array(str(tmp_path / "plain.zarr"), mode="r")
     assert stored.shards is None
     assert stored.chunks == (32, 32, 32)
