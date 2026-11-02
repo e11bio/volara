@@ -406,4 +406,4 @@ def test_array_scheduler_defaults_to_single_threaded_and_round_trips():
     dumped = DummyTask(array_scheduler=None).model_dump_json()
     assert DummyTask.model_validate_json(dumped).array_scheduler is None
     with pytest.raises(ValueError):
-        DummyTask(array_scheduler="distributed")
+        DummyTask(array_scheduler="distributed")  # ty: ignore[invalid-argument-type]
