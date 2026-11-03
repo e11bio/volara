@@ -1,5 +1,6 @@
 import pickle
-from typing import Annotated, Any, Callable, Literal
+from collections.abc import Callable
+from typing import Annotated, Any, Literal
 
 import cloudpickle
 from funlib.geometry import Coordinate, Roi

@@ -1,7 +1,8 @@
 import logging
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, nullcontext
 from itertools import chain
-from typing import Annotated, Callable, Generator, Iterator, Literal
+from typing import Annotated, Literal
 
 import daisy
 import networkx as nx
@@ -190,11 +191,15 @@ class AffAgglom(BlockwiseTask):
 
             return {
                 int(cantor_id): (float(total / count), float(count))
-                for cantor_id, total, count in zip(cantor_ids, sums, counts)
+                for cantor_id, total, count in zip(
+                    cantor_ids, sums, counts, strict=False
+                )
             }
 
         with benchmark_logger.trace("Count affinities"):
-            for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
+            for offset_affs, offset in zip(
+                affs, self.affs_data.neighborhood, strict=False
+            ):
                 neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
 
         with benchmark_logger.trace("postprocess scores"):

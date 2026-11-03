@@ -67,7 +67,7 @@ class SlurmWorker(Worker):
             raise RuntimeError(f"sbatch failed to execute: {e}") from e
         except FileNotFoundError:
             # sbatch is not found in the system's PATH
-            raise EnvironmentError(
+            raise OSError(
                 "sbatch is not installed or not in PATH. Either install slurm on your cluster, or run locally."
             )
 
@@ -214,7 +214,7 @@ class LSFWorker(Worker):
             raise RuntimeError(f"bsub failed to execute: {e}") from e
         except FileNotFoundError:
             # bsub is not found in the system's PATH
-            raise EnvironmentError(
+            raise OSError(
                 "bsub is not installed or not in PATH. Either install bsub on your cluster, or run locally."
             )
 

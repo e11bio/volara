@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
-from typing import Annotated, Iterator, Literal
+from typing import Annotated, Literal
 
 import daisy
 import mwatershed as mws
@@ -428,7 +429,9 @@ class ExtractFrags(BlockwiseTask):
                 "center": offset + voxel_size * Coordinate(center),
                 "size": int(count),
             }
-            for fragment_id, center, count in zip(fragment_ids, centers, counts)
+            for fragment_id, center, count in zip(
+                fragment_ids, centers, counts, strict=False
+            )
             if fragment_id > 0
         }
 
@@ -476,7 +479,7 @@ class ExtractFrags(BlockwiseTask):
         """
         radius = np.maximum(1, np.rint(min_spacing / np.array(voxel_size))).astype(int)
         grid = np.ogrid[tuple(slice(-r, r + 1) for r in radius)]
-        footprint = sum((g / r) ** 2 for g, r in zip(grid, radius)) <= 1.0
+        footprint = sum((g / r) ** 2 for g, r in zip(grid, radius, strict=False)) <= 1.0
         maxima = (
             maximum_filter(boundary_distances, footprint=footprint)
             == boundary_distances
@@ -647,11 +650,11 @@ class ExtractFrags(BlockwiseTask):
             # the voxel pairs this offset connects, both ends in bounds
             src = tuple(
                 slice(max(0, -d), size - max(0, d))
-                for d, size in zip(offset, cells.shape)
+                for d, size in zip(offset, cells.shape, strict=False)
             )
             dst = tuple(
                 slice(max(0, d), size - max(0, -d))
-                for d, size in zip(offset, cells.shape)
+                for d, size in zip(offset, cells.shape, strict=False)
             )
             crosses = (
                 (cells[src] != cells[dst]) & boundary_mask[src] & boundary_mask[dst]

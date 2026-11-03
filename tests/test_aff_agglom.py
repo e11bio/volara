@@ -155,7 +155,7 @@ def test_aff_agglom_basic(frags_2d, sqlite_db_2d, block_2d, tmp_path):
     g = sqlite_db_2d.open("r").read_graph(block_2d.write_roi)
     assert g.number_of_nodes() == 10
     assert g.number_of_edges() == 9
-    for u, v, data in g.edges(data=True):
+    for u, _v, data in g.edges(data=True):
         if u % 2 == 0:
             assert data["y_aff"] == 0.0
         else:
@@ -245,7 +245,7 @@ def test_aff_agglom_bulk_finds_every_adjacency(bulk):
         base = np.take(frags, range(frags.shape[axis] - 1), axis=axis)
         shifted = np.take(frags, range(1, frags.shape[axis]), axis=axis)
         mask = (base != shifted) & (base > 0) & (shifted > 0)
-        for u, v in zip(base[mask], shifted[mask]):
+        for u, v in zip(base[mask], shifted[mask], strict=False):
             expected.add((min(int(u), int(v)), max(int(u), int(v))))
 
     assert set(bulk.edges(db)) == expected

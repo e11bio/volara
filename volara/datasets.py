@@ -1,10 +1,11 @@
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Literal, Sequence, Union
+from typing import Annotated, Literal
 
 import numpy as np
 from cloudvolume import CloudVolume
@@ -490,7 +491,7 @@ class _CloudVolumeView:
             )
             if isinstance(s, slice)
             else slice(s + o, s + o + 1)
-            for i, (s, o) in enumerate(zip(index, self._offset))
+            for i, (s, o) in enumerate(zip(index, self._offset, strict=False))
         )
         data = np.asarray(self.vol[shifted])
         # CloudVolume always returns all dims; drop the ones indexed by an int
@@ -577,7 +578,7 @@ class CloudVolumeWrapper(Dataset):
 
 
 PydanticDataset = Annotated[
-    Union[Raw, Affs, LSD, Labels, MaskDataset, CloudVolumeWrapper],
+    Raw | Affs | LSD | Labels | MaskDataset | CloudVolumeWrapper,
     Field(discriminator="dataset_type"),
 ]
 
