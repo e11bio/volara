@@ -7,6 +7,7 @@ import pytest
 from funlib.geometry import Coordinate, Roi
 
 from volara.blockwise import GraphCluster, GraphMWS
+from volara.blockwise.graph_cluster import supports_hierarchy
 from volara.lut import LUT
 
 from .graph_cluster_helpers import make_db, partition, random_rag
@@ -16,6 +17,8 @@ W = {"aff": (1.0, 0.0)}
 
 
 def run(db, roi, levels, tmp_path, name=None, **kw):
+    if levels > 1 and not supports_hierarchy(db.open("r")):
+        pytest.skip("num_levels > 1 needs funlib.persistence with read_nodes(ids=)")
     name = name or f"levels_{levels}"
     task = GraphCluster(
         db=db,

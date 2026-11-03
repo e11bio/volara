@@ -8,6 +8,7 @@ from .octree import Octree as Octree
 from .store import HierarchyStore as HierarchyStore
 from .task import GraphCluster as GraphCluster
 from .task import GraphClusterLevel as GraphClusterLevel
+from .task import supports_hierarchy as supports_hierarchy
 
 __all__ = [
     "METHODS",
@@ -20,4 +21,5 @@ __all__ = [
     "MutexWatershed",
     "Octree",
     "SignedEdges",
+    "supports_hierarchy",
 ]

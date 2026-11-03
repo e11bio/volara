@@ -18,6 +18,7 @@ boundaries, so leaves should be as large as a worker can hold.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import resource
 import time
@@ -103,6 +104,23 @@ def _edge_arrays(rows, name_u: str, name_v: str, attr_names: list[str]):
 
 def _max_rss_mb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+
+
+def supports_hierarchy(db) -> bool:
+    """Whether an open graph database can look nodes up by id
+    (``read_nodes(ids=...)``), which leaf blocks need to place the far
+    endpoint of a cross-block edge. Released funlib.persistence <= 0.8.1
+    cannot; ``num_levels=1`` works without it."""
+    try:
+        return "ids" in inspect.signature(db.read_nodes).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+HIERARCHY_REQUIREMENT = (
+    "GraphCluster with num_levels > 1 needs a funlib.persistence with "
+    "read_nodes(ids=...) (newer than 0.8.1); num_levels=1 works with any version"
+)
 
 
 class GraphCluster(StrictBaseModel):
@@ -409,6 +427,9 @@ class GraphClusterLevel(BlockwiseTask):
         return self.config.octree.is_root(self.level)
 
     def init(self):
+        if self.level == 0 and self.config.depth > 1:
+            if not supports_hierarchy(self.config.db.open("r")):
+                raise RuntimeError(HIERARCHY_REQUIREMENT)
         self.config.store.ensure_manifest(self.config.manifest())
 
     def drop_artifacts(self):
@@ -605,10 +626,16 @@ class GraphClusterLevel(BlockwiseTask):
         cross = in_u ^ in_v
         n_dropped = int((~(in_u | in_v)).sum())
 
-        # position lookup for the foreign endpoint of every cross edge
+        # position lookup for the foreign endpoint of every cross edge; with
+        # a single leaf every foreign endpoint lies outside the roi, so the
+        # edge is dropped without a lookup (num_levels=1 then needs no
+        # read-by-id support from the database)
         other_id = np.where(in_u, v, u)
         foreign = np.unique(other_id[cross])
-        foreign_leaf = octree.leaf_index(self._positions(db, foreign, octree.dims))
+        if octree.num_blocks(0) == 1:
+            foreign_leaf = np.full((len(foreign), octree.dims), -1, dtype=np.int64)
+        else:
+            foreign_leaf = octree.leaf_index(self._positions(db, foreign, octree.dims))
         group = np.full(
             len(u), -1, dtype=np.int64
         )  # LCA level per raw edge, -1 = not deferred
