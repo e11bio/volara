@@ -1,37 +1,16 @@
-name: Publish
-
-permissions:
-  id-token: write
-
+name: publish
 on:
   push:
-    tags: "*"
-
+    tags: ["v*"]
 jobs:
-  build-n-publish:
-    name: Build and publish Python 🐍 distributions 📦 to PyPI and TestPyPI
+  pypi:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # ready for trusted publishing once a PyPI publisher is registered
     steps:
-      - uses: actions/checkout@master
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v3
-        with:
-          python-version: "3.11"
-      - name: Install pypa/build
-        run: >-
-          python -m
-          pip install
-          build
-          --user
-      - name: Build a binary wheel and a source tarball
-        run: >-
-          python -m
-          build
-          --sdist
-          --wheel
-          --outdir dist/
-      - name: Publish distribution 📦 to PyPI
-        if: startsWith(github.ref, 'refs/tags')
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_TOKEN }}
