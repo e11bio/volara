@@ -77,6 +77,15 @@ class GraphMWS(BlockwiseTask):
     and assuming we want all nodes and edges. If you don't want to process a
     sub volume of the graph setting this to false will speed up the read.
     """
+    canonical_order: bool = False
+    """
+    Break ties between equal-magnitude edges by ``(min(u, v), max(u, v),
+    attribute index)`` instead of by database row order. The default keeps
+    the legacy behaviour, where ties (a large share of real edges) fall to
+    whatever order the rows came back in. ``True`` makes the partition
+    reproducible across backends and is the ordering :class:`GraphCluster`
+    uses at every level, so it is what to compare against.
+    """
 
     fit: Literal["shrink"] = "shrink"
     read_write_conflict: Literal[False] = False
@@ -154,15 +163,17 @@ class GraphMWS(BlockwiseTask):
 
                 for u, v, edge_attrs in graph.edges(data=True):
                     scores = [
-                        w * edge_attrs.get(attr, None) + b
-                        for attr, (w, b) in self.weights.items()
+                        (w * edge_attrs.get(attr, None) + b, attr_index)
+                        for attr_index, (attr, (w, b)) in enumerate(
+                            self.weights.items()
+                        )
                         if edge_attrs.get(attr, None) is not None
                     ]
                     if self.edge_per_attr:
-                        for score in scores:
-                            edges.append((score, u, v))
+                        for score, attr_index in scores:
+                            edges.append((score, u, v, attr_index))
                     else:
-                        edges.append((sum(scores), u, v))
+                        edges.append((sum(s for s, _ in scores), u, v, 0))
 
                 prefix_edges = []
                 if starting_map is not None:
@@ -174,12 +185,23 @@ class GraphMWS(BlockwiseTask):
                         for u, v in zip(pre_merged_ids, pre_merged_ids[1:]):
                             prefix_edges.append((True, u, v))
 
-                edges = sorted(
-                    edges,
-                    key=lambda edge: abs(edge[0]),
-                    reverse=True,
-                )
-                edges = [(bool(aff > 0), u, v) for aff, u, v in edges]
+                if self.canonical_order:
+                    edges.sort(
+                        key=lambda edge: (
+                            -abs(edge[0]),
+                            min(edge[1], edge[2]),
+                            max(edge[1], edge[2]),
+                            edge[3],
+                        )
+                    )
+                else:
+                    # stable: ties keep database/networkx row order (legacy)
+                    edges = sorted(
+                        edges,
+                        key=lambda edge: abs(edge[0]),
+                        reverse=True,
+                    )
+                edges = [(bool(aff > 0), u, v) for aff, u, v, _ in edges]
 
             with benchmark_logger.trace("Run MWS"):
                 # generate the look up table via mutex watershed clustering
