@@ -288,7 +288,6 @@ class Argmax(BlockwiseTask):
 
 
 if __name__ == "__main__":
-
     argmax_task = Argmax()
     argmax_task.run_blockwise(multiprocessing=False)
 
