@@ -31,11 +31,11 @@ jobs:
 
       - name: Build documentation
         run: |
-          uv run --extra docs python -m ipykernel install --name volara_env --user
-          uv run --extra docs jupytext --to notebook examples/getting_started/basics.py
-          uv run --extra docs jupytext --to notebook examples/cremi/cremi.py
+          uv run --group docs python -m ipykernel install --name volara_env --user
+          uv run --group docs jupytext --to notebook examples/getting_started/basics.py
+          uv run --group docs jupytext --to notebook examples/cremi/cremi.py
           cp -r examples docs/source
-          uv run --extra docs sphinx-build docs/source docs/build/html -b html
+          uv run --group docs sphinx-build docs/source docs/build/html -b html
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3

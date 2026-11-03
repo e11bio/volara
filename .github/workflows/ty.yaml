@@ -15,4 +15,4 @@ jobs:
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: ty
-        run: uv run --extra dev ty check volara tests
+        run: uv run ty check volara tests

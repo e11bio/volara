@@ -35,7 +35,7 @@ jobs:
       uses: astral-sh/setup-uv@v5
 
     - name: Test with pytest
-      run: uv run --extra dev --extra indirect --resolution ${{ matrix.resolution }} --python ${{ matrix.python-version }} pytest --cov=volara tests
+      run: uv run --resolution ${{ matrix.resolution }} --python ${{ matrix.python-version }} pytest --cov=volara tests
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
@@ -59,4 +59,4 @@ jobs:
       uses: astral-sh/setup-uv@v5
 
     - name: Test with pytest
-      run: uv run --extra dev --extra indirect --resolution ${{ matrix.resolution }} --python ${{ matrix.python-version }} pytest --cov=volara tests
+      run: uv run --resolution ${{ matrix.resolution }} --python ${{ matrix.python-version }} pytest --cov=volara tests
