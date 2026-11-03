@@ -143,24 +143,6 @@ def _lookup_sorted(keys_sorted: np.ndarray, values: np.ndarray, query: np.ndarra
     return values[pos_clipped]
 
 
-def min_id_labels(nodes: np.ndarray, reps: np.ndarray) -> np.ndarray:
-    """Relabel each group of equal ``reps`` to the smallest ``nodes`` id in it."""
-    nodes = np.asarray(nodes, dtype=np.int64)
-    reps = np.asarray(reps, dtype=np.int64)
-    if len(nodes) == 0:
-        return nodes.copy()
-    order = np.argsort(reps, kind="stable")
-    r = reps[order]
-    n = nodes[order]
-    new_group = np.r_[True, r[1:] != r[:-1]]
-    starts = np.flatnonzero(new_group)
-    mins = np.minimum.reduceat(n, starts)
-    sizes = np.diff(np.r_[starts, len(r)])
-    labels = np.empty_like(nodes)
-    labels[order] = np.repeat(mins, sizes)
-    return labels
-
-
 class MutexWatershed:
     """Mutex watershed on a signed edge list via the ``mwatershed`` backend.
 
@@ -253,23 +235,7 @@ class MutexWatershed:
             ordered = SignedEdges.concat([edges, carried]).sorted()
 
         self._check_endpoints(nodes, ordered)
-        pairs = mws.cluster(head + ordered.to_mws())
-
-        reps = nodes.copy()
-        if pairs:
-            in_ids = np.fromiter(
-                (p[0] for p in pairs), dtype=np.int64, count=len(pairs)
-            )
-            out_ids = np.fromiter(
-                (p[1] for p in pairs), dtype=np.int64, count=len(pairs)
-            )
-            order = np.argsort(in_ids)
-            in_sorted, out_sorted = in_ids[order], out_ids[order]
-            pos = np.searchsorted(in_sorted, nodes)
-            pos = np.minimum(pos, len(in_sorted) - 1)
-            hit = in_sorted[pos] == nodes
-            reps[hit] = out_sorted[pos[hit]]
-        labels = min_id_labels(nodes, reps)
+        labels = self._cluster_arrays(nodes, ordered, head)
 
         return ClusterResult(
             labels=labels,
@@ -282,6 +248,30 @@ class MutexWatershed:
                 "cluster_seconds": time.perf_counter() - t0,
             },
         )
+
+    @staticmethod
+    def _cluster_arrays(
+        nodes: np.ndarray, ordered: SignedEdges, head: list[MwsEdge]
+    ) -> np.ndarray:
+        """``mwatershed.cluster_arrays`` (>= 0.6): no per-edge Python objects,
+        labels already named after the smallest member of each cluster."""
+        prefix = None
+        if head:
+            prefix = (
+                np.array([h[1] for h in head], dtype=np.uint64),
+                np.array([h[2] for h in head], dtype=np.uint64),
+                np.array([h[0] for h in head], dtype=bool),
+            )
+        out_nodes, labels = mws.cluster_arrays(
+            ordered.u.astype(np.uint64),
+            ordered.v.astype(np.uint64),
+            ordered.score,
+            nodes=nodes.astype(np.uint64),
+            sorted=True,
+            prefix=prefix,
+        )
+        assert np.array_equal(out_nodes.astype(np.int64), nodes)
+        return labels.astype(np.int64)
 
     @staticmethod
     def _check_endpoints(nodes: np.ndarray, edges: SignedEdges) -> None:

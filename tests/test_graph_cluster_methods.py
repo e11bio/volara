@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 
 from volara.blockwise.graph_cluster import MutexWatershed, SignedEdges
-from volara.blockwise.graph_cluster.methods import min_id_labels
 
 from .graph_cluster_helpers import groups_of, reference_mws
 
@@ -59,12 +58,6 @@ def test_canonical_order_is_independent_of_input_order():
     assert a.attr.tolist() == b.attr.tolist()
     mags = np.abs(a.score)
     assert np.all(mags[1:] <= mags[:-1])
-
-
-def test_min_id_labels():
-    nodes = np.array([5, 9, 2, 7, 11])
-    reps = np.array([9, 9, 2, 2, 11])
-    assert min_id_labels(nodes, reps).tolist() == [5, 5, 2, 2, 11]
 
 
 def test_cluster_labels_every_node_including_isolated():
@@ -144,3 +137,43 @@ def test_soft_vs_hard_carry_on_a_stronger_cross_edge():
         comps, new, carried=carried
     )
     assert hard.labels.tolist() == [1, 2]
+
+
+def test_cluster_matches_reference_with_prefix_and_carried():
+    """``MutexWatershed.cluster`` (backend ``cluster_arrays``) equals a
+    brute-force mutex watershed over the same processing order: prefix
+    decisions first, then carried and new edges in canonical order (soft
+    carry) or carried mutexes as prefix (hard carry). Random tie-heavy graphs
+    with gaps in the node ids."""
+    rng = np.random.default_rng(3)
+    weights = {"aff": (1.0, 0.0)}
+    for trial in range(20):
+        nodes = np.unique(rng.integers(1, 10_000, 60))
+        edges = SignedEdges(
+            rng.uniform(-1, 1, 250).round(1),
+            rng.choice(nodes, 250),
+            rng.choice(nodes, 250),
+            np.zeros(250, dtype=np.int64),
+        )
+        edges = edges.take(edges.u != edges.v)
+        carried = SignedEdges([-0.5, -0.2], nodes[:2], nodes[2:4], [0, 0])
+        prefix = [
+            (True, int(nodes[5]), int(nodes[6])),
+            (False, int(nodes[7]), int(nodes[8])),
+        ]
+        for commit in (False, True):
+            m = MutexWatershed(weights, commit_child_mutexes=commit)
+            labels = m.cluster(nodes, edges, carried=carried, prefix=prefix).labels
+            if commit:
+                order = prefix + carried.sorted().to_mws() + edges.sorted().to_mws()
+            else:
+                order = prefix + SignedEdges.concat([edges, carried]).sorted().to_mws()
+            ref = reference_mws(order)
+            expected = groups_of({int(n): ref.get(int(n), int(n)) for n in nodes})
+            assert groups_of(dict(zip(nodes.tolist(), labels.tolist()))) == expected, (
+                trial,
+                commit,
+            )
+            # labels are the smallest member of each group
+            for n, lab in zip(nodes.tolist(), labels.tolist()):
+                assert lab <= n

@@ -27,7 +27,7 @@ dependencies = [
     "funlib.geometry>=0.3",
     "funlib.persistence>=0.8.1",  # prepare_ds(sharding=) with a default inner chunk for any block size
     "funlib.math",
-    "mwatershed>=0.5.2",
+    "mwatershed>=0.6.0",
     "pydantic>=2.6.3",
     "numpy>=2.0",
     "numba>=0.59.0",
