@@ -14,6 +14,10 @@ jobs:
         # requires-python floor and the newest interpreter numba supports
         python-version: ["3.11", "3.13"]
         resolution: ["highest", "lowest-direct"]
+        exclude:
+          # lowest-direct on the newest interpreter: the llvmlite floor has no 3.13 wheels and its sdist does not build there
+          - python-version: "3.13"
+            resolution: lowest-direct
     services:
       postgres:
         image: postgres
