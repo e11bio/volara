@@ -69,7 +69,7 @@ class SlurmWorker(Worker):
             # sbatch is not found in the system's PATH
             raise OSError(
                 "sbatch is not installed or not in PATH. Either install slurm on your cluster, or run locally."
-            )
+            ) from None
 
     def get_slurm_command(
         self,
@@ -216,7 +216,7 @@ class LSFWorker(Worker):
             # bsub is not found in the system's PATH
             raise OSError(
                 "bsub is not installed or not in PATH. Either install bsub on your cluster, or run locally."
-            )
+            ) from None
 
     def get_lsf_command(
         self,

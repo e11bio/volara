@@ -267,8 +267,8 @@ def test_attrs_affs_validation(tmp_path):
 
 def test_attrs_labels_lsd():
     """Simple check for static attributes in subclasses."""
-    l = Labels(store="dummy")
-    assert l.attrs == {}
+    labels = Labels(store="dummy")
+    assert labels.attrs == {}
 
     lsd = LSD(store="dummy")
     assert lsd.attrs == {"lsds": True}

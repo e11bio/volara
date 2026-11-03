@@ -121,7 +121,7 @@ def test_a_worker_without_a_context_does_not_silently_guess(tmp_path, monkeypatc
     pytest tests/test_logging.py::test_a_worker_without_a_context_does_not_silently_guess
     """
     monkeypatch.delenv(daisy.Context.ENV_VARIABLE, raising=False)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 -- daisy's own error type
         daisy.Context.from_env()
 
 

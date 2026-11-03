@@ -691,13 +691,13 @@ class ExtractFrags(BlockwiseTask):
         lo, hi = out_of_volume
         for axis, n in enumerate(lo):
             if n > 0:
-                index = lambda s: tuple(  # noqa: E731
+                index = lambda s, axis=axis: tuple(  # noqa: E731
                     s if a == axis else slice(None) for a in range(boundary_mask.ndim)
                 )
                 boundary_mask[index(slice(n))] = boundary_mask[index(slice(n, n + 1))]
         for axis, n in enumerate(hi):
             if n > 0:
-                index = lambda s: tuple(  # noqa: E731
+                index = lambda s, axis=axis: tuple(  # noqa: E731
                     s if a == axis else slice(None) for a in range(boundary_mask.ndim)
                 )
                 boundary_mask[index(slice(-n, None))] = boundary_mask[

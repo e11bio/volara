@@ -577,7 +577,10 @@ def test_adaptive_spacing_is_dense_in_thin_and_sparse_in_thick(affs_2d, tmp_path
     seeds = adaptive_task(affs_path, tmp_path, 1.5).get_adaptive_seeds(
         dt, Coordinate(1, 1)
     )
-    density = lambda m: (seeds[m] > 0).sum() / m.sum()
+
+    def density(m):
+        return (seeds[m] > 0).sum() / m.sum()
+
     assert density(thin) > density(thick), (density(thin), density(thick))
 
 

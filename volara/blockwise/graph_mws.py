@@ -210,7 +210,7 @@ class GraphMWS(BlockwiseTask):
                         in_group = mapping.setdefault(out_frag, set())
                         in_group.add(in_frag)
 
-                    for out_frag, in_group in mapping.items():
+                    for _out_frag, in_group in mapping.items():
                         computed_codes = {
                             "seg_size": sum(
                                 [graph.nodes[in_frag]["size"] for in_frag in in_group]
