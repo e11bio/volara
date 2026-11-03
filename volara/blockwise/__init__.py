@@ -10,6 +10,8 @@ from .distance_agglom import (
     DistanceAgglom as DistanceAgglom,
 )
 from .extract_frags import ExtractFrags as ExtractFrags
+from .graph_cluster import GraphCluster as GraphCluster
+from .graph_cluster import GraphClusterLevel as GraphClusterLevel
 from .graph_mws import GraphMWS as GraphMWS
 from .intensity_correction import CLAHE as CLAHE
 from .lambda_task import LambdaTask as LambdaTask
@@ -72,6 +74,8 @@ __all__ = [
     "ComputeShift",
     "DistanceAgglom",
     "ExtractFrags",
+    "GraphCluster",
+    "GraphClusterLevel",
     "GraphMWS",
     "Relabel",
     "SeededExtractFrags",
