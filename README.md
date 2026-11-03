@@ -1,6 +1,5 @@
 [![tests](https://github.com/e11bio/volara/actions/workflows/tests.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/tests.yaml)
-[![ruff](https://github.com/e11bio/volara/actions/workflows/ruff.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/ruff.yaml)
-[![ty](https://github.com/e11bio/volara/actions/workflows/ty.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/ty.yaml)
+[![lint](https://github.com/e11bio/volara/actions/workflows/lint.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/lint.yaml)
 [![docs](https://github.com/e11bio/volara/actions/workflows/docs.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/docs.yaml)
 <!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
 
@@ -289,7 +288,6 @@ class Argmax(BlockwiseTask):
 
 
 if __name__ == "__main__":
-
     argmax_task = Argmax()
     argmax_task.run_blockwise(multiprocessing=False)
 

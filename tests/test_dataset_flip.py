@@ -16,9 +16,14 @@ from volara.datasets import Raw
 def _store(tmp_path, shape, name="t.zarr"):
     p = tmp_path / name
     arr = prepare_ds(
-        p, shape=shape, dtype=np.uint16, voxel_size=(1,) * len(shape),
-        offset=(0,) * len(shape), axis_names=list("tczyx"[-len(shape):]),
-        units=["nm"] * len(shape), mode="w",
+        p,
+        shape=shape,
+        dtype=np.uint16,
+        voxel_size=(1,) * len(shape),
+        offset=(0,) * len(shape),
+        axis_names=list("tczyx"[-len(shape) :]),
+        units=["nm"] * len(shape),
+        mode="w",
     )
     data = np.arange(int(np.prod(shape)), dtype=np.uint16).reshape(shape)
     arr[:] = data
@@ -53,7 +58,7 @@ def test_sub_roi_reads_through_the_reversal_are_exact(tmp_path):
     arr = Raw(store=p, flip=[0], voxel_size=(1, 1, 1), offset=(0, 0, 0)).array("r")
     for z0, zs in ((0, 3), (3, 4), (8, 4), (5, 2), (10, 2)):
         got = np.asarray(arr[Roi(Coordinate(z0, 0, 0), Coordinate(zs, 5, 4))])
-        assert np.array_equal(got, ref[z0:z0 + zs]), f"z[{z0}:{z0 + zs}]"
+        assert np.array_equal(got, ref[z0 : z0 + zs]), f"z[{z0}:{z0 + zs}]"
 
 
 def test_the_field_survives_a_round_trip_through_json(tmp_path):
@@ -73,7 +78,9 @@ def test_a_task_typed_field_keeps_the_flip(tmp_path):
         intensities: Raw
 
     p, data = _store(tmp_path, (6, 5, 4))
-    t = _Task(intensities=Raw(store=p, flip=[0], voxel_size=(1, 1, 1), offset=(0, 0, 0)))
+    t = _Task(
+        intensities=Raw(store=p, flip=[0], voxel_size=(1, 1, 1), offset=(0, 0, 0))
+    )
     rebuilt = _Task.model_validate_json(t.model_dump_json())
     assert rebuilt.intensities.flip == [0]
     assert np.array_equal(np.asarray(rebuilt.intensities.array("r")[:]), data[::-1])

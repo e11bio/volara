@@ -212,7 +212,9 @@ def test_a_sqlite_url_path_is_cast_to_a_local_file(tmp_path):
                 edge_attrs={"aff": "float"},
             )
             local = db.local
-        assert local == (tmp_path / "remote" / "memory" / "bucket" / "graph.db").resolve()
+        assert (
+            local == (tmp_path / "remote" / "memory" / "bucket" / "graph.db").resolve()
+        )
         assert db.id == "graph"
         assert db.model_dump()["path"] == "memory://bucket/graph.db"
         db.open("w")

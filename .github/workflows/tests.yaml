@@ -1,17 +1,23 @@
-name: Test
-
+name: tests
 on:
   push:
-
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 jobs:
-  test-linux:
+  test:
+    name: py${{ matrix.python-version }} ${{ matrix.resolution }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        # requires-python floor and the newest interpreter numba supports
+        python-version: ["3.11", "3.13"]
         resolution: ["highest", "lowest-direct"]
-
+        exclude:
+          # lowest-direct on the newest interpreter: the llvmlite floor has no 3.13 wheels and its sdist does not build there
+          - python-version: "3.13"
+            resolution: lowest-direct
     services:
       postgres:
         image: postgres
@@ -24,39 +30,30 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
-       PGUSER: postgres
-
+      PGUSER: postgres
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v5
-
-    - name: Test with pytest
-      run: uv run --resolution ${{ matrix.resolution }} --python ${{ matrix.python-version }} pytest --cov=volara tests
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --resolution ${{ matrix.resolution }}
+      - run: uv run pytest tests --cov=volara --cov-report=term-missing --cov-report=xml
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
   test-macos:
+    name: ${{ matrix.os }} py3.12
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, macos-15-intel]
-        python-version: ["3.12"]
-        resolution: ["highest"]
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v5
-
-    - name: Test with pytest
-      run: uv run --resolution ${{ matrix.resolution }} --python ${{ matrix.python-version }} pytest --cov=volara tests
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv run pytest tests
