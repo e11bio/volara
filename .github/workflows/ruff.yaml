@@ -11,8 +11,7 @@ jobs:
         uses: actions/checkout@master
 
       - name: Set up uv
-        # Install a specific uv version using the installer
-        run: curl -LsSf https://astral.sh/uv/0.4.1/install.sh | sh
+        uses: astral-sh/setup-uv@v6
 
       - name: Lint with ruff
-        run: uvx ruff check volara tests
+        run: uv run --only-group dev ruff check volara tests
