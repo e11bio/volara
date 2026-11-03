@@ -4,7 +4,8 @@ A method owns three things and nothing else: how raw edge attributes become
 signed scores (applied exactly once, at the leaf), how a block's graph is
 clustered, and how the clustered graph is contracted into what the parent
 block sees. The octree, scheduler, store and LUT composition never look
-inside. See DESIGN.md "Minimal architecture".
+inside, which is what lets other methods (GASP linkages, exact hierarchical
+agglomeration with boundary freezing) plug in without touching the driver.
 """
 
 from __future__ import annotations
@@ -71,7 +72,8 @@ class SignedEdges:
 
         Magnitude first (what MWS needs), then endpoints and attribute index so
         ties are broken independently of database row order, worker count or
-        task order. See DESIGN.md "Deterministic edge order".
+        task order. Ties are common on real data, so without this the
+        partition would depend on the database backend.
         """
         lo = np.minimum(self.u, self.v)
         hi = np.maximum(self.u, self.v)
@@ -162,13 +164,19 @@ def min_id_labels(nodes: np.ndarray, reps: np.ndarray) -> np.ndarray:
 class MutexWatershed:
     """Mutex watershed on a signed edge list via the ``mwatershed`` backend.
 
-    Carried state for the parent is the contracted graph itself: by the
-    argument in DESIGN.md "Mutex state is derived", the committed mutex
-    constraints between a block's components are exactly its surviving
-    inter-component repulsive edges, and surviving inter-component attractive
-    edges are dead. ``contract`` keeps the strongest repulsive edge per
-    component pair (lossless for MWS: once the first repulsive edge between
-    two clusters is processed the mutex exists and later ones are no-ops).
+    Carried state for the parent is the contracted graph itself. Merges are
+    monotone and a merge is refused only by an existing mutex, so (a) every
+    repulsive edge whose endpoints end in different components was processed
+    while they were separate and therefore committed a mutex, and (b) every
+    attractive edge between different final components was blocked by a
+    mutex that itself came from a repulsive edge between the same two
+    components. Hence the committed mutex constraints between a block's
+    components are exactly its surviving inter-component repulsive edges,
+    and surviving inter-component attractive edges are dead. ``contract``
+    keeps the strongest repulsive edge per component pair (lossless for MWS:
+    once the first repulsive edge between two clusters is processed the
+    mutex exists and later ones are no-ops). Verified against a brute-force
+    implementation in the tests.
     """
 
     name = "mws"
@@ -319,7 +327,55 @@ class MutexWatershed:
         )
 
 
-METHODS: dict[str, type] = {"mws": MutexWatershed}
+class GASP:
+    """Placeholder for GASP (Bailoni et al. 2022): generalised agglomeration
+    with ``sum`` / ``mean`` / ``max`` / ``min`` linkage via the backend's
+    ``cluster_weighted``. Not implemented yet.
+
+    What it needs beyond :class:`MutexWatershed`: ``cluster`` passes the
+    signed float scores and a linkage name instead of booleans, and
+    ``contract`` must keep **every** surviving inter-component edge
+    (attractive ones too) so the parent can recompute the linkage statistic
+    exactly from individual edges; only the greedy processing history is
+    approximated. The derived-mutex argument of :class:`MutexWatershed` does
+    not transfer to cannot-link constraints under other linkages.
+    """
+
+    name = "gasp"
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError(
+            "method='gasp' is not implemented yet; see the GASP class docstring"
+        )
+
+
+class HierarchicalAgglomeration:
+    """Placeholder for exact distributed hierarchical agglomeration with
+    boundary freezing (Lu, Zlateski & Seung 2021, arXiv:2106.10795). Not
+    implemented yet.
+
+    Unlike MWS this can be made **exact**: with a reducible linkage, a block
+    commits only merges that cannot be affected by edges it has not seen
+    (those not touching a frozen boundary region) and carries the residual
+    graph upward. ``contract`` therefore owns the "which merges to commit"
+    decision and the carried state is the residual graph, not just surviving
+    repulsive edges. The driver, octree and store need no change.
+    """
+
+    name = "hierarchical"
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError(
+            "method='hierarchical' is not implemented yet; see the "
+            "HierarchicalAgglomeration class docstring"
+        )
+
+
+METHODS: dict[str, type] = {
+    "mws": MutexWatershed,
+    "gasp": GASP,
+    "hierarchical": HierarchicalAgglomeration,
+}
 
 
 def get_method(name: str, **kwargs) -> ClusterMethod:

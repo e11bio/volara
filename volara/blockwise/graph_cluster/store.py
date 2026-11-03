@@ -1,6 +1,6 @@
 """On-disk hierarchy state for :class:`GraphCluster`.
 
-Layout (see DESIGN.md "Persistence and resumability")::
+Layout::
 
     work_dir/
       manifest.json                 # roi, levels, weights, method, ... (must match)

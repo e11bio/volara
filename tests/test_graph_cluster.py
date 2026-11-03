@@ -268,7 +268,7 @@ def test_starting_lut_only_with_one_level(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# adversarial cross-block graphs (DESIGN.md section 5)
+# adversarial cross-block graphs
 # ---------------------------------------------------------------------------
 
 TWO = Roi(
@@ -496,3 +496,22 @@ def test_final_components_are_not_carried_upward(tmp_path):
     root = task.store.read_stats(1, (0, 0, 0))
     assert root["n_edges_dropped_final"] == 1
     assert root["n_nodes"] == 2
+
+
+def test_unimplemented_methods_fail_at_construction(tmp_path):
+    nodes, edges = random_rag(ROI, 20, 30, seed=12)
+    db = make_db(tmp_path / "rag.sqlite", nodes, edges)
+    with pytest.raises(NotImplementedError, match="gasp"):
+        GraphCluster(db=db, roi=ROI, weights=W, lut=tmp_path / "x.npz", method="gasp")
+    with pytest.raises(NotImplementedError, match="hierarchical"):
+        GraphCluster(
+            db=db, roi=ROI, weights=W, lut=tmp_path / "x.npz", method="hierarchical"
+        )
+    with pytest.raises(ValueError):
+        GraphCluster(
+            db=db,
+            roi=ROI,
+            weights=W,
+            lut=tmp_path / "x.npz",
+            method="nope",  # ty: ignore[invalid-argument-type]
+        )

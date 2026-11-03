@@ -1,12 +1,19 @@
 """``GraphCluster``: hierarchical (octree) graph clustering with persisted
 intermediate state, and the per-level ``BlockwiseTask`` it is built from.
 
-See DESIGN.md. In short: level 0 blocks read their own nodes and edges from
-the RAG, cluster, and contract; every higher level unions its children's
-contracted graphs, adds the edges first owned by it (those crossing its
-children), clusters again, and contracts; the root composes all block LUTs
-into one fragment -> segment LUT. With ``num_levels=1`` there is a single
-block over the whole roi and the result is the plain in-memory algorithm.
+Level 0 blocks read their own nodes and edges from the RAG, cluster, and
+contract; every higher level unions its children's contracted graphs, adds
+the edges first owned by it (those crossing its children), clusters again,
+and contracts; the root composes all block LUTs into one fragment -> segment
+LUT. With ``num_levels=1`` there is a single block over the whole roi and
+the result is the plain in-memory algorithm.
+
+Hierarchical mutex watershed is an approximation of the global run: a
+block commits every decision it can make from the edges it sees, parents
+may merge child components but never split them, and the only irreversible
+errors are leaf decisions a cross-boundary edge would have prevented. The
+error therefore scales with the fraction of edges crossing block
+boundaries, so leaves should be as large as a worker can hold.
 """
 
 from __future__ import annotations
@@ -121,7 +128,8 @@ class GraphCluster(StrictBaseModel):
     """
     lut: LUT
     """Where the final fragment -> segment LUT is written. A path string is accepted."""
-    method: Literal["mws"] = "mws"
+    method: Literal["mws", "gasp", "hierarchical"] = "mws"
+    """Clustering method. Only ``"mws"`` is implemented; the others raise ``NotImplementedError``."""
     num_levels: int | None = 1
     """
     Octree depth. 1 = one in-memory block over the whole roi. ``None`` derives
@@ -195,6 +203,7 @@ class GraphCluster(StrictBaseModel):
         if not self.bounded_read and self.num_levels != 1:
             raise ValueError("bounded_read=False is only supported with num_levels=1")
         self.octree  # validates roi vs. levels / block_shape, raises if unusable
+        self.make_method()  # unimplemented methods fail here, not in a worker
         return self
 
     # -- derived objects -----------------------------------------------------
@@ -630,7 +639,7 @@ class GraphClusterLevel(BlockwiseTask):
         # edge there) and the highest level of an *attractive* one. A
         # component none of whose members has an attractive edge pending
         # above can never merge again: it is final here and is not carried up
-        # (DESIGN.md "Finished components"); repulsive deferred edges touching
+        # (see ``GraphClusterLevel._process_block``); repulsive deferred edges touching
         # it are dropped at the ancestor since they could only block merges
         # that cannot happen.
         lca = group[src]

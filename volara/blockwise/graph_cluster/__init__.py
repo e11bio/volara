@@ -1,5 +1,7 @@
+from .methods import GASP as GASP
 from .methods import METHODS as METHODS
 from .methods import ClusterResult as ClusterResult
+from .methods import HierarchicalAgglomeration as HierarchicalAgglomeration
 from .methods import MutexWatershed as MutexWatershed
 from .methods import SignedEdges as SignedEdges
 from .octree import Octree as Octree
@@ -10,6 +12,8 @@ from .task import GraphClusterLevel as GraphClusterLevel
 __all__ = [
     "METHODS",
     "ClusterResult",
+    "GASP",
+    "HierarchicalAgglomeration",
     "GraphCluster",
     "GraphClusterLevel",
     "HierarchyStore",
