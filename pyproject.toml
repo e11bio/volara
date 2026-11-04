@@ -140,3 +140,14 @@ error-on-warning = false
 # block_timeout); ty reports that as invalid-mutable-override. Recorded as a
 # warning to promote to error once the base fields are typed as the unions.
 invalid-mutable-override = "warn"
+
+[tool.coverage.run]
+branch = true
+source = ["volara"]
+
+[tool.coverage.report]
+# Floor measured from the first branch-enabled run; raise it when measured
+# coverage is two or more points ahead, never lower it without saying why.
+fail_under = 69
+show_missing = true
+skip_covered = true
