@@ -117,6 +117,7 @@ class Relabel(BlockwiseTask):
         segs = self.seg_data.array("r+")
 
         mapping = self.lut.load()
+        assert mapping is not None, f"LUT {self.lut.file} has not been written"
         src_sorted, dst_sorted = prepare_mapping(mapping[0], mapping[1])
 
         warmup_replace_values_sorted()

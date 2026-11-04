@@ -64,12 +64,13 @@ class LUT(StrictBaseModel):
         rm(self.file, recursive=False)
 
     def save(self, lut: np.ndarray, edges=None):
-        arrays = {"fragment_segment_lut": lut.astype(int)}
-        if edges is not None:
-            arrays["edges"] = edges
-
         with self.file.open("wb") as f:
-            np.savez_compressed(f, **arrays)
+            if edges is None:
+                np.savez_compressed(f, fragment_segment_lut=lut.astype(int))
+            else:
+                np.savez_compressed(
+                    f, fragment_segment_lut=lut.astype(int), edges=edges
+                )
 
     def load(self) -> np.ndarray | None:
         if not self.file.exists():
@@ -105,7 +106,7 @@ class LUTS:
         mappings = (lut.load() for lut in self.luts)
         return np.concatenate(
             [mapping for mapping in mappings if mapping is not None], axis=1
-        )  # type: ignore
+        )
 
     def load_iterated(self):
         starting_map = self.luts[0].load()

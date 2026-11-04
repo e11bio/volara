@@ -40,6 +40,7 @@ class SlurmWorker(Worker):
         task_id = context["task_id"]
 
         worker_log_basename = daisy.logging.get_worker_log_basename(worker_id, task_id)
+        assert worker_log_basename is not None, "daisy file logging is disabled"
 
         log_file = worker_log_basename / "slurm_worker.log"
         log_error = worker_log_basename / "slurm_worker.err"
@@ -67,9 +68,9 @@ class SlurmWorker(Worker):
             raise RuntimeError(f"sbatch failed to execute: {e}") from e
         except FileNotFoundError:
             # sbatch is not found in the system's PATH
-            raise EnvironmentError(
+            raise OSError(
                 "sbatch is not installed or not in PATH. Either install slurm on your cluster, or run locally."
-            )
+            ) from None
 
     def get_slurm_command(
         self,
@@ -188,6 +189,7 @@ class LSFWorker(Worker):
         task_id = context["task_id"]
 
         worker_log_basename = daisy.logging.get_worker_log_basename(worker_id, task_id)
+        assert worker_log_basename is not None, "daisy file logging is disabled"
         if not worker_log_basename.exists():
             worker_log_basename.mkdir(parents=True, exist_ok=True)
 
@@ -214,9 +216,9 @@ class LSFWorker(Worker):
             raise RuntimeError(f"bsub failed to execute: {e}") from e
         except FileNotFoundError:
             # bsub is not found in the system's PATH
-            raise EnvironmentError(
+            raise OSError(
                 "bsub is not installed or not in PATH. Either install bsub on your cluster, or run locally."
-            )
+            ) from None
 
     def get_lsf_command(
         self,
@@ -225,8 +227,8 @@ class LSFWorker(Worker):
         num_gpus: int = 0,
         queue: str = "",
         job_name: str = "",
-        log_file: str | None = None,
-        error_file: str | None = None,
+        log_file: str | Path | None = None,
+        error_file: str | Path | None = None,
     ) -> list[str]:
         """
         Build the ``bsub -K`` line that runs one worker as an LSF job.
@@ -244,9 +246,9 @@ class LSFWorker(Worker):
             queue (str, optional): Name of the LSF queue to submit the job.
                 Defaults to "".
             job_name (str, optional): Name assigned to the LSF job. Defaults to "".
-            log_file (str | None, optional): Path for standard output logging.
+            log_file (str | Path | None, optional): Path for standard output logging.
                 Defaults to None.
-            error_file (str | None, optional): Path for standard error logging.
+            error_file (str | Path | None, optional): Path for standard error logging.
                 Defaults to None.
         """
         self.is_bsub_available()
@@ -282,6 +284,7 @@ class LocalWorker(Worker):
         task_id = context["task_id"]
 
         worker_log_basename = daisy.logging.get_worker_log_basename(worker_id, task_id)
+        assert worker_log_basename is not None, "daisy file logging is disabled"
 
         _log_file = worker_log_basename / "out.log"
         _log_error = worker_log_basename / "out.err"

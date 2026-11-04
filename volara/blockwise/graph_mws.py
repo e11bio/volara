@@ -130,7 +130,9 @@ class GraphMWS(BlockwiseTask):
             starting_frags, starting_segs = starting_lut
             starting_map = {
                 in_frag: out_frag
-                for in_frag, out_frag in zip(starting_frags, starting_segs)
+                for in_frag, out_frag in zip(
+                    starting_frags, starting_segs, strict=False
+                )
             }
         else:
             starting_map = None
@@ -171,7 +173,9 @@ class GraphMWS(BlockwiseTask):
                         groups.setdefault(starting_map[node], set()).add(node)
                     for group in groups.values():
                         pre_merged_ids = list(group)
-                        for u, v in zip(pre_merged_ids, pre_merged_ids[1:]):
+                        for u, v in zip(
+                            pre_merged_ids, pre_merged_ids[1:], strict=False
+                        ):
                             prefix_edges.append((True, u, v))
 
                 edges = sorted(
@@ -188,7 +192,7 @@ class GraphMWS(BlockwiseTask):
             inputs: list[int]
             outputs: list[int]
             if len(mws_lut) > 0:
-                inputs, outputs = [list(x) for x in zip(*mws_lut)]
+                inputs, outputs = [list(x) for x in zip(*mws_lut, strict=False)]
             else:
                 inputs, outputs = [], []
             lut = np.array([inputs, outputs])
@@ -202,11 +206,11 @@ class GraphMWS(BlockwiseTask):
                     out_graph = out_rag_provider.read_graph(block.write_roi)
                     assert out_graph.number_of_nodes() == 0, out_graph.number_of_nodes
                     mapping: dict[int, set[int]] = {}
-                    for in_frag, out_frag in zip(inputs, outputs):
+                    for in_frag, out_frag in zip(inputs, outputs, strict=False):
                         in_group = mapping.setdefault(out_frag, set())
                         in_group.add(in_frag)
 
-                    for out_frag, in_group in mapping.items():
+                    for _out_frag, in_group in mapping.items():
                         computed_codes = {
                             "seg_size": sum(
                                 [graph.nodes[in_frag]["size"] for in_frag in in_group]
@@ -263,7 +267,7 @@ class IterativeGraphMWS(BlockwiseTask):
     `attr, (w, b) in weights.items()`
     If an attribute is not present in the edge data it will be skipped.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]  # ty: ignore[invalid-attribute-override]  # (offset, shape) pair, see write_roi
     """
     The roi to process. This is the roi of the full graph to process.
     """
@@ -376,7 +380,7 @@ class IterativeGraphMWS(BlockwiseTask):
                             relabeled_nodes[out_frag] = in_frag
                             mws_lut_relabelled.append((in_frag, out_frag))
 
-                mws_mapping = [list(x) for x in zip(*mws_lut)]
+                mws_mapping = [list(x) for x in zip(*mws_lut, strict=False)]
                 inputs = np.array(list(inputs), dtype=int)
                 if len(mws_lut) > 0:
                     outputs = replace_values(
@@ -389,7 +393,7 @@ class IterativeGraphMWS(BlockwiseTask):
 
                 new_frag_to_seg_mapping = {
                     int(in_frag): int(out_frag)
-                    for in_frag, out_frag in zip(inputs, outputs)
+                    for in_frag, out_frag in zip(inputs, outputs, strict=False)
                     if out_frag is not None
                 }
                 new_seg_to_frag_mapping = {}
@@ -492,11 +496,15 @@ class IterativeGraphMWS(BlockwiseTask):
                         ]
                         magnitudes_and_weights = [
                             (magnitude, weight * magnitude)
-                            for weight, magnitude in zip(weights, magnitudes)
+                            for weight, magnitude in zip(
+                                weights, magnitudes, strict=False
+                            )
                             if weight is not None
                         ]
                         if len(magnitudes_and_weights) > 0:
-                            magnitudes, weights = zip(*magnitudes_and_weights)
+                            magnitudes, weights = zip(
+                                *magnitudes_and_weights, strict=False
+                            )
                             agglomerated_edge_attrs[weight_attr] = sum(weights) / sum(
                                 magnitudes
                             )
@@ -552,7 +560,7 @@ class GraphMWSExtractFragments(BlockwiseTask):
     `attr, (w, b) in weights.items()`
     If an attribute is not present in the edge data it will be skipped.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]  # ty: ignore[invalid-attribute-override]  # (offset, shape) pair, see write_roi
     """
     The roi to process. This is the roi of the full graph to process.
     """
@@ -631,7 +639,7 @@ class GraphMWSExtractFragments(BlockwiseTask):
                 inputs: list[int]
                 outputs: list[int]
                 if len(mws_lut) > 0:
-                    inputs, outputs = [list(x) for x in zip(*mws_lut)]
+                    inputs, outputs = [list(x) for x in zip(*mws_lut, strict=False)]
                 else:
                     inputs, outputs = [], []
 
@@ -758,7 +766,7 @@ class FragSegEdgeAgglom(BlockwiseTask):
     """
     A list of edge attributes to agglomerate via size weighted mean.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]  # ty: ignore[invalid-attribute-override]  # (offset, shape) pair, see write_roi
     """
     The roi to process. This is the roi of the full graph to process.
     """

@@ -64,7 +64,7 @@ def test_distance_agglom_basic(labels_2d, block_2d, tmp_path):
 
     g = db.open("r").read_graph()
     assert g.number_of_edges() >= 1
-    for u, v, data in g.edges(data=True):
+    for _u, _v, data in g.edges(data=True):
         assert "distance" in data
         assert "embedding_similarity" in data
         assert data["distance"] >= 0

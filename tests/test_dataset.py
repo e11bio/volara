@@ -113,6 +113,7 @@ def test_raw_serialization_roundtrip(tmp_path, stack):
             assert back.stack.dataset_type == expected["dataset_type"]
             assert type(back.stack) is type(raw_a.stack)
             if "scale_shift" in expected:
+                assert isinstance(back.stack, Raw)
                 assert back.stack.scale_shift == tuple(expected["scale_shift"])
     else:
         assert raw_b.stack is None and raw_c.stack is None
@@ -267,8 +268,8 @@ def test_attrs_affs_validation(tmp_path):
 
 def test_attrs_labels_lsd():
     """Simple check for static attributes in subclasses."""
-    l = Labels(store="dummy")
-    assert l.attrs == {}
+    labels = Labels(store="dummy")
+    assert labels.attrs == {}
 
     lsd = LSD(store="dummy")
     assert lsd.attrs == {"lsds": True}

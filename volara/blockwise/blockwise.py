@@ -2,10 +2,11 @@ import logging
 import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 import daisy
 import numpy as np
@@ -256,7 +257,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             with open(config_file, "w") as f:
                 f.write(self.model_dump_json())
 
-            logging.info("Running block with config %s..." % config_file)
+            logging.info(f"Running block with config {config_file}...")
 
             def run_worker():
                 cmd = worker_config.get_command(config_file, self.task_name)
@@ -332,7 +333,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> Iterator[daisy.Task]:
+    ) -> Generator[daisy.Task, None, None]:
         """
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.
@@ -404,7 +405,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Whether or not to spoof the data inputs to this task.
         """
         data = {}
-        for name, field in self.__class__.model_fields.items():
+        for name, _field in self.__class__.model_fields.items():
             value = getattr(self, name)
             if hasattr(value, "spoof"):
                 # If the value has a spoof method, call it to get a mock value

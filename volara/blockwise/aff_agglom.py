@@ -1,7 +1,8 @@
 import logging
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
 from itertools import chain
-from typing import Annotated, Callable, Generator, Iterator, Literal
+from typing import Annotated, Literal
 
 import daisy
 import networkx as nx
@@ -10,7 +11,7 @@ from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
 from funlib.persistence.arrays import Array
-from funlib.persistence.graphs.graph_database import GraphDataBase
+from funlib.persistence.graphs.sql_graph_database import SQLGraphDataBase
 from pydantic import Field
 
 from ..datasets import Affs, Dataset, Labels
@@ -190,11 +191,15 @@ class AffAgglom(BlockwiseTask):
 
             return {
                 int(cantor_id): (float(total / count), float(count))
-                for cantor_id, total, count in zip(cantor_ids, sums, counts)
+                for cantor_id, total, count in zip(
+                    cantor_ids, sums, counts, strict=False
+                )
             }
 
         with benchmark_logger.trace("Count affinities"):
-            for offset_affs, offset in zip(affs, self.affs_data.neighborhood):
+            for offset_affs, offset in zip(
+                affs, self.affs_data.neighborhood, strict=False
+            ):
                 neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
 
         with benchmark_logger.trace("postprocess scores"):
@@ -222,7 +227,7 @@ class AffAgglom(BlockwiseTask):
                         )
 
     def agglomerate_in_block(
-        self, block: Block, affs: Array, frags: Array, rag_provider: GraphDataBase
+        self, block: Block, affs: Array, frags: Array, rag_provider: SQLGraphDataBase
     ):
         benchmark_logger = self.get_benchmark_logger()
 
@@ -304,7 +309,7 @@ class AffAgglom(BlockwiseTask):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> Iterator[daisy.Task]:
+    ) -> Generator[daisy.Task, None, None]:
 
         # temporary workaround since bulk_write_mode needs to modify the db
         self.init()

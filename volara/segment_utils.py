@@ -98,7 +98,7 @@ def replace_values(arr, src, dst):
     label_map = {src[i]: dst[i] for i in range(len(src))}
     relabeled_arr = np.zeros_like(arr)
 
-    for i in numba.prange(arr.shape[0]):  # type: ignore[non-iterable]
+    for i in numba.prange(arr.shape[0]):  # ty: ignore[not-iterable]  # numba.prange is untyped
         relabeled_arr[i] = label_map.get(arr[i], arr[i])
 
     return relabeled_arr.reshape(shape)
@@ -139,7 +139,7 @@ def replace_values_sorted(arr, src_sorted, dst_sorted):
     flat = arr.ravel()
     out = np.empty_like(flat)
 
-    for i in numba.prange(flat.size):
+    for i in numba.prange(flat.size):  # ty: ignore[not-iterable]  # numba.prange is untyped
         v = flat[i]
         j = np.searchsorted(src_sorted, v)
 

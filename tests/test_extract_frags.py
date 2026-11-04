@@ -59,7 +59,9 @@ def reference_filter_avg_fragments(affs, fragments_data, filter_value, ndim):
     filtered = [
         fragment
         for fragment, mean in zip(
-            fragment_ids, ndimage.mean(average_affs, fragments_data, fragment_ids)
+            fragment_ids,
+            ndimage.mean(average_affs, fragments_data, fragment_ids),
+            strict=False,
         )
         if mean < filter_value
     ]
@@ -74,10 +76,10 @@ def reference_fragment_centers(fragments_data, offset, voxel_size):
     separate `unique(return_counts=True)`. `ExtractFrags.fragment_centers`
     replaces this."""
     fragment_ids, counts = np.unique(fragments_data, return_counts=True)
-    foreground = [(f, c) for f, c in zip(fragment_ids, counts) if f > 0]
+    foreground = [(f, c) for f, c in zip(fragment_ids, counts, strict=False) if f > 0]
     if not foreground:
         return {}
-    fragment_ids, counts = zip(*foreground)
+    fragment_ids, counts = zip(*foreground, strict=False)
     centers = ndimage.center_of_mass(
         np.ones_like(fragments_data), fragments_data, fragment_ids
     )
@@ -86,7 +88,9 @@ def reference_fragment_centers(fragments_data, offset, voxel_size):
             "center": offset + voxel_size * Coordinate(center),
             "size": int(count),
         }
-        for fragment_id, center, count in zip(fragment_ids, centers, counts)
+        for fragment_id, center, count in zip(
+            fragment_ids, centers, counts, strict=False
+        )
     }
 
 
@@ -573,7 +577,10 @@ def test_adaptive_spacing_is_dense_in_thin_and_sparse_in_thick(affs_2d, tmp_path
     seeds = adaptive_task(affs_path, tmp_path, 1.5).get_adaptive_seeds(
         dt, Coordinate(1, 1)
     )
-    density = lambda m: (seeds[m] > 0).sum() / m.sum()
+
+    def density(m):
+        return (seeds[m] > 0).sum() / m.sum()
+
     assert density(thin) > density(thick), (density(thin), density(thick))
 
 

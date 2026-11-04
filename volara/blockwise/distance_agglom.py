@@ -7,7 +7,7 @@ import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field
 from scipy.ndimage import laplace
-from scipy.spatial import cKDTree  # type: ignore[unresolved-import]
+from scipy.spatial import cKDTree  # ty: ignore[unresolved-import]  # scipy stubs omit cKDTree
 
 from ..datasets import Dataset, Labels
 from ..dbs import PostgreSQL, SQLite
@@ -133,13 +133,13 @@ class DistanceAgglom(BlockwiseTask):
             else self.background_intensities
         )
         assert len(background_intensities) == len(distance_keys)
-        for (frag_i, frag_j), dist in zip(pairs, distances):
+        for (frag_i, frag_j), dist in zip(pairs, distances, strict=False):
             if frag_i in rag.nodes and frag_j in rag.nodes:
                 node_attrs_a = rag.nodes[frag_i]
                 node_attrs_b = rag.nodes[frag_j]
                 attr_dict = {"distance": dist}
                 for distance_key, background_intensity in zip(
-                    distance_keys, background_intensities
+                    distance_keys, background_intensities, strict=False
                 ):
                     if (
                         distance_key not in node_attrs_a
