@@ -52,6 +52,11 @@ s3 = [
     "s3fs>=2026.1.0",
 ]
 
+[project.urls]
+Documentation = "https://e11bio.github.io/volara"
+Source = "https://github.com/e11bio/volara"
+Issues = "https://github.com/e11bio/volara/issues"
+
 [dependency-groups]
 # Installed by `uv sync` (PEP 735); not part of the published package.
 # ruff and ty are pinned with == until uv.lock is committed: both change
