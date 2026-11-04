@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --resolution ${{ matrix.resolution }}
-      - run: uv run pytest tests --cov=volara --cov-report=term-missing --cov-report=xml
+      - run: uv run pytest tests --cov --cov-report=term-missing --cov-report=xml
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -55,5 +55,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync
+      - run: uv sync --locked
       - run: uv run pytest tests

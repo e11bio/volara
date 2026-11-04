@@ -1,7 +1,7 @@
 [![tests](https://github.com/e11bio/volara/actions/workflows/tests.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/tests.yaml)
 [![lint](https://github.com/e11bio/volara/actions/workflows/lint.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/lint.yaml)
-[![docs](https://github.com/e11bio/volara/actions/workflows/docs.yaml/badge.svg)](https://github.com/e11bio/volara/actions/workflows/docs.yaml)
-<!-- [![codecov](https://codecov.io/gh/e11bio/volara/branch/main/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/e11bio/volara) -->
+[![docs](https://github.com/e11bio/volara/actions/workflows/docs.yaml/badge.svg)](https://e11bio.github.io/volara)
+[![publish](https://github.com/e11bio/volara/actions/workflows/publish.yaml/badge.svg)](https://pypi.org/project/volara/)
 
 <p align="center">
   <picture>
@@ -13,6 +13,8 @@
 
 # Volara
 Easy application of common blockwise operations for image processing of arbitrarily large volumetric microscopy.
+
+**Documentation:** https://e11bio.github.io/volara
 
 # Motivation
 We have been using [Daisy](https://github.com/funkelab/daisy) for scaling our ML pipelines to process large volumetric data. We found that as pipelines became more complex we were re-writing a lot of useful common functions for different projects. We therefore wanted a unified framework to transparently handle some of this functionality through simple abstractions, while maintaining the efficiency and ease-of-use that Daisy offers. 
@@ -41,10 +43,13 @@ To cite this repository please use the following bibtex entry:
 }
 ```
 
-# Getting started
+# Install
 
-* Volara is available on PyPi and can be installed with `pip install volara`
-* For running inference with pre-trained pytorch models, you can also install [volara-ml](https://github.com/e11bio/volara-ml) with `pip install volara-ml`
+```bash
+pip install volara    # or: uv add volara
+```
+
+For running inference with pre-trained pytorch models, also install [volara-ml](https://github.com/e11bio/volara-ml) with `pip install volara-ml`.
 
 # Useful links
 - [Blog post](https://e11.bio/blog/volara)
@@ -316,3 +321,19 @@ Execution Summary
  [3. 6. 8. 9. 8. 0. 6. 5. 4. 7.]]
 [1. 2. 0. 2. 1. 0. 2. 2. 1. 2.]
 ```
+
+# Contributing
+
+The commands below are the ones CI runs, so a green local run means a green PR.
+
+```bash
+git clone https://github.com/e11bio/volara
+cd volara
+uv sync                                             # Python, dependencies, dev tools (from uv.lock)
+uv run pytest tests                                 # tests with coverage
+uv run --only-group dev ruff check . && uv run --only-group dev ruff format --check .
+uv run ty check volara tests                        # types
+# docs: see .github/workflows/docs.yaml (notebooks are converted before sphinx-build)
+```
+
+`uv.lock` pins the development environment; the `lock-upgrade` workflow refreshes it monthly and opens a pull request.
