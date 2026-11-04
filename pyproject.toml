@@ -59,13 +59,12 @@ Issues = "https://github.com/e11bio/volara/issues"
 
 [dependency-groups]
 # Installed by `uv sync` (PEP 735); not part of the published package.
-# ruff and ty are pinned with == until uv.lock is committed: both change
-# their rule sets between releases.
+# ruff and ty versions come from uv.lock; `uv lock --upgrade` moves them.
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ty==0.0.96",
-    "ruff==0.17.3",
+    "ty>=0.0.96",
+    "ruff>=0.17.3",
     # tests seem to be failing because a dependency of ours fails
     # without some packages installed. Not used directly by volara.
     "pandas>=3.0.0",

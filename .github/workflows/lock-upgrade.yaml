@@ -1,0 +1,27 @@
+name: lock-upgrade
+# Monthly refresh of uv.lock, opened as a pull request so CI runs against the
+# new resolution before it lands. Trigger by hand from the Actions tab to
+# upgrade sooner.
+on:
+  schedule:
+    - cron: "0 6 1 * *"   # 06:00 UTC on the first of every month
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv lock --upgrade
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/lock-upgrade
+          commit-message: "Upgrade uv.lock"
+          title: "Upgrade uv.lock"
+          body: |
+            Monthly `uv lock --upgrade`. Close and reopen this PR to trigger CI
+            if the checks did not start.
+          delete-branch: true
