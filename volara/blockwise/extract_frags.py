@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from typing import Annotated, Literal
 
@@ -369,6 +369,7 @@ class ExtractFrags(BlockwiseTask):
         `min_extent` along some axis. See the field for why: single-section
         plates in low-certainty pockets, which no affinity average can see.
         """
+        assert self.min_extent is not None
         ids, inverse = np.unique(fragments_data, return_inverse=True)
         inverse = inverse.reshape(fragments_data.shape)
 
@@ -560,6 +561,7 @@ class ExtractFrags(BlockwiseTask):
         already the answer.
         """
         if self.voronoi == "euclidean":
+            assert voxel_size is not None, "euclidean voronoi needs a voxel size"
             indices = distance_transform_edt(
                 seeds == 0,
                 sampling=tuple(voxel_size),
@@ -968,7 +970,7 @@ class ExtractFrags(BlockwiseTask):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> Iterator[daisy.Task]:
+    ) -> Generator[daisy.Task, None, None]:
 
         # temporary workaround since bulk_write_mode needs to modify the db
         self.init()

@@ -113,6 +113,7 @@ def test_raw_serialization_roundtrip(tmp_path, stack):
             assert back.stack.dataset_type == expected["dataset_type"]
             assert type(back.stack) is type(raw_a.stack)
             if "scale_shift" in expected:
+                assert isinstance(back.stack, Raw)
                 assert back.stack.scale_shift == tuple(expected["scale_shift"])
     else:
         assert raw_b.stack is None and raw_c.stack is None

@@ -126,3 +126,17 @@ ignore = ["E501"]  # the formatter owns line length
 "tutorials/**/*.py" = ["E402"]  # jupytext cells import mid-file
 "examples/**/*.py" = ["E402"]
 "__init__.py" = ["F401"]  # re-exports
+
+[tool.ty.src]
+include = ["volara", "tests"]
+exclude = []  # only ever shrinks
+
+[tool.ty.terminal]
+# warn-level rules are recorded counters, not failures
+error-on-warning = false
+
+[tool.ty.rules]
+# Task subclasses narrow base fields to Literal values (fit, read_write_conflict,
+# block_timeout); ty reports that as invalid-mutable-override. Recorded as a
+# warning to promote to error once the base fields are typed as the unions.
+invalid-mutable-override = "warn"

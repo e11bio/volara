@@ -315,6 +315,7 @@ def test_skip_mask_round_trips_through_the_task_config(tmp_path):
     t = _masked_task(tmp_path, {2: 1})
     rebuilt = MaskedTask.model_validate_json(t.model_dump_json())
     assert rebuilt.skip_mask == t.skip_mask
+    assert rebuilt.skip_mask is not None
     assert rebuilt.skip_mask.array("r")[:].tolist() == [[0], [0], [1], [0]]
 
 

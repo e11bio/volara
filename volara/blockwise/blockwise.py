@@ -2,7 +2,7 @@ import logging
 import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from shutil import rmtree
@@ -333,7 +333,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> Iterator[daisy.Task]:
+    ) -> Generator[daisy.Task, None, None]:
         """
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.

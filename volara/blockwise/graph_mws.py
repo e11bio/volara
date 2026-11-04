@@ -267,7 +267,7 @@ class IterativeGraphMWS(BlockwiseTask):
     `attr, (w, b) in weights.items()`
     If an attribute is not present in the edge data it will be skipped.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]  # ty: ignore[invalid-attribute-override]  # (offset, shape) pair, see write_roi
     """
     The roi to process. This is the roi of the full graph to process.
     """
@@ -560,7 +560,7 @@ class GraphMWSExtractFragments(BlockwiseTask):
     `attr, (w, b) in weights.items()`
     If an attribute is not present in the edge data it will be skipped.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]  # ty: ignore[invalid-attribute-override]  # (offset, shape) pair, see write_roi
     """
     The roi to process. This is the roi of the full graph to process.
     """
@@ -766,7 +766,7 @@ class FragSegEdgeAgglom(BlockwiseTask):
     """
     A list of edge attributes to agglomerate via size weighted mean.
     """
-    roi: tuple[PydanticCoordinate, PydanticCoordinate]
+    roi: tuple[PydanticCoordinate, PydanticCoordinate]  # ty: ignore[invalid-attribute-override]  # (offset, shape) pair, see write_roi
     """
     The roi to process. This is the roi of the full graph to process.
     """

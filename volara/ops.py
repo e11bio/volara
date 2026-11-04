@@ -13,7 +13,7 @@ which a cloudpickled callable does not expose.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 from funlib.persistence import Array
@@ -91,7 +91,7 @@ class OmeNormalize(DatasetOp):
         import zarr
 
         metadata_group = zarr.open_group(zarr_store(self.metadata), mode="r")
-        omero: dict = metadata_group.attrs["omero"]  # type: ignore[assignment]
+        omero = cast(dict, metadata_group.attrs["omero"])
         channels_meta: list[dict] = omero["channels"]
         return [(c["window"]["min"], c["window"]["max"]) for c in channels_meta]
 
