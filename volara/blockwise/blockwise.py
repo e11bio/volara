@@ -258,9 +258,15 @@ class BlockwiseTask(StrictBaseModel, ABC):
                 f.write(self.model_dump_json())
 
             logging.info(f"Running block with config {config_file}...")
+            task_name = self.task_name
 
+            # Only these three locals may be captured below. daisy pickles the
+            # spawn function into one driver-side helper per worker slot, and a
+            # closure over `self` would ship the whole task and import its
+            # module graph (torch, gunpowder, ...) into every helper: about
+            # 1 GB of driver RAM per slot on a Predict task, versus 32 MB.
             def run_worker():
-                cmd = worker_config.get_command(config_file, self.task_name)
+                cmd = worker_config.get_command(config_file, task_name)
                 # daisy v2 cloudpickles this spawn function into a worker
                 # subprocess and expects it to BLOCK for the worker's lifetime --
                 # a spawn fn that returns early is treated as a dead worker and

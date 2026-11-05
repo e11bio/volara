@@ -1,3 +1,4 @@
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -75,6 +76,32 @@ def test_drop_removes_meta_dir(tmp_path):
     assert t.meta_dir.exists()
     t.drop()
     assert not t.meta_dir.exists()
+
+
+def test_worker_func_closure_does_not_capture_the_task(tmp_path):
+    """REGRESSION (#95). daisy pickles the spawn function into one driver-side
+    helper per worker slot. If the closure captured the task, every helper
+    would unpickle the whole task and import its module graph, costing about
+    1 GB of driver RAM per slot on a Predict task; the command only needs the
+    worker config, the config file path and the task name."""
+    import cloudpickle
+
+    from volara.logging import set_log_basedir
+    from volara.workers import LocalWorker
+
+    set_log_basedir(tmp_path / "logs")
+    t = DummyTask(worker_config=LocalWorker())
+    t.meta_dir.mkdir(parents=True)
+
+    run_worker = t.worker_func()
+
+    captured = inspect.getclosurevars(run_worker).nonlocals
+    assert set(captured) == {"worker_config", "config_file", "task_name"}
+    assert not any(isinstance(v, BlockwiseTask) for v in captured.values())
+    assert captured["task_name"] == "dummy-task"
+    assert captured["config_file"] == t.config_file
+    assert t.config_file.read_text() == t.model_dump_json()
+    assert callable(cloudpickle.loads(cloudpickle.dumps(run_worker)))
 
 
 DROP_ARTIFACTS_CALLS: list[str] = []

@@ -27,6 +27,14 @@ class Worker(StrictBaseModel, ABC):
 
 
 class SlurmWorker(Worker):
+    """Run each worker as a slurm job.
+
+    Every worker slot holds one driver-side helper process for the whole run,
+    blocked in ``sbatch --wait`` while its job is pending or running. Pending
+    slots are therefore not free: set the task's ``num_workers`` to what the
+    queue can actually grant, not to the number of blocks.
+    """
+
     queue: str
     num_gpus: int = 0
     num_cpus: int = 1
