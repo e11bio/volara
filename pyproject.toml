@@ -48,11 +48,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+s3 = [
+    "s3fs>=2026.1.0",
+]
+
+[project.urls]
+Documentation = "https://e11bio.github.io/volara"
+Source = "https://github.com/e11bio/volara"
+Issues = "https://github.com/e11bio/volara/issues"
+
+[dependency-groups]
+# Installed by `uv sync` (PEP 735); not part of the published package.
+# ruff and ty versions come from uv.lock; `uv lock --upgrade` moves them.
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ty>=0.0.1a24",
-    "ruff>=0.6",
+    "ty>=0.0.96",
+    "ruff>=0.17.3",
+    # tests seem to be failing because a dependency of ours fails
+    # without some packages installed. Not used directly by volara.
+    "pandas>=3.0.0",
 ]
 docs = [
     "autodoc_pydantic>=2.0",
@@ -69,16 +84,6 @@ docs = [
     "nbsphinx>=0.9.7",
     "jupytext>=1.16.7",
     "pydata-sphinx-theme",
-]
-s3 = [
-    "s3fs>=2026.1.0",
-]
-
-# tests seem to be failing because a dependency of ours fails
-# without some packages installed. These are not used directly
-# by volara.
-indirect = [
-    "pandas>=3.0.0",
 ]
 
 [project.scripts]
@@ -106,13 +111,49 @@ include = ["volara*"]
 [tool.setuptools.package-data]
 "volara" = ["py.typed"]
 
-[tool.ruff]
-lint.select = ["F", "W", "I001"]
-
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "slurm: test requires a real slurm installation (srun on PATH). Deselected by default; run with `-m slurm`.",
 ]
 # Skip slurm-gated tests unless explicitly requested. The worker tests spoof the
 # cluster binaries via PATH shims and so are NOT marked slurm -- they run everywhere.
-addopts = "-m 'not slurm'"
+addopts = "-m 'not slurm' --cov --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["docs/build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]  # the formatter owns line length
+
+[tool.ruff.lint.per-file-ignores]
+"tutorials/**/*.py" = ["E402"]  # jupytext cells import mid-file
+"examples/**/*.py" = ["E402"]
+"__init__.py" = ["F401"]  # re-exports
+
+[tool.ty.src]
+include = ["volara", "tests", "benchmarks"]
+exclude = []  # only ever shrinks
+
+[tool.ty.terminal]
+# warn-level rules are recorded counters, not failures
+error-on-warning = false
+
+[tool.ty.rules]
+# Task subclasses narrow base fields to Literal values (fit, read_write_conflict,
+# block_timeout); ty reports that as invalid-mutable-override. Recorded as a
+# warning to promote to error once the base fields are typed as the unions.
+invalid-mutable-override = "warn"
+
+[tool.coverage.run]
+branch = true
+source = ["volara"]
+
+[tool.coverage.report]
+# Floor measured from the first branch-enabled run; raise it when measured
+# coverage is two or more points ahead, never lower it without saying why.
+fail_under = 69
+show_missing = true
+skip_covered = true

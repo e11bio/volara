@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from funlib.persistence.graphs import PgSQLGraphDatabase, SQLiteGraphDataBase
-from funlib.persistence.graphs.graph_database import GraphDataBase
+from funlib.persistence.graphs.sql_graph_database import SQLGraphDataBase
 from funlib.persistence.types import Vec
 
 from .paths import PydanticUPath, local_path
@@ -103,7 +103,7 @@ class DB(StrictBaseModel, ABC):
         return parsed_node_attrs, parsed_edge_attrs
 
     @abstractmethod
-    def open(self, mode: str = "r") -> GraphDataBase:
+    def open(self, mode: str = "r") -> SQLGraphDataBase:
         """
         Return a `funlib.persistence.graphs.GraphDB` instance.
         """

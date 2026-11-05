@@ -20,7 +20,9 @@ sys.path.insert(0, os.path.abspath("../.."))
 # -- Project information -----------------------------------------------------
 
 project = "Volara"
-copyright = "2024, William Patton, Arlo Sheridan, Jeff Rhoades, Jakob Troidl, Andrew Champion"
+copyright = (
+    "2024, William Patton, Arlo Sheridan, Jeff Rhoades, Jakob Troidl, Andrew Champion"
+)
 author = "William Patton, Arlo Sheridan, Jeff Rhoades, Jakob Troidl, Andrew Champion"
 
 
@@ -61,7 +63,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_theme = "pydata_sphinx_theme"
 html_theme_options = {
     "show_nav_level": 3,  # controls how many levels deep navigation is shown
-    "navigation_depth": 3, # alternative option for some versions
+    "navigation_depth": 3,  # alternative option for some versions
     "collapse_navigation": True,  # Keep navigation expanded
 }
 html_sidebars = {

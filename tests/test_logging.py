@@ -35,7 +35,9 @@ from volara.logging import get_log_basedir, set_log_basedir
 
 def _context(**kwargs):
     """A worker context as the driver builds it."""
-    return daisy.Context(hostname="localhost", port=1234, task_id="t", worker_id=0, **kwargs)
+    return daisy.Context(
+        hostname="localhost", port=1234, task_id="t", worker_id=0, **kwargs
+    )
 
 
 def test_volara_set_log_basedir_reaches_the_daisy_context(tmp_path):
@@ -94,9 +96,15 @@ def test_a_spawned_process_recovers_the_drivers_basedir(tmp_path):
     env[daisy.Context.ENV_VARIABLE] = _context().to_env()
     # Deliberately NOT inheriting the parent's module state: a fresh import, like a worker.
     child = subprocess.run(
-        [sys.executable, "-c", "import daisy, json;"
-         " print(json.dumps(daisy.Context.from_env()['logdir']))"],
-        capture_output=True, text=True, env=env, check=True,
+        [
+            sys.executable,
+            "-c",
+            "import daisy, json; print(json.dumps(daisy.Context.from_env()['logdir']))",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
     )
     assert json.loads(child.stdout.strip()) == str(basedir), (
         f"child resolved {child.stdout.strip()!r}, driver set {str(basedir)!r}"
@@ -113,7 +121,7 @@ def test_a_worker_without_a_context_does_not_silently_guess(tmp_path, monkeypatc
     pytest tests/test_logging.py::test_a_worker_without_a_context_does_not_silently_guess
     """
     monkeypatch.delenv(daisy.Context.ENV_VARIABLE, raising=False)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 -- daisy's own error type
         daisy.Context.from_env()
 
 
@@ -200,9 +208,15 @@ def test_a_url_basedir_reaches_every_worker_as_the_same_local_directory(
     env = dict(os.environ)
     env[daisy.Context.ENV_VARIABLE] = _context().to_env()
     child = subprocess.run(
-        [sys.executable, "-c", "import daisy, json;"
-         " print(json.dumps(daisy.Context.from_env()['logdir']))"],
-        capture_output=True, text=True, env=env, check=True,
+        [
+            sys.executable,
+            "-c",
+            "import daisy, json; print(json.dumps(daisy.Context.from_env()['logdir']))",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
         cwd=remote_root.parent,  # a different launch directory than the driver's
     )
     assert json.loads(child.stdout.strip()) == str(expected)

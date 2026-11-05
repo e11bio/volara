@@ -33,7 +33,7 @@ fig, axes = plt.subplots(1, 3, figsize=(14, 8))
 
 ims = []
 for i, (raw_slice, affs_slice) in enumerate(
-    zip(raw.array("r")[:], affs.array("r")[:].transpose([1, 0, 2, 3]))
+    zip(raw.array("r")[:], affs.array("r")[:].transpose([1, 0, 2, 3]), strict=False)
 ):
     # Show the raw data
     if i == 0:
@@ -218,7 +218,7 @@ fig, axes = plt.subplots(1, 3, figsize=(18, 8))
 
 ims = []
 for i, (raw_slice, fragments_slice, segments_slice) in enumerate(
-    zip(raw_data, indexed_fragments, indexed_segments)
+    zip(raw_data, indexed_fragments, indexed_segments, strict=False)
 ):
     # Show the raw data
     if i == 0:

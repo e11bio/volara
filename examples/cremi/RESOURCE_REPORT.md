@@ -15,15 +15,15 @@ It also times every worker's startup, idle time and teardown.
    ```sh
    git clone https://github.com/e11bio/volara.git
    cd volara/examples/cremi
-   uv run --python 3.12 --extra docs python cremi.py
+   uv run --python 3.12 --group docs python cremi.py
    ```
 
-   After the pipeline finishes, daisy prints an Execution Summary and its Resource Utilization panel. It also appends that run's report to `runs.jsonl` in each task's tracking store, under `volara_logs/` in the working directory. (`--python 3.12` because numba does not support 3.14 yet; `--extra docs` provides matplotlib for the example's GIFs.)
+   After the pipeline finishes, daisy prints an Execution Summary and its Resource Utilization panel. It also appends that run's report to `runs.jsonl` in each task's tracking store, under `volara_logs/` in the working directory. (`--python 3.12` because numba does not support 3.14 yet; `--group docs` provides matplotlib for the example's GIFs.)
 
 2. Build the report from those records with [`cremi_report.py`](cremi_report.py), which sits next to `cremi.py`:
 
    ```sh
-   uv run --python 3.12 --extra docs python cremi_report.py   # reads ./volara_logs
+   uv run --python 3.12 --group docs python cremi_report.py   # reads ./volara_logs
    ```
 
    It reads the last line of each task's `runs.jsonl` with `daisy.TaskReport.from_dict`. It prints the per-task table below, then daisy's panel again via `daisy.RunReport(...).render()`. Inside a script you can also call `task.report()` on any `daisy.Task`.

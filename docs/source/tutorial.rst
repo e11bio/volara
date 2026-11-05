@@ -8,7 +8,7 @@ Tutorial
 
   To follow the example here, install the necessary dependencies::
 
-    uv pip install volara[docs]
+    pip install volara matplotlib
 
   .. jupyter-execute::
 

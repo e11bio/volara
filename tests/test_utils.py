@@ -60,8 +60,8 @@ def test_strict_base_model_forbids_extra():
         x: int
 
     try:
-        MyModel(x=1, y=2)  # type: ignore[unknown-argument]
-        assert False, "Should have raised"
+        MyModel(x=1, y=2)  # ty: ignore[unknown-argument]
+        raise AssertionError("Should have raised")
     except ValidationError:
         pass
 

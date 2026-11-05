@@ -2,10 +2,11 @@ import logging
 import multiprocessing
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 import daisy
 import numpy as np
@@ -13,7 +14,7 @@ from funlib.geometry import Coordinate, Roi
 
 from volara.logging import get_log_basedir, set_log_basedir
 
-from ..datasets import MaskDataset
+from ..datasets import ArraySchedulerName, MaskDataset, array_scheduler
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
 from .benchmark import BenchmarkLogger
@@ -75,6 +76,19 @@ class BlockwiseTask(StrictBaseModel, ABC):
     single block legitimately runs long (e.g. the global mutex watershed) must set
     an explicit large value instead (see ``GraphMWS``). When a block exceeds the
     timeout daisy reclaims it and retries under ``max_retries``.
+    """
+    array_scheduler: ArraySchedulerName | None = "single-threaded"
+    """
+    The dask scheduler the workers compute array reads with. Every array a
+    worker opens through :meth:`Dataset.array` (in :meth:`process_block_func`
+    and while processing blocks) is opened with
+    ``funlib.persistence.open_ds(..., scheduler=array_scheduler)``.
+
+    ``"single-threaded"`` (the default) runs each read in the worker's own
+    thread: daisy already runs one block per worker, so dask's thread pool would
+    only add contention, and with many workers per machine it oversubscribes
+    the cores. ``None`` leaves the choice to dask (its threaded scheduler for
+    arrays), which is what volara did before this field existed.
     """
     skip_mask: MaskDataset | None = None
     """
@@ -207,8 +221,9 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         read_roi = roi if context is None else roi.grow(context, context)
         block = daisy.Block(roi, read_roi, roi)
-        process_block = self.process_block_func()
-        process_block(block)
+        with array_scheduler(self.array_scheduler):
+            with self.process_block_func() as process_block:
+                process_block(block)
 
     def drop(self, drop_outputs: bool = True) -> None:
         """
@@ -242,10 +257,16 @@ class BlockwiseTask(StrictBaseModel, ABC):
             with open(config_file, "w") as f:
                 f.write(self.model_dump_json())
 
-            logging.info("Running block with config %s..." % config_file)
+            logging.info(f"Running block with config {config_file}...")
+            task_name = self.task_name
 
+            # Only these three locals may be captured below. daisy pickles the
+            # spawn function into one driver-side helper per worker slot, and a
+            # closure over `self` would ship the whole task and import its
+            # module graph (torch, gunpowder, ...) into every helper: about
+            # 1 GB of driver RAM per slot on a Predict task, versus 32 MB.
             def run_worker():
-                cmd = worker_config.get_command(config_file, self.task_name)
+                cmd = worker_config.get_command(config_file, task_name)
                 # daisy v2 cloudpickles this spawn function into a worker
                 # subprocess and expects it to BLOCK for the worker's lifetime --
                 # a spawn fn that returns early is treated as a dead worker and
@@ -268,6 +289,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         """
         benchmark_logger = self.get_benchmark_logger()
         with ExitStack() as stack:
+            stack.enter_context(array_scheduler(self.array_scheduler))
             with benchmark_logger.trace("Process Block Setup"):
                 process_block = stack.enter_context(self.process_block_func())
 
@@ -279,18 +301,23 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     set_log_basedir(client.context["logdir"])  # type: ignore[non-subscriptable]
                 except KeyError as e:
                     raise ValueError(client.context) from e
-                while True:
-                    logger.info("getting block")
-                    with ExitStack() as worker_stack:
-                        with worker_benchmark_logger.trace("Acquire Block"):
-                            block = worker_stack.enter_context(client.acquire_block())
-                        logger.info(f"got block {block}")
+                # arrays opened while processing blocks (not only in the setup
+                # above) get the same scheduler, also in a cache worker process
+                with array_scheduler(self.array_scheduler):
+                    while True:
+                        logger.info("getting block")
+                        with ExitStack() as worker_stack:
+                            with worker_benchmark_logger.trace("Acquire Block"):
+                                block = worker_stack.enter_context(
+                                    client.acquire_block()
+                                )
+                            logger.info(f"got block {block}")
 
-                        if block is None:
-                            break
+                            if block is None:
+                                break
 
-                        with benchmark_logger.trace("Process Block"):
-                            process_block(block)
+                            with benchmark_logger.trace("Process Block"):
+                                process_block(block)
 
             if self.num_cache_workers is not None:
                 workers = [
@@ -312,7 +339,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> Iterator[daisy.Task]:
+    ) -> Generator[daisy.Task, None, None]:
         """
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.
@@ -334,6 +361,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
             if multiprocessing:
                 process_func = self.worker_func()
             else:
+                stack.enter_context(array_scheduler(self.array_scheduler))
                 process_block_func = self.process_block_func()
                 with benchmark_logger.trace("Process Block Setup"):
                     process_block = stack.enter_context(process_block_func)
@@ -383,7 +411,7 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Whether or not to spoof the data inputs to this task.
         """
         data = {}
-        for name, field in self.__class__.model_fields.items():
+        for name, _field in self.__class__.model_fields.items():
             value = getattr(self, name)
             if hasattr(value, "spoof"):
                 # If the value has a spoof method, call it to get a mock value

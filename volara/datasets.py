@@ -1,8 +1,11 @@
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Literal, Sequence, Union
+from typing import Annotated, Literal
 
 import numpy as np
 from cloudvolume import CloudVolume
@@ -20,6 +23,37 @@ from .ops import (
 )
 from .paths import PydanticUPath, is_local, rm, to_upath, zarr_store
 from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
+
+ArraySchedulerName = Literal["single-threaded", "synchronous", "threads", "processes"]
+"""A dask scheduler name accepted by ``dask.compute(scheduler=...)``."""
+
+_array_scheduler: ContextVar[ArraySchedulerName | None] = ContextVar(
+    "volara_array_scheduler", default=None
+)
+
+
+@contextmanager
+def array_scheduler(scheduler: ArraySchedulerName | None):
+    """Open every array within this context with the given dask scheduler.
+
+    :meth:`Dataset.array` hands the current value to ``funlib.persistence.open_ds``
+    as ``scheduler``, which is what the returned ``Array`` computes its reads with.
+    ``None`` (the default outside any context) leaves the choice to dask. Workers
+    run under :attr:`~volara.blockwise.BlockwiseTask.array_scheduler`, which is
+    ``"single-threaded"`` by default: daisy already runs one block per worker, so
+    dask's thread pool would only add contention inside each worker.
+    """
+    token = _array_scheduler.set(scheduler)
+    try:
+        yield
+    finally:
+        _array_scheduler.reset(token)
+
+
+def current_array_scheduler() -> ArraySchedulerName | None:
+    """The scheduler :meth:`Dataset.array` will open arrays with right now."""
+    return _array_scheduler.get()
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -210,7 +244,7 @@ class Dataset(StrictBaseModel, ABC):
             units=units,
             axis_names=axis_names,
             types=types,
-            chunk_shape=chunk_shape,
+            chunk_shape=Coordinate(chunk_shape),
             dtype=dtype,
             mode="a",
             **kwargs,
@@ -238,16 +272,16 @@ class Dataset(StrictBaseModel, ABC):
                 f"Dataset {self.store} is not writable, cannot open in mode other than 'r'."
             )
 
-        metadata = {
-            "voxel_size": self.voxel_size if self.voxel_size is not None else None,
-            "offset": self.offset if self.offset is not None else None,
-            "axis_names": self.axis_names if self.axis_names is not None else None,
-            "units": self.units if self.units is not None else None,
-        }
+        # open_ds defaults every metadata field to None, so unset fields pass
+        # straight through.
         arr = open_ds(
             self.prepared_store,
             mode=mode,
-            **{k: v for k, v in metadata.items() if v is not None},  # type: ignore[invalid-argument-type]
+            scheduler=_array_scheduler.get(),
+            voxel_size=self.voxel_size,
+            offset=self.offset,
+            axis_names=self.axis_names,
+            units=self.units,
             **self.zarr_kwargs,
         )
 
@@ -439,11 +473,11 @@ class _CloudVolumeView:
 
     def __init__(self, vol: CloudVolume):
         self.vol = vol
-        self.shape = tuple(int(s) for s in vol.shape)  # type: ignore[unresolved-attribute]
-        self.dtype = np.dtype(vol.dtype)  # type: ignore[unresolved-attribute]
+        self.shape = tuple(int(s) for s in vol.shape)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
+        self.dtype = np.dtype(vol.dtype)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
         self.ndim = len(self.shape)
         # last dimension in CV is always channel and has no offset
-        self._offset = tuple(int(o) for o in vol.voxel_offset) + (0,)  # type: ignore[unresolved-attribute]
+        self._offset: tuple[int, ...] = tuple(int(o) for o in vol.voxel_offset) + (0,)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
 
     def __getitem__(self, index) -> np.ndarray:
         if not isinstance(index, tuple):
@@ -456,9 +490,9 @@ class _CloudVolumeView:
             )
             if isinstance(s, slice)
             else slice(s + o, s + o + 1)
-            for i, (s, o) in enumerate(zip(index, self._offset))
+            for i, (s, o) in enumerate(zip(index, self._offset, strict=False))
         )
-        data = np.asarray(self.vol[shifted])
+        data = np.asarray(self.vol[shifted])  # ty: ignore[not-subscriptable]  # CloudVolume is untyped
         # CloudVolume always returns all dims; drop the ones indexed by an int
         # so we behave like a numpy array.
         squeeze = tuple(slice(None) if isinstance(s, slice) else 0 for s in index)
@@ -506,8 +540,8 @@ class CloudVolumeWrapper(Dataset):
         metadata = {
             "axis_names": self.axis_names if self.axis_names is not None else None,
             "units": self.units if self.units is not None else None,
-            "offset": self.offset if self.offset is not None else vol.voxel_offset,  # type: ignore[unresolved-attribute]
-            "types": ["space" for _ in range(len(vol.shape) - 1)]  # type: ignore[unresolved-attribute]
+            "offset": self.offset if self.offset is not None else vol.voxel_offset,  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
+            "types": ["space" for _ in range(len(vol.shape) - 1)]  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
             + ["channel"],  # last dimension in CV is always channel
         }
 
@@ -517,7 +551,7 @@ class CloudVolumeWrapper(Dataset):
         # ~20k keys instead of ~10M for FlyWire-sized volumes); it never causes
         # over-reading. With one dask chunk per storage chunk, dask spent ~4s
         # culling the graph on every read regardless of ROI size.
-        chunks = tuple(int(c) * 8 for c in vol.chunk_size) + (int(vol.num_channels),)  # type: ignore[unresolved-attribute]
+        chunks = tuple(int(c) * 8 for c in vol.chunk_size) + (int(vol.num_channels),)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
         dask_arr = da.from_array(
             view,
             chunks=chunks,
@@ -525,7 +559,7 @@ class CloudVolumeWrapper(Dataset):
         )
 
         return Array(
-            dask_arr,  # type: ignore
+            dask_arr,
             **{k: v for k, v in metadata.items() if v is not None},  # type: ignore
         )
 
@@ -543,7 +577,7 @@ class CloudVolumeWrapper(Dataset):
 
 
 PydanticDataset = Annotated[
-    Union[Raw, Affs, LSD, Labels, MaskDataset, CloudVolumeWrapper],
+    Raw | Affs | LSD | Labels | MaskDataset | CloudVolumeWrapper,
     Field(discriminator="dataset_type"),
 ]
 

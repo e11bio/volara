@@ -1,58 +1,46 @@
-name: Deploy Docs to GitHub Pages
-
+name: docs
 on:
-  push:
-    branches: [main]
-    tags: "*"
+  # Rebuild after every benchmark run so the charts carry the newest point;
+  # workflow_run fires on the default branch only.
+  workflow_run:
+    workflows: [benchmark]
+    types: [completed]
   workflow_dispatch:
-
-# Allow this job to clone the repo and create a page deployment
 permissions:
   contents: read
   pages: write
   id-token: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Set up uv
-        # Install a specific uv version using the installer
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Install pandoc
-        uses: pandoc/actions/setup@v1
-
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: pandoc/actions/setup@v1
+      - run: uv sync --locked --group docs
       - name: Build documentation
         run: |
-          uv run --extra docs python -m ipykernel install --name volara_env --user
-          uv run --extra docs jupytext --to notebook examples/getting_started/basics.py
-          uv run --extra docs jupytext --to notebook examples/cremi/cremi.py
+          uv run --group docs python -m ipykernel install --name volara_env --user
+          uv run --group docs jupytext --to notebook examples/getting_started/basics.py
+          uv run --group docs jupytext --to notebook examples/cremi/cremi.py
           cp -r examples docs/source
-          uv run --extra docs sphinx-build docs/source docs/build/html -b html
-
-      - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
+          uv run --group docs sphinx-build docs/source docs/build/html -b html
+      # The benchmark action keeps its data and dashboard on gh-pages; the
+      # site is deployed from this artifact, so bring them along.
+      - run: |
+          if git fetch --depth=1 origin gh-pages 2>/dev/null && git checkout origin/gh-pages -- dev/bench 2>/dev/null; then
+            mkdir -p docs/build/html/dev && mv dev/bench docs/build/html/dev/
+          fi
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/build/html
-          retention-days: 90
-
   deploy:
-    # if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     needs: build
-    # Deploy to the github-pages environment
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4

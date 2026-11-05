@@ -1,0 +1,55 @@
+name: benchmark
+# Publishes the timings the tests job measured (benchmarks/run.py) to the
+# gh-pages branch; nothing is measured here, so the tests run only once.
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# contents: the action commits benchmark data to the gh-pages branch.
+# actions: the artifact is downloaded from the tests run.
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark
+          path: benchmarks
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # The action needs the data branch to exist; create it on the first run.
+      - run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git config user.name github-actions && git config user.email github-actions@github.com
+            git checkout --orphan gh-pages && git rm -rfq . && git commit --allow-empty -m "Benchmark data branch"
+            git push origin gh-pages && git checkout -
+          fi
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: volara
+          tool: customSmallerIsBetter
+          output-file-path: benchmarks/output.json
+          ref: ${{ github.event.workflow_run.head_sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          auto-push: true
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: false
+          summary-always: true

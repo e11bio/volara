@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
-from typing import Annotated, Iterator, Literal
+from typing import Annotated, Literal
 
 import daisy
 import mwatershed as mws
@@ -368,6 +369,7 @@ class ExtractFrags(BlockwiseTask):
         `min_extent` along some axis. See the field for why: single-section
         plates in low-certainty pockets, which no affinity average can see.
         """
+        assert self.min_extent is not None
         ids, inverse = np.unique(fragments_data, return_inverse=True)
         inverse = inverse.reshape(fragments_data.shape)
 
@@ -428,7 +430,9 @@ class ExtractFrags(BlockwiseTask):
                 "center": offset + voxel_size * Coordinate(center),
                 "size": int(count),
             }
-            for fragment_id, center, count in zip(fragment_ids, centers, counts)
+            for fragment_id, center, count in zip(
+                fragment_ids, centers, counts, strict=False
+            )
             if fragment_id > 0
         }
 
@@ -476,7 +480,7 @@ class ExtractFrags(BlockwiseTask):
         """
         radius = np.maximum(1, np.rint(min_spacing / np.array(voxel_size))).astype(int)
         grid = np.ogrid[tuple(slice(-r, r + 1) for r in radius)]
-        footprint = sum((g / r) ** 2 for g, r in zip(grid, radius)) <= 1.0
+        footprint = sum((g / r) ** 2 for g, r in zip(grid, radius, strict=False)) <= 1.0
         maxima = (
             maximum_filter(boundary_distances, footprint=footprint)
             == boundary_distances
@@ -557,6 +561,7 @@ class ExtractFrags(BlockwiseTask):
         already the answer.
         """
         if self.voronoi == "euclidean":
+            assert voxel_size is not None, "euclidean voronoi needs a voxel size"
             indices = distance_transform_edt(
                 seeds == 0,
                 sampling=tuple(voxel_size),
@@ -647,11 +652,11 @@ class ExtractFrags(BlockwiseTask):
             # the voxel pairs this offset connects, both ends in bounds
             src = tuple(
                 slice(max(0, -d), size - max(0, d))
-                for d, size in zip(offset, cells.shape)
+                for d, size in zip(offset, cells.shape, strict=False)
             )
             dst = tuple(
                 slice(max(0, d), size - max(0, -d))
-                for d, size in zip(offset, cells.shape)
+                for d, size in zip(offset, cells.shape, strict=False)
             )
             crosses = (
                 (cells[src] != cells[dst]) & boundary_mask[src] & boundary_mask[dst]
@@ -688,13 +693,13 @@ class ExtractFrags(BlockwiseTask):
         lo, hi = out_of_volume
         for axis, n in enumerate(lo):
             if n > 0:
-                index = lambda s: tuple(  # noqa: E731
+                index = lambda s, axis=axis: tuple(  # noqa: E731
                     s if a == axis else slice(None) for a in range(boundary_mask.ndim)
                 )
                 boundary_mask[index(slice(n))] = boundary_mask[index(slice(n, n + 1))]
         for axis, n in enumerate(hi):
             if n > 0:
-                index = lambda s: tuple(  # noqa: E731
+                index = lambda s, axis=axis: tuple(  # noqa: E731
                     s if a == axis else slice(None) for a in range(boundary_mask.ndim)
                 )
                 boundary_mask[index(slice(-n, None))] = boundary_mask[
@@ -965,7 +970,7 @@ class ExtractFrags(BlockwiseTask):
         self,
         upstream_tasks: daisy.Task | list[daisy.Task] | None = None,
         multiprocessing: bool = True,
-    ) -> Iterator[daisy.Task]:
+    ) -> Generator[daisy.Task, None, None]:
 
         # temporary workaround since bulk_write_mode needs to modify the db
         self.init()

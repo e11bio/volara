@@ -1,3 +1,4 @@
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -75,6 +76,32 @@ def test_drop_removes_meta_dir(tmp_path):
     assert t.meta_dir.exists()
     t.drop()
     assert not t.meta_dir.exists()
+
+
+def test_worker_func_closure_does_not_capture_the_task(tmp_path):
+    """REGRESSION (#95). daisy pickles the spawn function into one driver-side
+    helper per worker slot. If the closure captured the task, every helper
+    would unpickle the whole task and import its module graph, costing about
+    1 GB of driver RAM per slot on a Predict task; the command only needs the
+    worker config, the config file path and the task name."""
+    import cloudpickle
+
+    from volara.logging import set_log_basedir
+    from volara.workers import LocalWorker
+
+    set_log_basedir(tmp_path / "logs")
+    t = DummyTask(worker_config=LocalWorker())
+    t.meta_dir.mkdir(parents=True)
+
+    run_worker = t.worker_func()
+
+    captured = inspect.getclosurevars(run_worker).nonlocals
+    assert set(captured) == {"worker_config", "config_file", "task_name"}
+    assert not any(isinstance(v, BlockwiseTask) for v in captured.values())
+    assert captured["task_name"] == "dummy-task"
+    assert captured["config_file"] == t.config_file
+    assert t.config_file.read_text() == t.model_dump_json()
+    assert callable(cloudpickle.loads(cloudpickle.dumps(run_worker)))
 
 
 DROP_ARTIFACTS_CALLS: list[str] = []
@@ -315,6 +342,7 @@ def test_skip_mask_round_trips_through_the_task_config(tmp_path):
     t = _masked_task(tmp_path, {2: 1})
     rebuilt = MaskedTask.model_validate_json(t.model_dump_json())
     assert rebuilt.skip_mask == t.skip_mask
+    assert rebuilt.skip_mask is not None
     assert rebuilt.skip_mask.array("r")[:].tolist() == [[0], [0], [1], [0]]
 
 
@@ -369,3 +397,41 @@ def test_a_url_basedir_puts_the_meta_dir_and_tracking_store_in_one_local_place(
     assert not t.meta_dir.exists()
     third = t.run_blockwise(multiprocessing=False)[t.task_name]
     assert third.skipped_count == 0
+
+
+SEEN_SCHEDULERS: list[str | None] = []
+
+
+class SchedulerRecordingTask(DummyTask):
+    """Records the array scheduler in force during setup and per block."""
+
+    @contextmanager
+    def process_block_func(self):
+        from volara.datasets import current_array_scheduler
+
+        SEEN_SCHEDULERS.append(current_array_scheduler())
+
+        def process_block(block):
+            SEEN_SCHEDULERS.append(current_array_scheduler())
+
+        yield process_block
+
+
+@pytest.mark.parametrize("scheduler", ["single-threaded", "threads", None])
+def test_workers_open_arrays_with_the_task_array_scheduler(scheduler):
+    from volara.datasets import current_array_scheduler
+
+    SEEN_SCHEDULERS.clear()
+    task = SchedulerRecordingTask(array_scheduler=scheduler)
+    task.process_roi(Roi((0, 0), (10, 10)))
+    # setup and the block both ran under the task's scheduler, and it is gone after
+    assert SEEN_SCHEDULERS == [scheduler, scheduler]
+    assert current_array_scheduler() is None
+
+
+def test_array_scheduler_defaults_to_single_threaded_and_round_trips():
+    assert DummyTask().array_scheduler == "single-threaded"
+    dumped = DummyTask(array_scheduler=None).model_dump_json()
+    assert DummyTask.model_validate_json(dumped).array_scheduler is None
+    with pytest.raises(ValueError):
+        DummyTask(array_scheduler="distributed")  # ty: ignore[invalid-argument-type]
