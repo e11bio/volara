@@ -38,7 +38,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --resolution ${{ matrix.resolution }}
-      - run: uv run pytest --cov-report=xml
+      - name: tests
+        run: |
+          start=$(date +%s%N)
+          uv run pytest --cov-report=xml
+          echo "PYTEST_SECONDS=$(awk "BEGIN {print ($(date +%s%N) - $start) / 1e9}")" >> "$GITHUB_ENV"
+      # The benchmark workflow publishes these numbers after this run completes.
+      - if: github.event_name != 'pull_request' && matrix.python-version == '3.11' && matrix.resolution == 'highest'
+        run: uv run python benchmarks/run.py --pytest-seconds "$PYTEST_SECONDS" --pytest-command "uv run pytest --cov-report=xml"
+      - if: github.event_name != 'pull_request' && matrix.python-version == '3.11' && matrix.resolution == 'highest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: benchmarks/output.json
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
