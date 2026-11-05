@@ -1,7 +1,10 @@
 name: docs
 on:
-  push:
-    branches: [main]
+  # Rebuild after every benchmark run so the charts carry the newest point;
+  # workflow_run fires on the default branch only.
+  workflow_run:
+    workflows: [benchmark]
+    types: [completed]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,6 +25,12 @@ jobs:
           uv run --group docs jupytext --to notebook examples/cremi/cremi.py
           cp -r examples docs/source
           uv run --group docs sphinx-build docs/source docs/build/html -b html
+      # The benchmark action keeps its data and dashboard on gh-pages; the
+      # site is deployed from this artifact, so bring them along.
+      - run: |
+          if git fetch --depth=1 origin gh-pages 2>/dev/null && git checkout origin/gh-pages -- dev/bench 2>/dev/null; then
+            mkdir -p docs/build/html/dev && mv dev/bench docs/build/html/dev/
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/build/html

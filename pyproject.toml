@@ -111,12 +111,13 @@ include = ["volara*"]
 "volara" = ["py.typed"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "slurm: test requires a real slurm installation (srun on PATH). Deselected by default; run with `-m slurm`.",
 ]
 # Skip slurm-gated tests unless explicitly requested. The worker tests spoof the
 # cluster binaries via PATH shims and so are NOT marked slurm -- they run everywhere.
-addopts = "-m 'not slurm'"
+addopts = "-m 'not slurm' --cov --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 88
@@ -132,7 +133,7 @@ ignore = ["E501"]  # the formatter owns line length
 "__init__.py" = ["F401"]  # re-exports
 
 [tool.ty.src]
-include = ["volara", "tests"]
+include = ["volara", "tests", "benchmarks"]
 exclude = []  # only ever shrinks
 
 [tool.ty.terminal]

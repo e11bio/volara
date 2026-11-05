@@ -10,6 +10,7 @@
    
    cli
    api
+   benchmarks
 
 .. include:: ../../README.md
    :parser: myst_parser.sphinx_

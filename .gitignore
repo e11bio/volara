@@ -170,3 +170,4 @@ volara_benchmark_logs
 *.json
 *.npz
 CLAUDE.md
+benchmarks/output.json
