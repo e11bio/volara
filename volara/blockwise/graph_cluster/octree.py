@@ -11,8 +11,8 @@ database's spatial query. Nothing here knows about graphs or clustering.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from itertools import product
-from typing import Iterator
 
 import numpy as np
 from funlib.geometry import Coordinate, Roi
@@ -166,8 +166,8 @@ class Octree:
         grid = self.grid_shape(level - 1)
         out = []
         for offset in product((0, 1), repeat=self.dims):
-            child = tuple(2 * int(i) + o for i, o in zip(index, offset))
-            if all(c < g for c, g in zip(child, grid)):
+            child = tuple(2 * int(i) + o for i, o in zip(index, offset, strict=False))
+            if all(c < g for c, g in zip(child, grid, strict=False)):
                 out.append(child)
         return out
 

@@ -45,12 +45,12 @@ class SignedEdges:
         return f"SignedEdges(n={len(self)})"
 
     @classmethod
-    def empty(cls) -> "SignedEdges":
+    def empty(cls) -> SignedEdges:
         z = np.zeros(0, dtype=np.int64)
         return cls(np.zeros(0, dtype=np.float64), z, z, z)
 
     @classmethod
-    def concat(cls, parts: list["SignedEdges"]) -> "SignedEdges":
+    def concat(cls, parts: list[SignedEdges]) -> SignedEdges:
         parts = [p for p in parts if p is not None]
         if not parts:
             return cls.empty()
@@ -64,7 +64,7 @@ class SignedEdges:
     def __len__(self) -> int:
         return len(self.score)
 
-    def take(self, idx) -> "SignedEdges":
+    def take(self, idx) -> SignedEdges:
         return SignedEdges(self.score[idx], self.u[idx], self.v[idx], self.attr[idx])
 
     def canonical_order(self) -> np.ndarray:
@@ -79,19 +79,26 @@ class SignedEdges:
         hi = np.maximum(self.u, self.v)
         return np.lexsort((self.attr, hi, lo, -np.abs(self.score)))
 
-    def sorted(self) -> "SignedEdges":
+    def sorted(self) -> SignedEdges:
         return self.take(self.canonical_order())
 
     def to_mws(self) -> list[MwsEdge]:
         """``(positive, u, v)`` tuples in the current order. Zero scores are
         repulsive, matching the legacy ``aff > 0`` rule."""
-        return list(zip((self.score > 0).tolist(), self.u.tolist(), self.v.tolist()))
+        return list(
+            zip(
+                (self.score > 0).tolist(),
+                self.u.tolist(),
+                self.v.tolist(),
+                strict=False,
+            )
+        )
 
     def arrays(self) -> dict[str, np.ndarray]:
         return {"score": self.score, "u": self.u, "v": self.v, "attr": self.attr}
 
     @classmethod
-    def from_arrays(cls, arrays) -> "SignedEdges":
+    def from_arrays(cls, arrays) -> SignedEdges:
         return cls(arrays["score"], arrays["u"], arrays["v"], arrays["attr"])
 
 
@@ -374,5 +381,5 @@ def get_method(name: str, **kwargs) -> ClusterMethod:
     except KeyError:
         raise ValueError(
             f"unknown clustering method {name!r}; known: {sorted(METHODS)}"
-        )
+        ) from None
     return cls(**kwargs)

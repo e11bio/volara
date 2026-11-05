@@ -41,7 +41,7 @@ def random_rag(
     shape = np.asarray(roi.shape, dtype=float)
     pos = begin + rng.random((n_nodes, roi.dims)) * shape
     ids = np.arange(n_nodes) + id_offset
-    nodes = {int(i): tuple(p) for i, p in zip(ids, pos)}
+    nodes = {int(i): tuple(p) for i, p in zip(ids, pos, strict=False)}
     edges = {}
     tries = 0
     while len(edges) < n_edges and tries < 50 * n_edges:
@@ -72,7 +72,7 @@ def partition(lut: np.ndarray, nodes=None) -> frozenset:
     ``GraphMWS`` LUT omits fragments without edges, ``GraphCluster`` lists them."""
     groups: dict[int, set[int]] = {}
     seen = set()
-    for frag, seg in zip(lut[0].tolist(), lut[1].tolist()):
+    for frag, seg in zip(lut[0].tolist(), lut[1].tolist(), strict=False):
         groups.setdefault(int(seg), set()).add(int(frag))
         seen.add(int(frag))
     parts = [frozenset(g) for g in groups.values()]

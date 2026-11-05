@@ -15,49 +15,70 @@ Layout::
         done                        # written last; marks the block complete
       L1/...
 
-Every file is written to a temporary name and renamed into place, and the
-``done`` marker is the last thing written, so a block is either complete or
-absent. Files in other blocks' ``deferred/`` directories are rewritten
-identically on a re-run, which keeps a restart idempotent.
+``work_dir`` is any ``UPath``: a local directory or a URL on an fsspec
+filesystem (``s3://bucket/run/``, ...). Every file is written whole: locally
+to a temporary name renamed into place, remotely as a single object write
+(atomic on object stores, which have no rename). The ``done`` marker is the
+last thing written, so a block is either complete or absent. Files in other
+blocks' ``deferred/`` directories are rewritten identically on a re-run, which
+keeps a restart idempotent. "Directories" are only key prefixes on an object
+store, so nothing here relies on a directory existing: listings are globs.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import os
-import shutil
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
 import numpy as np
+from upath import UPath
+
+from volara.paths import is_local, rm, to_upath
 
 from .methods import SignedEdges
 from .octree import Index, Octree
 
 
-def _atomic_savez(path: Path, **arrays) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with open(tmp, "wb") as f:
-        np.savez(f, **arrays)
-    os.replace(tmp, path)
+def _write_bytes(path: UPath, data: bytes) -> None:
+    """Write ``data`` to ``path`` so that readers see the old file or the
+    whole new one, never a partial write."""
+    if is_local(path):
+        local = Path(str(path))
+        local.parent.mkdir(parents=True, exist_ok=True)
+        tmp = local.with_name(local.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, local)
+    else:
+        path.write_bytes(data)  # one PUT: atomic on object stores
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
-    os.replace(tmp, path)
+def _atomic_savez(path: UPath, **arrays) -> None:
+    buffer = io.BytesIO()
+    np.savez(buffer, **arrays)
+    _write_bytes(path, buffer.getvalue())
+
+
+def _atomic_write_text(path: UPath, text: str) -> None:
+    _write_bytes(path, text.encode())
+
+
+def _load_npz(path: UPath) -> dict[str, np.ndarray]:
+    with np.load(io.BytesIO(path.read_bytes())) as d:
+        return {k: d[k] for k in d.files}
 
 
 class HierarchyStore:
-    def __init__(self, work_dir: Path):
-        self.work_dir = Path(work_dir)
+    def __init__(self, work_dir: Any):
+        self.work_dir: UPath = to_upath(work_dir)
 
     # -- manifest -----------------------------------------------------------
 
     @property
-    def manifest_path(self) -> Path:
+    def manifest_path(self) -> UPath:
         return self.work_dir / "manifest.json"
 
     def ensure_manifest(self, manifest: dict) -> None:
@@ -75,19 +96,15 @@ class HierarchyStore:
 
     # -- paths --------------------------------------------------------------
 
-    def level_dir(self, level: int) -> Path:
+    def level_dir(self, level: int) -> UPath:
         return self.work_dir / f"L{level}"
 
-    def block_dir(self, level: int, index: Index) -> Path:
+    def block_dir(self, level: int, index: Index) -> UPath:
         return self.level_dir(level) / "_".join(str(int(i)) for i in index)
 
-    def block_dirs(self, level: int) -> Iterator[Path]:
-        level_dir = self.level_dir(level)
-        if not level_dir.exists():
-            return
-        for p in sorted(level_dir.iterdir()):
-            if p.is_dir():
-                yield p
+    def level_files(self, level: int, name: str) -> Iterator[UPath]:
+        """Every block's ``name`` file at ``level``, in block-key order."""
+        yield from sorted(self.level_dir(level).glob(f"*/{name}"), key=str)
 
     # -- completion ---------------------------------------------------------
 
@@ -101,9 +118,7 @@ class HierarchyStore:
         """Remove a block's own outputs (not deferred files others wrote into it)."""
         d = self.block_dir(level, index)
         for name in ("done", "lut.npz", "graph.npz", "boundary.npz", "stats.json"):
-            p = d / name
-            if p.exists():
-                p.unlink()
+            rm(d / name, recursive=False)
 
     # -- per-block artifacts -------------------------------------------------
 
@@ -115,8 +130,8 @@ class HierarchyStore:
         )
 
     def read_lut(self, level: int, index: Index) -> tuple[np.ndarray, np.ndarray]:
-        with np.load(self.block_dir(level, index) / "lut.npz") as d:
-            return d["in_ids"], d["out_ids"]
+        d = _load_npz(self.block_dir(level, index) / "lut.npz")
+        return d["in_ids"], d["out_ids"]
 
     def write_graph(self, level: int, index: Index, nodes, edges: SignedEdges) -> None:
         _atomic_savez(
@@ -126,8 +141,8 @@ class HierarchyStore:
         )
 
     def read_graph(self, level: int, index: Index) -> tuple[np.ndarray, SignedEdges]:
-        with np.load(self.block_dir(level, index) / "graph.npz") as d:
-            return d["nodes"], SignedEdges.from_arrays(d)
+        d = _load_npz(self.block_dir(level, index) / "graph.npz")
+        return d["nodes"], SignedEdges.from_arrays(d)
 
     def write_boundary(
         self, level: int, index: Index, orig, comp, max_level, max_attractive_level
@@ -147,8 +162,8 @@ class HierarchyStore:
     def read_boundary(
         self, level: int, index: Index
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        with np.load(self.block_dir(level, index) / "boundary.npz") as d:
-            return d["orig"], d["comp"], d["max_level"], d["max_attractive_level"]
+        d = _load_npz(self.block_dir(level, index) / "boundary.npz")
+        return d["orig"], d["comp"], d["max_level"], d["max_attractive_level"]
 
     def write_deferred(
         self,
@@ -167,13 +182,11 @@ class HierarchyStore:
 
     def read_deferred(self, level: int, index: Index) -> SignedEdges:
         d = self.block_dir(level, index) / "deferred"
-        if not d.exists():
-            return SignedEdges.empty()
-        parts = []
-        for p in sorted(d.glob("from_*.npz")):
-            with np.load(p) as arrays:
-                parts.append(SignedEdges.from_arrays(arrays))
-        return SignedEdges.concat(parts)
+        parts = [
+            SignedEdges.from_arrays(_load_npz(p))
+            for p in sorted(d.glob("from_*.npz"), key=str)
+        ]
+        return SignedEdges.concat(parts) if parts else SignedEdges.empty()
 
     def write_stats(self, level: int, index: Index, stats: dict) -> None:
         _atomic_write_text(
@@ -185,24 +198,19 @@ class HierarchyStore:
         return json.loads((self.block_dir(level, index) / "stats.json").read_text())
 
     def level_stats(self, level: int) -> list[dict]:
-        out = []
-        for d in self.block_dirs(level):
-            p = d / "stats.json"
-            if p.exists():
-                out.append(json.loads(p.read_text()))
-        return out
+        return [
+            json.loads(p.read_text()) for p in self.level_files(level, "stats.json")
+        ]
 
     # -- composition --------------------------------------------------------
 
     def level_lut(self, level: int) -> tuple[np.ndarray, np.ndarray]:
         """Concatenation of every block LUT at ``level`` (disjoint inputs)."""
         ins, outs = [], []
-        for d in self.block_dirs(level):
-            p = d / "lut.npz"
-            if p.exists():
-                with np.load(p) as arrays:
-                    ins.append(arrays["in_ids"])
-                    outs.append(arrays["out_ids"])
+        for p in self.level_files(level, "lut.npz"):
+            arrays = _load_npz(p)
+            ins.append(arrays["in_ids"])
+            outs.append(arrays["out_ids"])
         if not ins:
             z = np.zeros(0, dtype=np.int64)
             return z, z
@@ -211,10 +219,7 @@ class HierarchyStore:
     # -- cleanup ------------------------------------------------------------
 
     def drop_level(self, level: int) -> None:
-        d = self.level_dir(level)
-        if d.exists():
-            shutil.rmtree(d)
+        rm(self.level_dir(level))
 
     def drop(self) -> None:
-        if self.work_dir.exists():
-            shutil.rmtree(self.work_dir)
+        rm(self.work_dir)

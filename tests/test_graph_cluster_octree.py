@@ -26,7 +26,7 @@ def test_grid_shapes_and_clipping_on_non_divisible_roi():
         covered = np.zeros(tuple(roi.shape), dtype=np.uint8)
         for index in t.blocks(level):
             b = t.block_roi(level, index)
-            sl = tuple(slice(o, o + s) for o, s in zip(b.begin, b.shape))
+            sl = tuple(slice(o, o + s) for o, s in zip(b.begin, b.shape, strict=False))
             covered[sl] += 1
             assert t.index_of_roi(level, b) == index
         assert covered.min() == 1 and covered.max() == 1
@@ -90,7 +90,7 @@ def test_lca():
         [2, 0, 0],
         [0, 0, 0],
     ]
-    for (la, lb), lvl, idx in zip(zip(a, b), level, index):
+    for (la, lb), lvl, idx in zip(zip(a, b, strict=False), level, index, strict=False):
         block = t.block_roi(int(lvl), tuple(idx))
         assert block.contains(t.block_roi(0, tuple(la)))
         assert block.contains(t.block_roi(0, tuple(lb)))

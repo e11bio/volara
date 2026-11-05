@@ -6637,7 +6637,7 @@ requires-dist = [
     { name = "funlib-persistence", specifier = ">=0.8.1" },
     { name = "iohub", specifier = ">=0.3.0a5" },
     { name = "llvmlite", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "!=0.44.*,<0.46" },
-    { name = "mwatershed", specifier = ">=0.5.2" },
+    { name = "mwatershed", specifier = ">=0.6.0" },
     { name = "numba", specifier = ">=0.59.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "polars", specifier = ">=1.31.0" },

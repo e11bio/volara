@@ -134,22 +134,24 @@ def test_hierarchy_invariants(tmp_path, levels):
 
     # 1. every node exactly once, ids are member ids (min of the component)
     assert sorted(lut[0].tolist()) == sorted(nodes)
-    for frag, seg in zip(lut[0], lut[1]):
+    for frag, seg in zip(lut[0], lut[1], strict=False):
         assert seg <= frag
-    seg_of = dict(zip(lut[0].tolist(), lut[1].tolist()))
+    seg_of = dict(zip(lut[0].tolist(), lut[1].tolist(), strict=False))
     for seg in set(seg_of.values()):
         assert seg_of[seg] == seg
 
     # 2. every signed edge introduced exactly once across the hierarchy, or
     #    dropped as provably irrelevant (repulsive, touching a final component)
     summary = task.summary()
-    introduced = sum(l["n_edges_local"] + l["n_edges_new"] for l in summary["levels"])
-    dropped_final = sum(l["n_edges_dropped_final"] for l in summary["levels"])
+    introduced = sum(
+        lv["n_edges_local"] + lv["n_edges_new"] for lv in summary["levels"]
+    )
+    dropped_final = sum(lv["n_edges_dropped_final"] for lv in summary["levels"])
     assert introduced + dropped_final == len(edges)
     assert dropped_final > 0  # pruning is actually exercised on this graph
     assert summary["levels"][0]["n_blocks"] == task.octree.num_blocks(0)
     assert summary["levels"][-1]["n_blocks"] == 1
-    assert sum(l["n_edges_dropped_outside"] for l in summary["levels"]) == 0
+    assert sum(lv["n_edges_dropped_outside"] for lv in summary["levels"]) == 0
 
     # 3. each level's partition is a coarsening of the level below
     store = task.store
@@ -157,7 +159,7 @@ def test_hierarchy_invariants(tmp_path, levels):
     for level in range(levels):
         in_ids, out_ids = store.level_lut(level)
         assert len(np.unique(in_ids)) == len(in_ids)
-        comp_of = dict(zip(in_ids.tolist(), out_ids.tolist()))
+        comp_of = dict(zip(in_ids.tolist(), out_ids.tolist(), strict=False))
         if level == 0:
             assert sorted(in_ids.tolist()) == sorted(nodes)
             final_of = {n: seg_of[n] for n in in_ids.tolist()}
@@ -172,9 +174,9 @@ def test_hierarchy_invariants(tmp_path, levels):
         by_comp = {}
         for n, c in comp_of.items():
             by_comp.setdefault(c, set()).add(final_of[n])
-        assert all(
-            len(s) == 1 for s in by_comp.values()
-        ), "a parent split a child component"
+        assert all(len(s) == 1 for s in by_comp.values()), (
+            "a parent split a child component"
+        )
     assert pruned_total > 0  # final components were left behind somewhere
 
 
@@ -231,7 +233,7 @@ def test_edges_to_nodes_outside_roi_are_excluded(tmp_path):
         task, lut = run(db, inner, levels, tmp_path)
         assert sorted(lut[0].tolist()) == [1, 2, 3]
         assert partition(lut) == frozenset({frozenset({1, 2}), frozenset({3})})
-        dropped = sum(l["n_edges_dropped_outside"] for l in task.summary()["levels"])
+        dropped = sum(lv["n_edges_dropped_outside"] for lv in task.summary()["levels"])
         assert dropped == 2
 
 
@@ -518,3 +520,45 @@ def test_unimplemented_methods_fail_at_construction(tmp_path):
             lut=tmp_path / "x.npz",
             method="nope",  # ty: ignore[invalid-argument-type]
         )
+
+
+def test_remote_work_dir_matches_local_and_restarts(tmp_path):
+    """The hierarchy state lives on any fsspec filesystem (here ``memory://``,
+    standing in for ``s3://``): same result as a local work dir, restartable,
+    droppable. ``memory://`` is per process, hence ``multiprocessing=False``."""
+    from upath import UPath
+
+    nodes, edges = random_rag(ROI, 300, 1000, seed=11)
+    db = make_db(tmp_path / "rag.sqlite", nodes, edges)
+    _, lut_local = run(db, ROI, 3, tmp_path, name="local")
+
+    work_dir = UPath(f"memory://graph-cluster-test/{tmp_path.name}/work")
+    lut = LUT(path=f"memory://graph-cluster-test/{tmp_path.name}/lut.npz")
+    task = GraphCluster(
+        db=db, roi=ROI, weights=W, lut=lut, num_levels=3, work_dir=work_dir
+    )
+    assert task.store.work_dir.protocol == "memory"
+    task.drop()
+    task.run_blockwise(multiprocessing=False)
+    remote = task.lut.load()
+    assert remote is not None
+    np.testing.assert_array_equal(remote, lut_local)
+    assert (work_dir / "manifest.json").exists()
+    assert len(task.summary()["levels"]) == 3
+
+    # restart after the root and a level-1 block lost their outputs
+    store = task.store
+    store.clear_block(2, (0, 0, 0))
+    store.clear_block(1, (0, 0, 0))
+    assert not store.is_done(2, (0, 0, 0))
+    task.drop(drop_outputs=False)
+    task.lut.drop()
+    task.run_blockwise(multiprocessing=False)
+    np.testing.assert_array_equal(task.lut.load(), lut_local)
+
+    # the default work dir follows the lut onto its filesystem
+    default = GraphCluster(db=db, roi=ROI, weights=W, lut=lut, num_levels=3)
+    assert default.store_dir.protocol == "memory"
+
+    task.drop()
+    assert not list(work_dir.glob("**/done"))

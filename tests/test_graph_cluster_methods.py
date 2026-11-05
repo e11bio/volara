@@ -170,10 +170,13 @@ def test_cluster_matches_reference_with_prefix_and_carried():
                 order = prefix + SignedEdges.concat([edges, carried]).sorted().to_mws()
             ref = reference_mws(order)
             expected = groups_of({int(n): ref.get(int(n), int(n)) for n in nodes})
-            assert groups_of(dict(zip(nodes.tolist(), labels.tolist()))) == expected, (
+            assert (
+                groups_of(dict(zip(nodes.tolist(), labels.tolist(), strict=False)))
+                == expected
+            ), (
                 trial,
                 commit,
             )
             # labels are the smallest member of each group
-            for n, lab in zip(nodes.tolist(), labels.tolist()):
+            for n, lab in zip(nodes.tolist(), labels.tolist(), strict=False):
                 assert lab <= n

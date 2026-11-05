@@ -31,8 +31,10 @@ import daisy
 import numpy as np
 from funlib.geometry import Coordinate, Roi
 from pydantic import Field, field_validator, model_validator
+from upath import UPath
 
 from volara.lut import LUT
+from volara.paths import PydanticUPath
 from volara.segment_utils import replace_values
 
 from ...dbs import PostgreSQL, SQLite
@@ -166,8 +168,14 @@ class GraphCluster(StrictBaseModel):
     contracted graph. Each level is its own blockwise task, so levels may run
     on different queues.
     """
-    work_dir: Path | None = None
-    """Intermediate per-block state (restartable). Defaults to a directory next to ``lut``."""
+    work_dir: PydanticUPath | None = None
+    """
+    Intermediate per-block state (restartable): a local directory or a URL on
+    any fsspec filesystem (``s3://bucket/run/graph_cluster``), which every
+    worker must be able to reach. Remote credentials come from the environment,
+    or pass a ``UPath`` built with ``storage_options``. Defaults to a directory
+    next to ``lut``, on the same filesystem and with the same options.
+    """
     block_shape: PydanticCoordinate | None = None
     """Leaf block shape in world units. Defaults to ``ceil(roi.shape / 2**(num_levels-1))``."""
     edge_per_attr: bool = True
@@ -220,7 +228,7 @@ class GraphCluster(StrictBaseModel):
             raise ValueError("starting_lut is only supported with num_levels=1")
         if not self.bounded_read and self.num_levels != 1:
             raise ValueError("bounded_read=False is only supported with num_levels=1")
-        self.octree  # validates roi vs. levels / block_shape, raises if unusable
+        _ = self.octree  # validates roi vs. levels / block_shape, raises if unusable
         self.make_method()  # unimplemented methods fail here, not in a worker
         return self
 
@@ -237,10 +245,10 @@ class GraphCluster(StrictBaseModel):
         return Octree(self.roi, self.depth, self.block_shape)
 
     @property
-    def store_dir(self) -> Path:
+    def store_dir(self) -> UPath:
         if self.work_dir is not None:
-            return Path(self.work_dir)
-        return Path(str(self.lut.file.parent)) / f"{self.lut.name}-graph-cluster"
+            return self.work_dir
+        return self.lut.file.parent / f"{self.lut.name}-graph-cluster"
 
     @property
     def store(self) -> HierarchyStore:
@@ -277,7 +285,7 @@ class GraphCluster(StrictBaseModel):
     def _per_level(self, value, level: int):
         return value[level] if isinstance(value, list) else value
 
-    def level_task(self, level: int) -> "GraphClusterLevel":
+    def level_task(self, level: int) -> GraphClusterLevel:
         return GraphClusterLevel(
             config=self,
             level=level,
@@ -289,10 +297,10 @@ class GraphCluster(StrictBaseModel):
         )
 
     @property
-    def tasks(self) -> list["GraphClusterLevel"]:
+    def tasks(self) -> list[GraphClusterLevel]:
         return [self.level_task(level) for level in range(self.depth)]
 
-    def pipeline(self) -> "Pipeline":
+    def pipeline(self) -> Pipeline:
         from ..pipeline import Pipeline
 
         return reduce(lambda a, b: a + b, (Pipeline(t) for t in self.tasks))
@@ -794,7 +802,10 @@ class GraphClusterLevel(BlockwiseTask):
         by_seg = np.argsort(seg, kind="stable")
         s, n = seg[by_seg], nodes[by_seg]
         same = s[1:] == s[:-1]
-        return [(True, int(a), int(b)) for a, b in zip(n[:-1][same], n[1:][same])]
+        return [
+            (True, int(a), int(b))
+            for a, b in zip(n[:-1][same], n[1:][same], strict=False)
+        ]
 
     def _finalize(self, nodes, labels, level, store: HierarchyStore) -> None:
         """Compose every level's block LUTs into the final fragment -> segment LUT."""
