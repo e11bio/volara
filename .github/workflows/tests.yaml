@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --resolution ${{ matrix.resolution }}
-      - run: uv run pytest tests --cov --cov-report=term-missing --cov-report=xml
+      - run: uv run pytest --cov-report=xml
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -56,4 +56,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --locked
-      - run: uv run pytest tests
+      - run: uv run pytest --no-cov   # platform smoke test; the coverage floor is gated by the Linux matrix

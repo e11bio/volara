@@ -330,7 +330,8 @@ The commands below are the ones CI runs, so a green local run means a green PR.
 git clone https://github.com/e11bio/volara
 cd volara
 uv sync                                             # Python, dependencies, dev tools (from uv.lock)
-uv run pytest tests                                 # tests with coverage
+uv run pytest                                       # tests with coverage
+uv run pytest --no-cov tests/<file>.py              # one file, without the coverage floor
 uv run --only-group dev ruff check . && uv run --only-group dev ruff format --check .
 uv run ty check volara tests                        # types
 # docs: see .github/workflows/docs.yaml (notebooks are converted before sphinx-build)
