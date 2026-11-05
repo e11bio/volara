@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793850259280,
+  "lastUpdate": 1793850593147,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -33,6 +33,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 46.471,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "id": "e2e558f56698ac46e4dc99cc52a2423e8b2f682b",
+          "message": "Keep the task out of the worker spawn closure\n\n`BlockwiseTask.worker_func` built its spawn function over `self`, so daisy\npickled the whole task into every driver-side worker helper and each\nhelper imported the task's module graph: about 1 GB of driver RAM per\nworker slot on a Predict task, 100 GB for 130 slurm workers, while the\nhelper only runs `sbatch --wait`. The closure now captures the worker\nconfig, the config file path and the task name, which is all the command\nneeds; the cluster job still rebuilds the task from the config file. A\nregression test checks the closure's free variables, and the SlurmWorker\ndocstring says why `num_workers` should match what the queue can grant.\n\nFixes #95\n\nCo-Authored-By: Claude Mythos 5.1 <noreply@anthropic.com>",
+          "timestamp": "2026-11-05T03:43:48Z",
+          "url": "https://github.com/e11bio/volara/commit/e2e558f56698ac46e4dc99cc52a2423e8b2f682b"
+        },
+        "date": 1793850590047,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 2281.174,
+            "range": "± 37.662",
+            "unit": "ms",
+            "extra": "interpreter startup 25.9 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 58.957,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
