@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793850593147,
+  "lastUpdate": 1794354995800,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -68,6 +68,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 58.957,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "e41b26c02113bc24c7c281a7aea50402ebc5922b",
+          "message": "Build docs on pull requests and deploy them on version tags (#98)\n\n* Build docs on pull requests and deploy them on version tags\n\nThe docs workflow ran after every benchmark run on main and deployed each\ntime. It now builds on every pull request without deploying, deploys on a\nv* tag push, and can be redeployed by hand, so the site describes the\nreleased version. The benchmark charts are still copied from gh-pages at\ndeploy time, so they refresh at each release.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* Run the lowest-direct test leg against the declared floors\n\nThe resolution mode was passed to `uv sync` only. The next step, a plain\n`uv run pytest`, saw a lockfile written in another mode, re-resolved to the\nnewest versions and replaced the environment, so the leg named\nlowest-direct tested unlocked newest versions instead. The mode is now set\nonce as UV_RESOLUTION for the whole job.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-10T23:50:00Z",
+          "url": "https://github.com/e11bio/volara/commit/e41b26c02113bc24c7c281a7aea50402ebc5922b"
+        },
+        "date": 1794354992866,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1570.189,
+            "range": "± 22.58",
+            "unit": "ms",
+            "extra": "interpreter startup 18.4 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 47.903,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
