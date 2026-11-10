@@ -1,15 +1,24 @@
 name: docs
 on:
-  # Rebuild after every benchmark run so the charts carry the newest point;
-  # workflow_run fires on the default branch only.
-  workflow_run:
-    workflows: [benchmark]
-    types: [completed]
+  # Build on every pull request (no deploy) and deploy on a version tag, so
+  # the site always describes the released version. workflow_dispatch
+  # redeploys by hand.
+  # Release order: push the version bump to main as the last commit, wait for
+  # tests and benchmark to finish on it, then tag. The tag's deploy then
+  # includes a benchmark point measured on the released commit.
+  pull_request:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 permissions:
   contents: read
   pages: write
   id-token: write
+# One run at a time per ref; a running deploy is never cancelled. Per ref so
+# that builds for different pull requests do not displace each other.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,11 +40,12 @@ jobs:
           if git fetch --depth=1 origin gh-pages 2>/dev/null && git checkout origin/gh-pages -- dev/bench 2>/dev/null; then
             mkdir -p docs/build/html/dev && mv dev/bench docs/build/html/dev/
           fi
-      - uses: actions/upload-pages-artifact@v3
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: docs/build/html
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
     needs: build
     environment:
       name: github-pages
