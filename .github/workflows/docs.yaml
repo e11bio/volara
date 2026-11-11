@@ -1,12 +1,12 @@
 name: docs
 on:
-  # Build on every pull request (no deploy) and deploy on a version tag, so
-  # the site always describes the released version. workflow_dispatch
-  # redeploys by hand.
+  # Deploy on a version tag, so the site describes the released version.
+  # Run by hand (workflow_dispatch) on a pull request's branch to check the
+  # build before merging: that builds without deploying. A manual run on main
+  # redeploys. Not run on every push or pull request commit.
   # Release order: push the version bump to main as the last commit, wait for
   # tests and benchmark to finish on it, then tag. The tag's deploy then
   # includes a benchmark point measured on the released commit.
-  pull_request:
   push:
     tags: ["v*"]
   workflow_dispatch:
@@ -40,12 +40,13 @@ jobs:
           if git fetch --depth=1 origin gh-pages 2>/dev/null && git checkout origin/gh-pages -- dev/bench 2>/dev/null; then
             mkdir -p docs/build/html/dev && mv dev/bench docs/build/html/dev/
           fi
-      - if: github.event_name != 'pull_request'
+      # Only a tag or main deploys; a manual run on another branch is a build check.
+      - if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/build/html
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
     needs: build
     environment:
       name: github-pages
