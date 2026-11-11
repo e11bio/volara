@@ -8,7 +8,12 @@ is better for every metric.
   <p id="benchmark-status">Loading benchmark data…</p>
 </div>
 
+<!-- jupyter-sphinx puts require.js on every page. With an AMD loader present,
+     Chart.js registers as an AMD module and never sets the global `Chart`, so
+     the charts stay empty. Hide `define` while Chart.js loads. -->
+<script>window.__amdDefine = window.define; window.define = undefined;</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script>window.define = window.__amdDefine;</script>
 <script src="_static/benchmarks.js"></script>
 <script src="dev/bench/data.js" onerror="benchmarksUnavailable()"></script>
 <script>window.addEventListener("load", renderBenchmarks);</script>
