@@ -5,10 +5,10 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
+import lazy_loader as lazy
 import numpy as np
-from cloudvolume import CloudVolume
 from funlib.geometry import Coordinate
 from funlib.persistence import Array, open_ds, prepare_ds
 from pydantic import AliasChoices, Field, model_validator
@@ -23,6 +23,14 @@ from .ops import (
 )
 from .paths import PydanticUPath, is_local, rm, to_upath, zarr_store
 from .utils import OpenMode, PydanticCallable, PydanticCoordinate, StrictBaseModel
+
+if TYPE_CHECKING:
+    from cloudvolume import CloudVolume
+
+# Loaded on first use, so `import volara` does not import cloud-volume. Only
+# CloudVolumeWrapper needs it, and a broken cloud-volume release then cannot
+# break every volara import (12.16.0 fails at import without crackle-codec).
+cloudvolume = lazy.load("cloudvolume")
 
 ArraySchedulerName = Literal["single-threaded", "synchronous", "threads", "processes"]
 """A dask scheduler name accepted by ``dask.compute(scheduler=...)``."""
@@ -471,7 +479,7 @@ class _CloudVolumeView:
     keeps the task graph small and each read fetches exactly the requested ROI.
     """
 
-    def __init__(self, vol: CloudVolume):
+    def __init__(self, vol: "CloudVolume"):
         self.vol = vol
         self.shape = tuple(int(s) for s in vol.shape)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
         self.dtype = np.dtype(vol.dtype)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
@@ -528,7 +536,7 @@ class CloudVolumeWrapper(Dataset):
                 f"array() without the lazy-op path. Drop the field or use a zarr-backed Dataset."
             )
 
-        vol = CloudVolume(
+        vol = cloudvolume.CloudVolume(
             str(self.store),
             mip=self.mip,
             use_https=True,
@@ -540,8 +548,8 @@ class CloudVolumeWrapper(Dataset):
         metadata = {
             "axis_names": self.axis_names if self.axis_names is not None else None,
             "units": self.units if self.units is not None else None,
-            "offset": self.offset if self.offset is not None else vol.voxel_offset,  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
-            "types": ["space" for _ in range(len(vol.shape) - 1)]  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
+            "offset": self.offset if self.offset is not None else vol.voxel_offset,
+            "types": ["space" for _ in range(len(vol.shape) - 1)]
             + ["channel"],  # last dimension in CV is always channel
         }
 
@@ -551,7 +559,7 @@ class CloudVolumeWrapper(Dataset):
         # ~20k keys instead of ~10M for FlyWire-sized volumes); it never causes
         # over-reading. With one dask chunk per storage chunk, dask spent ~4s
         # culling the graph on every read regardless of ROI size.
-        chunks = tuple(int(c) * 8 for c in vol.chunk_size) + (int(vol.num_channels),)  # ty: ignore[unresolved-attribute]  # CloudVolume is untyped
+        chunks = tuple(int(c) * 8 for c in vol.chunk_size) + (int(vol.num_channels),)
         dask_arr = da.from_array(
             view,
             chunks=chunks,

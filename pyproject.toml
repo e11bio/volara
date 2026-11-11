@@ -35,7 +35,10 @@ dependencies = [
     "llvmlite<0.46,!=0.44.*; platform_machine == 'x86_64' and sys_platform == 'darwin'",
     "scipy>=1.15.3",
     "scikit-image>=0.25.2",
-    "cloud-volume>=12.4.1",
+    # 12.16.0 imports crackle at module level without requiring crackle-codec
+    "cloud-volume>=12.4.1,!=12.16.0",
+    # cloud-volume is loaded on first use (volara/datasets.py)
+    "lazy-loader>=0.4",
     "polars>=1.31.0",
     "cloudpickle>=3.0",
     "psutil>=7.0.0",
