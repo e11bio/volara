@@ -182,7 +182,7 @@ def test_cloudvolume_refuses_ops_it_would_silently_drop(monkeypatch):
     def _explode(*a, **k):
         raise AssertionError("opened the volume instead of refusing `ops`")
 
-    monkeypatch.setattr(datasets, "CloudVolume", _explode)
+    monkeypatch.setattr(datasets.cloudvolume, "CloudVolume", _explode)
     c = CloudVolumeWrapper(store="gs://no/such/bucket", ops=[lambda d: d * 2])
     with pytest.raises(NotImplementedError, match="ops"):
         c.array("r")
