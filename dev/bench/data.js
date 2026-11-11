@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794414244846,
+  "lastUpdate": 1794424319943,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -173,6 +173,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 39.417,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "6adc55a273350ee0b1d02c42181fef88c6f04f5b",
+          "message": "Load cloud-volume on first use and exclude its broken 12.16.0 release (#102)\n\ncloud-volume 12.16.0 imports crackle at module level without requiring\ncrackle-codec, so `import volara` failed on a fresh install. Only\nCloudVolumeWrapper needs cloud-volume: it is now loaded with lazy_loader\non first use, so importing volara no longer imports it, and 12.16.0 is\nexcluded from the dependency range.\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-11T19:03:27Z",
+          "url": "https://github.com/e11bio/volara/commit/6adc55a273350ee0b1d02c42181fef88c6f04f5b"
+        },
+        "date": 1794424318211,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1039.68,
+            "range": "± 35.136",
+            "unit": "ms",
+            "extra": "interpreter startup 16.1 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 35.926,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
