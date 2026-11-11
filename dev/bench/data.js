@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794424319943,
+  "lastUpdate": 1794424398338,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -208,6 +208,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 35.926,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "96081936afc8ee6fadc09baaea3ccab9207f018a",
+          "message": "Deploy docs on version tags and by hand only (#101)\n\nThe docs workflow now runs on a v* tag push and on workflow_dispatch, and\nnot on every push or pull request commit. A tag or a manual run on main\ndeploys; a manual run on any other branch builds without deploying, which\nis how a pull request's docs are checked once it is ready to merge.\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-11T19:04:21Z",
+          "url": "https://github.com/e11bio/volara/commit/96081936afc8ee6fadc09baaea3ccab9207f018a"
+        },
+        "date": 1794424394683,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1494.298,
+            "range": "± 21.533",
+            "unit": "ms",
+            "extra": "interpreter startup 23.5 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 51.401,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
