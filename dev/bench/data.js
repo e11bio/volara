@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794355592236,
+  "lastUpdate": 1794414244846,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -138,6 +138,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 47.293,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "id": "1d6c739922a133b7a4dedb8bdcbd774f0d1c423b",
+          "message": "Draw the benchmark charts on pages that load require.js\n\njupyter-sphinx puts require.js on every docs page. With an AMD loader\npresent, the Chart.js bundle registers as an AMD module and never sets\nthe global Chart, so benchmarks.js failed at new Chart() and the page\nstayed empty although the data was deployed. Hide define while Chart.js\nloads and restore it afterwards.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-11T16:17:17Z",
+          "url": "https://github.com/e11bio/volara/commit/1d6c739922a133b7a4dedb8bdcbd774f0d1c423b"
+        },
+        "date": 1794414243110,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1541.987,
+            "range": "± 102.594",
+            "unit": "ms",
+            "extra": "interpreter startup 15.2 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 39.417,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
