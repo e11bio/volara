@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794424633440,
+  "lastUpdate": 1794504816604,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -278,6 +278,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 47.88,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "id": "83b6617f0777a9ca3bcf99e809f8cf7a106f0caf",
+          "message": "Bump version to 2.1.2\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-12T17:19:22Z",
+          "url": "https://github.com/e11bio/volara/commit/83b6617f0777a9ca3bcf99e809f8cf7a106f0caf"
+        },
+        "date": 1794504815112,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1549.461,
+            "range": "± 20.606",
+            "unit": "ms",
+            "extra": "interpreter startup 23.8 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 52.7,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
