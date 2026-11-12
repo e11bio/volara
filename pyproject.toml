@@ -36,10 +36,9 @@ dependencies = [
     "scipy>=1.15.3",
     "scikit-image>=0.25.2",
     # 12.16.0 and 12.16.1 import crackle at module level without requiring
-    # crackle-codec, so `import cloudvolume` fails:
+    # crackle-codec, so `import cloudvolume` fails. Fixed in 12.16.2:
     # https://github.com/seung-lab/cloud-volume/issues/715
-    # Raise the cap once that is fixed.
-    "cloud-volume>=12.4.1,<12.16",
+    "cloud-volume>=12.4.1,!=12.16.0,!=12.16.1",
     # cloud-volume is loaded on first use (volara/datasets.py)
     "lazy-loader>=0.4",
     "polars>=1.31.0",
