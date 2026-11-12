@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794504816604,
+  "lastUpdate": 1794505521203,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -313,6 +313,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 52.7,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "Will",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "id": "31f0492835d24a75fab96868c79c9866f3494ad8",
+          "message": "Exclude only the broken cloud-volume releases\n\ncloud-volume 12.16.2 makes crackle-codec a required dependency, which\nfixes the import failure in 12.16.0 and 12.16.1\n(seung-lab/cloud-volume#715). Replace the <12.16 cap with exclusions for\nthose two versions.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-12T17:37:11Z",
+          "url": "https://github.com/e11bio/volara/commit/31f0492835d24a75fab96868c79c9866f3494ad8"
+        },
+        "date": 1794505519916,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1395.214,
+            "range": "± 44.571",
+            "unit": "ms",
+            "extra": "interpreter startup 20.5 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 58.727,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
