@@ -334,7 +334,12 @@ uv run pytest                                       # tests with coverage
 uv run pytest --no-cov tests/<file>.py              # one file, without the coverage floor
 uv run --only-group dev ruff check . && uv run --only-group dev ruff format --check .
 uv run ty check volara tests                        # types
-# docs: see .github/workflows/docs.yaml (notebooks are converted before sphinx-build)
+# docs, as .github/workflows/docs.yaml builds them (needs pandoc; runs the examples, ~10 min)
+uv run --group docs python -m ipykernel install --name volara_env --user
+uv run --group docs jupytext --to notebook examples/getting_started/basics.py
+uv run --group docs jupytext --to notebook examples/cremi/cremi.py
+cp -r examples docs/source
+uv run --group docs sphinx-build -W --keep-going docs/source docs/build/html -b html
 ```
 
 `uv.lock` pins the development environment; the `lock-upgrade` workflow refreshes it monthly and opens a pull request.

@@ -42,9 +42,10 @@ extensions = [
     "myst_parser",  # include md files in rst files
 ]
 
-nbsphinx_custom_formats = {
-    ".py": ["jupytext.reads", {"fmt", "py:percent"}],
-}
+# The example scripts are converted to notebooks with jupytext before the build
+# (see .github/workflows/docs.yaml), so nbsphinx only reads `.ipynb` files. Do not
+# register `.py` as a notebook format here: that makes every Python file under the
+# source directory a document, `conf.py` included.
 nbsphinx_kernel_name = "volara_env"
 
 # Add any paths that contain templates here, relative to this directory.
@@ -53,7 +54,30 @@ templates_path = ["_templates"]
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    # Output of examples/cremi/cremi_report.py, copied in with the examples; not a
+    # page of the site.
+    "examples/cremi/RESOURCE_REPORT.md",
+]
+
+# The task models have `Coordinate` fields (`block_size`, `context`), which have no
+# JSON schema. Render those fields in the schema box as autodoc_pydantic already
+# does, without the per-model warning.
+autodoc_pydantic_model_show_json_error_strategy = "coerce"
+
+# sphinx-click does `from sphinx.ext.autodoc import mock` and calls it. Under
+# Sphinx 9 that name is the `sphinx.ext.autodoc.mock` module once any extension
+# has imported it, so the `click` directive fails with "'module' object is not
+# callable" and the CLI page is empty. Hand sphinx-click the function. Remove once
+# https://github.com/click-contrib/sphinx-click/issues/159 is fixed.
+import sphinx_click.ext  # noqa: E402
+from sphinx.ext.autodoc.mock import mock as _autodoc_mock  # noqa: E402
+
+if not callable(sphinx_click.ext.mock):
+    sphinx_click.ext.mock = _autodoc_mock
 
 # -- Options for HTML output -------------------------------------------------
 
