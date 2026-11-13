@@ -11,6 +11,7 @@ Tutorial
     pip install volara matplotlib
 
   .. jupyter-execute::
+    :stderr:
 
     import logging
     import random
