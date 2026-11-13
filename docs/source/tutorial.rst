@@ -12,8 +12,12 @@ Tutorial
 
   .. jupyter-execute::
 
+    import logging
     import random
     import pprint
+
+    # Show warnings only; volara logs its progress at INFO.
+    logging.basicConfig(level=logging.WARNING)
 
     import matplotlib.pyplot as plt
     import numpy as np

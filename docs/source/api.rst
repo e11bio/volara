@@ -22,6 +22,7 @@ Datasets
 
 .. automodule:: volara.datasets
     :members:
+    :exclude-members: Field
 
 Dataset Operations
 ==================

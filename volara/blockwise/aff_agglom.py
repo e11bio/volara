@@ -60,7 +60,7 @@ class AffAgglom(BlockwiseTask):
     This allows us to compute the affinity statistics in subgroups of the
     neighborhood. For example if you wanted to compute the mean affinity
     between fragments in x and y separately from z, you would provide
-    a dictionary like so:
+    a dictionary like so::
 
         scores = {
             "xy": [(1, 0, 0), (0, 1, 0)],

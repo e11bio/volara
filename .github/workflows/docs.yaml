@@ -33,7 +33,7 @@ jobs:
           uv run --group docs jupytext --to notebook examples/getting_started/basics.py
           uv run --group docs jupytext --to notebook examples/cremi/cremi.py
           cp -r examples docs/source
-          uv run --group docs sphinx-build docs/source docs/build/html -b html
+          uv run --group docs sphinx-build -W --keep-going docs/source docs/build/html -b html
       # The benchmark action keeps its data and dashboard on gh-pages; the
       # site is deployed from this artifact, so bring them along.
       - run: |
