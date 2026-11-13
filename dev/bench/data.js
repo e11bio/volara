@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794505521203,
+  "lastUpdate": 1794596854644,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -348,6 +348,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 58.727,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "bff3018756128bbcdfe2df99d85086208465efe3",
+          "message": "Make Sphinx warnings fatal and fix the docs warnings (#103)\n\nBuild the docs with -W --keep-going and remove the 74 warnings the build\nhad: stop registering .py as a notebook format (conf.py and the example\nscripts were parsed and executed as notebooks), restore the CLI reference\nunder Sphinx 9, and fix the remaining docstring, autodoc and tutorial\nwarnings. Document the docs build in the README.\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-13T19:01:36Z",
+          "url": "https://github.com/e11bio/volara/commit/bff3018756128bbcdfe2df99d85086208465efe3"
+        },
+        "date": 1794596853137,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1506.945,
+            "range": "± 29.968",
+            "unit": "ms",
+            "extra": "interpreter startup 22.7 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 51.36,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
