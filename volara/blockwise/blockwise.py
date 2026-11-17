@@ -387,20 +387,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
 
             yield task
 
-    def spoof(self, spoof_dir: Path):
-        """
-        Whether or not to spoof the data inputs to this task.
-        """
-        data = {}
-        for name, _field in self.__class__.model_fields.items():
-            value = getattr(self, name)
-            if hasattr(value, "spoof"):
-                # If the value has a spoof method, call it to get a mock value
-                data[name] = value.spoof(spoof_dir)
-            else:
-                data[name] = value
-        return self.__class__(**data)
-
     def run_blockwise(
         self,
         multiprocessing: bool = True,
