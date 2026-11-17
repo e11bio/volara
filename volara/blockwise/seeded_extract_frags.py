@@ -11,7 +11,7 @@ from pydantic import Field
 from scipy.ndimage import gaussian_filter
 
 from ..datasets import Affs, Dataset, Labels
-from ..dbs import PostgreSQL, SQLite
+from ..dbs import CSR, PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -52,7 +52,7 @@ class SeededExtractFrags(BlockwiseTask):
     The strides with which to filter each offset in the affinities neighborhood.
     """
     graph_db: Annotated[
-        PostgreSQL | SQLite,
+        PostgreSQL | SQLite | CSR,
         Field(discriminator="db_type"),
     ]
     """

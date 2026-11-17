@@ -1,8 +1,10 @@
+import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from funlib.persistence.graphs import PgSQLGraphDatabase, SQLiteGraphDataBase
+from funlib.persistence.graphs.csr_graph_database import CSRGraphDataBase
 from funlib.persistence.graphs.sql_graph_database import SQLGraphDataBase
 from funlib.persistence.types import Vec
 
@@ -10,6 +12,7 @@ from .paths import PydanticUPath, local_path
 from .utils import StrictBaseModel
 
 AttrsDict = dict[str, Any]
+GraphProvider = SQLGraphDataBase | CSRGraphDataBase
 
 
 class DB(StrictBaseModel, ABC):
@@ -45,6 +48,12 @@ class DB(StrictBaseModel, ABC):
     """
     The dimensionality of your spatial data. This is used to define the number
     of coordinates used to index your node locations.
+    """
+
+    bulk_only: ClassVar[bool] = False
+    """
+    True for a database whose writes only become readable when a task ends.
+    Tasks write to it through their bulk path whatever their ``bulk_write``.
     """
 
     @property
@@ -103,7 +112,7 @@ class DB(StrictBaseModel, ABC):
         return parsed_node_attrs, parsed_edge_attrs
 
     @abstractmethod
-    def open(self, mode: str = "r") -> SQLGraphDataBase:
+    def open(self, mode: str = "r") -> GraphProvider:
         """
         Return a `funlib.persistence.graphs.GraphDB` instance.
         """
@@ -256,3 +265,82 @@ class PostgreSQL(DB):
             raise
         db._drop_edges()
         db._create_tables()
+
+
+class CSR(DB):
+    """
+    A graph in memory-mapped CSR arrays under a directory
+    (:class:`funlib.persistence.graphs.CSRGraphDataBase`).
+
+    Workers append what they write to their own files and never contend. The
+    arrays readers use are rebuilt when a task ends, so a task always writes
+    through its bulk path, and what a task wrote cannot be read back until
+    that task has finished. Reads cost the same whatever the size of the
+    graph. Existing nodes and edges take new attribute values; rows are not
+    updated one at a time.
+    """
+
+    db_type: Literal["csr"] = "csr"
+    """
+    A literal used for pydantic serialization and deserialization of
+    DB Union types.
+    """
+    path: PydanticUPath
+    """
+    The directory of the database. The arrays are memory-mapped, so a URL
+    here is cast to a local path under :func:`volara.paths.get_remote_root`
+    with a warning (see :func:`volara.paths.local_path`).
+    """
+    cell_size: float | list[float] = 3000.0
+    """
+    Edge length of the grid cells nodes are sorted by, in world units. Pick
+    it a few times smaller than the blocks that will be read.
+    """
+
+    bulk_only: ClassVar[bool] = True
+
+    @property
+    def local(self) -> Path:
+        """The local directory behind `path`."""
+        return local_path(self.path, what="CSR graph databases")
+
+    @property
+    def id(self) -> str:
+        return self.local.stem
+
+    def open(self, mode="r") -> CSRGraphDataBase:
+        node_attrs, edge_attrs = self.graph_attrs
+        if mode == "w" and not self.local.parent.exists():
+            self.local.parent.mkdir(parents=True)
+        return CSRGraphDataBase(
+            self.local,
+            position_attribute="position",
+            node_attrs=node_attrs,
+            edge_attrs=edge_attrs,
+            mode=mode,
+            cell_size=self.cell_size,
+        )
+
+    def drop(self) -> None:
+        if self.local.exists():
+            shutil.rmtree(self.local)
+
+    def drop_edges(self) -> None:
+        try:
+            db = self.open("r+")
+        except RuntimeError:
+            return
+        db.drop_edges()
+
+    def spoof(self, nodes: bool = True):
+        spoofed_db = self.__class__(
+            path=self.local.parent / f"spoofed_{self.local.name}",
+            **self.model_dump(exclude={"path"}),
+        )
+        spoofed = spoofed_db.open("w")
+        if nodes:
+            columns, _ = self.open("r").read_arrays(edge_attrs=[])
+            ids = columns.pop("id")
+            columns.pop("step")
+            spoofed.write_node_arrays(ids, **columns)
+        return spoofed_db

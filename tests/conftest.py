@@ -6,7 +6,7 @@ import pytest
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
-from volara.dbs import SQLite
+from volara.dbs import CSR, DB, SQLite
 from volara.logging import set_log_basedir
 from volara.segment_utils import seg_to_affgraph
 
@@ -172,7 +172,15 @@ class BulkHarness:
         self.tmp_path = tmp_path
         self.affs_path = affs_path
 
-    def db(self, tag) -> SQLite:
+    def db(self, tag, csr: bool = False) -> DB:
+        if csr:
+            return CSR(
+                path=self.tmp_path / f"bulk_{tag}.csr",
+                node_attrs={"size": "int"},
+                edge_attrs={"aff": "float"},
+                ndim=2,
+                cell_size=4.0,
+            )
         return SQLite(
             path=self.tmp_path / f"bulk_{tag}.sqlite",
             node_attrs={"size": "int"},
