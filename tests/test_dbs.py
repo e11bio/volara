@@ -259,3 +259,23 @@ def test_csr_drop_edges_spoof_and_drop(bulk):
     assert not db.local.exists()
     with pytest.raises(RuntimeError):
         db.open("r")
+
+
+def test_csr_arrays_are_rebuilt_once_per_task(bulk, monkeypatch):
+    """Blocks only append: the arrays are rebuilt when a task ends, not after
+    every block, which a worker's blocks would otherwise each trigger."""
+    from funlib.geometry import Coordinate
+    from funlib.persistence.graphs import CSRGraphDataBase
+
+    builds = []
+    build = CSRGraphDataBase._build
+    monkeypatch.setattr(
+        CSRGraphDataBase,
+        "_build",
+        lambda self, *a, **k: builds.append(1) or build(self, *a, **k),
+    )
+    db = bulk.db("csr", csr=True)
+    bulk.extract_frags(db, "csr", False, Coordinate(5, 5), Coordinate(2, 2))
+    assert len(builds) == 1
+    bulk.aff_agglom(db, "csr", False, Coordinate(5, 5), Coordinate(2, 2))
+    assert len(builds) == 2

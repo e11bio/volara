@@ -270,9 +270,14 @@ class AffAgglom(BlockwiseTask):
         way the database can be written."""
         return self.bulk_write or self.db.bulk_only
 
-    def _task_context(self, worker):
+    def _task_context(self, worker, provider=None):
+        """The bulk-write context of the task. A database that is only
+        written in bulk counts the writes of the handle that entered the
+        context, so a worker passes the ``provider`` its blocks write with."""
         if self._bulk:
-            return self.db.open("r+").bulk_write_mode(
+            if provider is None or not self.db.bulk_only:
+                provider = self.db.open("r+")
+            return provider.bulk_write_mode(
                 worker=worker, node_writes=False, edge_writes=True
             )
         return nullcontext()
@@ -294,7 +299,7 @@ class AffAgglom(BlockwiseTask):
                 rag_provider,
             )
 
-        with self._task_context(worker=True):
+        with self._task_context(worker=True, provider=rag_provider):
             yield process_block
 
     @contextmanager

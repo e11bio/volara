@@ -2010,7 +2010,7 @@ wheels = [
 [[package]]
 name = "funlib-persistence"
 version = "0.8.1"
-source = { git = "https://github.com/funkelab/funlib.persistence?branch=feat%2Fcsr-graph-database#d531a4d3fd50fbc9722838ccc8f0592003b1633f" }
+source = { git = "https://github.com/funkelab/funlib.persistence?branch=feat%2Fcsr-graph-database#d54f6b8643f93492b2d7c629e96c9b8c1d1c63b8" }
 dependencies = [
     { name = "dask" },
     { name = "funlib-geometry" },
