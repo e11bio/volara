@@ -159,3 +159,8 @@ source = ["volara"]
 fail_under = 69
 show_missing = true
 skip_covered = true
+
+[tool.uv.sources]
+# CSRGraphDataBase is on a funlib.persistence branch (funkelab/funlib.persistence#54).
+# Drop this and raise the floor in `dependencies` once it is released.
+"funlib.persistence" = { git = "https://github.com/funkelab/funlib.persistence", branch = "feat/csr-graph-database" }
