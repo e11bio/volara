@@ -4,9 +4,11 @@ import shutil
 import daisy
 import numpy as np
 import pytest
+from daisy import TaskState
 from funlib.geometry import Coordinate, Roi
 from funlib.persistence.arrays import prepare_ds
 
+from tests.conftest import write_zarr
 from volara.blockwise.lambda_task import LambdaTask
 from volara.datasets import Labels, Raw
 from volara.workers import LocalWorker, LSFWorker, SlurmWorker
@@ -19,25 +21,6 @@ lsf_available = pytest.mark.skipif(
     shutil.which("bsub") is None or os.environ.get("VOLARA_LSF_TEST_QUEUE") is None,
     reason="bsub not found or VOLARA_LSF_TEST_QUEUE not set",
 )
-
-
-def test_lambda_task_init_and_drop(zarr_2d, tmp_path):
-    """init() creates output zarr, drop_artifacts() removes it.
-
-    pytest tests/test_lambda_task.py::test_lambda_task_init_and_drop
-    """
-    raw_path, _ = zarr_2d
-    out_path = tmp_path / "test.zarr" / "out"
-    task = LambdaTask(
-        in_data=Raw(store=raw_path),
-        out_data=Labels(store=out_path),
-        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-    )
-    task.init()
-    assert out_path.exists()
-    task.drop_artifacts()
-    assert not out_path.exists()
 
 
 def test_lambda_task_basic(zarr_2d, block_2d, tmp_path):
@@ -65,20 +48,12 @@ def test_lambda_task_basic(zarr_2d, block_2d, tmp_path):
     assert result.dtype == expected.dtype
 
 
-def test_lambda_task_multiblock(tmp_path):
+def test_lambda_task_multiblock(gradient_20x10, blocks_20x10, tmp_path):
     """Two blocks tile a 20x10 array and produce a correct full-coverage output.
 
     pytest tests/test_lambda_task.py::test_lambda_task_multiblock
     """
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
+    in_path, data = gradient_20x10
 
     out_path = tmp_path / "data.zarr" / "out"
     task = LambdaTask(
@@ -89,121 +64,56 @@ def test_lambda_task_multiblock(tmp_path):
     )
     task.init()
 
-    block1 = daisy.Block(
-        total_roi=Roi((0, 0), (20, 10)),
-        read_roi=Roi((0, 0), (10, 10)),
-        write_roi=Roi((0, 0), (10, 10)),
-    )
-    block2 = daisy.Block(
-        total_roi=Roi((0, 0), (20, 10)),
-        read_roi=Roi((10, 0), (10, 10)),
-        write_roi=Roi((10, 0), (10, 10)),
-    )
-
     with task.process_block_func() as process_block:
-        process_block(block1)
-        process_block(block2)
+        for block in blocks_20x10:
+            process_block(block)
 
     result = task.out_data.array("r")[:]
     expected = (data > 0.5).astype(np.uint8)
     np.testing.assert_array_equal(result, expected)
 
 
-def test_lambda_task_multiprocessing_local_worker(tmp_path):
-    """LambdaTask produces correct output when dispatched to LocalWorker subprocesses.
-
-    pytest tests/test_lambda_task.py::test_lambda_task_multiprocessing_local_worker
-    """
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
-
-    out_path = tmp_path / "data.zarr" / "out"
+@pytest.mark.parametrize(
+    "make_worker",
+    [
+        LocalWorker,
+        # with a cluster: VOLARA_SLURM_TEST_QUEUE=<queue> / VOLARA_LSF_TEST_QUEUE=<queue>
+        pytest.param(
+            lambda: SlurmWorker(queue=os.environ["VOLARA_SLURM_TEST_QUEUE"]),
+            marks=slurm_available,
+        ),
+        pytest.param(
+            lambda: LSFWorker(queue=os.environ["VOLARA_LSF_TEST_QUEUE"]),
+            marks=lsf_available,
+        ),
+    ],
+    ids=["local", "slurm", "lsf"],
+)
+def test_lambda_task_multiprocessing_worker(gradient_20x10, tmp_path, make_worker):
+    """Dispatched to worker processes, the task completes every block, returns
+    its ``TaskState`` and writes the same output as in process."""
+    in_path, data = gradient_20x10
     task = LambdaTask(
         in_data=Raw(store=in_path),
-        out_data=Labels(store=out_path),
+        out_data=Labels(store=tmp_path / "data.zarr" / "out"),
         lambda_func=lambda x: (x > 0.5).astype(np.uint8),
         block_size=Coordinate(10, 10),
         num_workers=2,
-        worker_config=LocalWorker(),
+        worker_config=make_worker(),
     )
-    task.run_blockwise(multiprocessing=True)
 
-    result = task.out_data.array("r")[:]
-    expected = (data > 0.5).astype(np.uint8)
-    np.testing.assert_array_equal(result, expected)
+    state = task.run_blockwise(multiprocessing=True)[task.task_name]
 
-
-@slurm_available
-def test_lambda_task_multiprocessing_slurm_worker(tmp_path):
-    """LambdaTask produces correct output when dispatched to SlurmWorker subprocesses.
-
-    Can run this test with a Slurm worker if you have access to a Slurm cluster and set up a queue for testing:
-    VOLARA_SLURM_TEST_QUEUE=<queue> pytest tests/test_lambda_task.py::test_lambda_task_multiprocessing_slurm_worker
-    """
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
-
-    out_path = tmp_path / "data.zarr" / "out"
-    task = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=out_path),
-        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-        num_workers=2,
-        worker_config=SlurmWorker(queue=os.environ["VOLARA_SLURM_TEST_QUEUE"]),
+    assert (
+        type(state),
+        state.total_block_count,
+        state.completed_count,
+        state.failed_count,
+        state.orphaned_count,
+    ) == (TaskState, 2, 2, 0, 0)
+    np.testing.assert_array_equal(
+        task.out_data.array("r")[:], (data > 0.5).astype(np.uint8)
     )
-    task.run_blockwise(multiprocessing=True)
-
-    result = task.out_data.array("r")[:]
-    expected = (data > 0.5).astype(np.uint8)
-    np.testing.assert_array_equal(result, expected)
-
-
-@lsf_available
-def test_lambda_task_multiprocessing_lsf_worker(tmp_path):
-    """LambdaTask produces correct output when dispatched to LSFWorker subprocesses.
-
-    Can run this test with an LSF worker if you have access to an LSF cluster and set up a queue for testing:
-    VOLARA_LSF_TEST_QUEUE=<queue> pytest tests/test_lambda_task.py::test_lambda_task_multiprocessing_lsf_worker
-    """
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
-
-    out_path = tmp_path / "data.zarr" / "out"
-    task = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=out_path),
-        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-        num_workers=2,
-        worker_config=LSFWorker(queue=os.environ["VOLARA_LSF_TEST_QUEUE"]),
-    )
-    task.run_blockwise(multiprocessing=True)
-
-    result = task.out_data.array("r")[:]
-    expected = (data > 0.5).astype(np.uint8)
-    np.testing.assert_array_equal(result, expected)
 
 
 def test_lambda_task_properties(zarr_2d, tmp_path):
@@ -235,13 +145,7 @@ def test_lambda_task_init_out_false_skips_prepare_and_drop(tmp_path):
     """
     data = np.random.default_rng(0).random((10, 10), dtype=np.float32)
     in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
+    write_zarr(in_path, data)
 
     # Pre-create the output dataset (simulating an already-existing volume)
     out_path = tmp_path / "data.zarr" / "out"
@@ -281,13 +185,7 @@ def test_lambda_task_default_block_size_from_out_data(tmp_path):
     """
     data = np.random.default_rng(0).random((20, 20), dtype=np.float32)
     in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
+    write_zarr(in_path, data)
 
     # Create output with a specific chunk shape (5, 5)
     out_path = tmp_path / "data.zarr" / "out"
@@ -320,13 +218,7 @@ def test_lambda_task_skips_non_overlapping_blocks(tmp_path):
     # in_data covers (0,0) to (10,10)
     data = np.ones((10, 10), dtype=np.float32)
     in_path = tmp_path / "data.zarr" / "raw"
-    prepare_ds(
-        in_path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
+    write_zarr(in_path, data)
 
     # out_data covers (0,0) to (20,20) -- larger than in_data
     out_path = tmp_path / "data.zarr" / "out"

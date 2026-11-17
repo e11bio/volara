@@ -1,3 +1,4 @@
+import pytest
 from funlib.geometry import Coordinate, Roi
 from pydantic import ValidationError
 
@@ -59,11 +60,8 @@ def test_strict_base_model_forbids_extra():
     class MyModel(StrictBaseModel):
         x: int
 
-    try:
-        MyModel(x=1, y=2)  # ty: ignore[unknown-argument]
-        raise AssertionError("Should have raised")
-    except ValidationError:
-        pass
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        MyModel.model_validate({"x": 1, "y": 2})
 
 
 def test_pydantic_callable_has_a_json_schema():

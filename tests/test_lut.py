@@ -177,3 +177,15 @@ def test_luts_load_iterated(tmp_path):
     # Should chain: 1->100, 2->200
     np.testing.assert_array_equal(loaded[0], [1, 2])
     np.testing.assert_array_equal(loaded[1], [100, 200])
+
+
+def test_luts_add_appends_a_lut_or_another_luts(tmp_path):
+    a, b, c = (LUT(path=tmp_path / f"{name}.npz") for name in "abc")
+    assert ((a + b) + c).luts == [a, b, c]
+    assert ((a + b) + LUTS(luts=c)).luts == [a, b, c]
+
+
+@pytest.mark.parametrize("make_left", [lambda lut: lut, lambda lut: LUTS(luts=lut)])
+def test_adding_anything_but_a_lut_raises_type_error(tmp_path, make_left):
+    with pytest.raises(TypeError, match="Cannot add <class 'int'>"):
+        make_left(LUT(path=tmp_path / "a.npz")) + 3

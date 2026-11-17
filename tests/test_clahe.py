@@ -29,15 +29,6 @@ def _make_clahe_task(tmp_path):
     return task, data, out_path
 
 
-def test_clahe_init_and_drop(tmp_path):
-    """init() creates output zarr, drop_artifacts() removes it."""
-    task, _, out_path = _make_clahe_task(tmp_path)
-    task.init()
-    assert out_path.exists()
-    task.drop_artifacts()
-    assert not out_path.exists()
-
-
 def test_clahe_basic(tmp_path):
     """CLAHE on a gradient image produces different (contrast-enhanced) output in [0,255]."""
     task, data, _ = _make_clahe_task(tmp_path)

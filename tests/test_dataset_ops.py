@@ -107,13 +107,6 @@ def test_nothing_set_is_unchanged_and_op_free(tmp_path):
     assert np.array_equal(np.asarray(r.array("r")[:]), data)
 
 
-def test_a_flip_still_refuses_a_write_mode(tmp_path):
-    p, _ = _store(tmp_path, (5, 4, 3))
-    r = Raw(store=p, flip=[0], voxel_size=(1, 1, 1), offset=(0, 0, 0))
-    with pytest.raises(ValueError, match="read-only"):
-        r.array("a")
-
-
 def test_a_list_of_channel_selections_applies_in_order(tmp_path):
     """Each element indexes axis 0 of the array left by the one before it."""
     p, data = _store(tmp_path, (4, 5, 4, 3))

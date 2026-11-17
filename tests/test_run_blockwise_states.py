@@ -10,24 +10,13 @@ map return on both the serial and multiprocessing paths so a caller can see
 """
 
 import numpy as np
+import pytest
 from daisy import TaskState
 from funlib.geometry import Coordinate
-from funlib.persistence.arrays import prepare_ds
 
+from tests.conftest import write_zarr
 from volara.blockwise.lambda_task import LambdaTask
 from volara.datasets import Labels, Raw
-
-
-def _write_raw(path, data):
-    prepare_ds(
-        path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )[:] = data
-    return path
-
 
 # A lambda that raises when a block's data exceeds a threshold. Passed through
 # volara's cloudpickle-based PydanticCallable, so it must be an expression --
@@ -39,49 +28,56 @@ _FAIL_ON_HIGH = lambda x: (  # noqa: E731
 )
 
 
-def test_task_serial_returns_state_map(tmp_path):
-    """multiprocessing=False returns {task_id: TaskState}; all blocks complete.
+@pytest.mark.parametrize(
+    "combine, n_tasks, multiprocessing",
+    [
+        # a task with workers is test_lambda_task_multiprocessing_worker
+        (lambda a, b: a, 1, False),
+        (lambda a, b: a + b, 2, False),
+        (lambda a, b: a + b, 2, True),
+    ],
+    ids=["task-serial", "pipeline-serial", "pipeline-workers"],
+)
+def test_run_blockwise_returns_a_task_state_per_task(
+    gradient_20x10, tmp_path, combine, n_tasks, multiprocessing
+):
+    """A task and a sequential (``+``) pipeline both return ``{task_id: TaskState}``,
+    serially and with workers; every block of every task completes."""
+    in_path, _ = gradient_20x10
+    tasks = [
+        LambdaTask(
+            in_data=Raw(store=in_path),
+            out_data=Labels(store=tmp_path / "data.zarr" / name),
+            lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+            block_size=Coordinate(10, 10),
+            num_workers=1,
+        )
+        for name in ("out_a", "out_b")
+    ]
 
-    pytest tests/test_run_blockwise_states.py::test_task_serial_returns_state_map
-    """
-    # 20x10 tiled into two 10x10 blocks
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = _write_raw(tmp_path / "data.zarr" / "raw", data)
+    states = combine(*tasks).run_blockwise(multiprocessing=multiprocessing)
 
-    task = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=tmp_path / "data.zarr" / "out"),
-        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-    )
-
-    states = task.run_blockwise(multiprocessing=False)
-
-    assert isinstance(states, dict)
-    assert task.task_name in states
-    state = states[task.task_name]
-    assert isinstance(state, TaskState)
-    assert state.total_block_count == 2
-    assert state.completed_count == 2
-    assert state.failed_count == 0
-    assert state.orphaned_count == 0
-    assert state.is_done()
+    assert {
+        name: (
+            type(state),
+            state.total_block_count,
+            state.completed_count,
+            state.failed_count,
+            state.orphaned_count,
+        )
+        for name, state in states.items()
+    } == {task.task_name: (TaskState, 2, 2, 0, 0) for task in tasks[:n_tasks]}
 
 
 def test_task_multiprocessing_surfaces_failed_blocks(tmp_path):
-    """A worker function that raises on one block -> failed_count > 0.
-
-    This is the whole point of the PR: the returned map surfaces the failure,
-    whereas the old bool return would have reported success (is_done() is True
-    even with a failed block).
-
-    pytest tests/test_run_blockwise_states.py::test_task_multiprocessing_surfaces_failed_blocks
-    """
+    """A worker function that raises on one block is counted in ``failed_count``,
+    while ``is_done()`` is still True: it counts failed blocks as done, which is
+    why a bool return cannot tell a clean run from one with failures."""
     # block 0 (rows 0..10) is all 0.0 -> succeeds
     # block 1 (rows 10..20) is all 2.0 -> lambda raises
     data = np.zeros((20, 10), dtype=np.float32)
     data[10:, :] = 2.0
-    in_path = _write_raw(tmp_path / "data.zarr" / "raw", data)
+    in_path = write_zarr(tmp_path / "data.zarr" / "raw", data)
 
     task = LambdaTask(
         in_data=Raw(store=in_path),
@@ -91,86 +87,11 @@ def test_task_multiprocessing_surfaces_failed_blocks(tmp_path):
         num_workers=1,
     )
 
-    states = task.run_blockwise(multiprocessing=True)
+    state = task.run_blockwise(multiprocessing=True)[task.task_name]
 
-    assert isinstance(states, dict)
-    state = states[task.task_name]
-    assert isinstance(state, TaskState)
-    assert state.total_block_count == 2
-    assert state.failed_count > 0
-    assert state.completed_count == 1
-    # is_done() counts failed blocks as "done" -- the reason a bool return
-    # cannot distinguish a clean run from one with failures.
+    assert (state.total_block_count, state.completed_count, state.failed_count) == (
+        2,
+        1,
+        1,
+    )
     assert state.is_done()
-
-
-def test_pipeline_serial_returns_merged_state_map(tmp_path):
-    """A sequential (``+``) Pipeline returns a merged map covering both tasks.
-
-    Previously Pipeline.run_blockwise returned None.
-
-    pytest tests/test_run_blockwise_states.py::test_pipeline_serial_returns_merged_state_map
-    """
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = _write_raw(tmp_path / "data.zarr" / "raw", data)
-
-    task_a = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=tmp_path / "data.zarr" / "out_a"),
-        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-    )
-    task_b = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=tmp_path / "data.zarr" / "out_b"),
-        lambda_func=lambda x: (x > 0.3).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-    )
-
-    pipeline = task_a + task_b
-    states = pipeline.run_blockwise(multiprocessing=False)
-
-    assert states is not None
-    assert isinstance(states, dict)
-    assert task_a.task_name in states
-    assert task_b.task_name in states
-    for task in (task_a, task_b):
-        state = states[task.task_name]
-        assert isinstance(state, TaskState)
-        assert state.completed_count == 2
-        assert state.failed_count == 0
-        assert state.is_done()
-
-
-def test_pipeline_multiprocessing_returns_merged_state_map(tmp_path):
-    """The Pipeline multiprocessing path also returns the merged map (not None).
-
-    pytest tests/test_run_blockwise_states.py::test_pipeline_multiprocessing_returns_merged_state_map
-    """
-    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
-    in_path = _write_raw(tmp_path / "data.zarr" / "raw", data)
-
-    task_a = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=tmp_path / "data.zarr" / "out_a"),
-        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-        num_workers=1,
-    )
-    task_b = LambdaTask(
-        in_data=Raw(store=in_path),
-        out_data=Labels(store=tmp_path / "data.zarr" / "out_b"),
-        lambda_func=lambda x: (x > 0.3).astype(np.uint8),
-        block_size=Coordinate(10, 10),
-        num_workers=1,
-    )
-
-    pipeline = task_a + task_b
-    states = pipeline.run_blockwise(multiprocessing=True)
-
-    assert states is not None
-    assert isinstance(states, dict)
-    assert task_a.task_name in states
-    assert task_b.task_name in states
-    for task in (task_a, task_b):
-        assert states[task.task_name].is_done()

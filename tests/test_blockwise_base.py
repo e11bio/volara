@@ -1,4 +1,3 @@
-import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -7,10 +6,15 @@ import numpy as np
 import pytest
 import zarr
 from funlib.geometry import Coordinate, Roi
+from pydantic import ValidationError
 
+from volara.blockwise import CLAHE, Argmax, ExtractFrags, Relabel, Threshold
 from volara.blockwise.blockwise import BlockwiseTask
+from volara.blockwise.lambda_task import LambdaTask
 from volara.blockwise.pipeline import Pipeline
-from volara.datasets import MaskDataset
+from volara.datasets import Affs, Labels, MaskDataset, Raw
+from volara.dbs import SQLite
+from volara.lut import LUT
 
 
 class DummyTask(BlockwiseTask):
@@ -67,25 +71,7 @@ def test_meta_dir_and_config_file(tmp_path):
     assert t.tracking_path == tmp_path / "logs" / "dummy-task-meta" / "blocks_done"
 
 
-def test_drop_removes_meta_dir(tmp_path):
-    from volara.logging import set_log_basedir
-
-    set_log_basedir(tmp_path / "logs")
-    t = DummyTask()
-    t.meta_dir.mkdir(parents=True)
-    assert t.meta_dir.exists()
-    t.drop()
-    assert not t.meta_dir.exists()
-
-
-def test_worker_func_closure_does_not_capture_the_task(tmp_path):
-    """REGRESSION (#95). daisy pickles the spawn function into one driver-side
-    helper per worker slot. If the closure captured the task, every helper
-    would unpickle the whole task and import its module graph, costing about
-    1 GB of driver RAM per slot on a Predict task; the command only needs the
-    worker config, the config file path and the task name."""
-    import cloudpickle
-
+def test_worker_func_writes_the_config_file_the_worker_command_reads(tmp_path):
     from volara.logging import set_log_basedir
     from volara.workers import LocalWorker
 
@@ -93,15 +79,31 @@ def test_worker_func_closure_does_not_capture_the_task(tmp_path):
     t = DummyTask(worker_config=LocalWorker())
     t.meta_dir.mkdir(parents=True)
 
-    run_worker = t.worker_func()
+    t.worker_func()
 
-    captured = inspect.getclosurevars(run_worker).nonlocals
-    assert set(captured) == {"worker_config", "config_file", "task_name"}
-    assert not any(isinstance(v, BlockwiseTask) for v in captured.values())
-    assert captured["task_name"] == "dummy-task"
-    assert captured["config_file"] == t.config_file
     assert t.config_file.read_text() == t.model_dump_json()
-    assert callable(cloudpickle.loads(cloudpickle.dumps(run_worker)))
+
+
+class PayloadTask(DummyTask):
+    """DummyTask that carries a megabyte of state."""
+
+    payload: str = "x" * 1_000_000
+
+
+def test_spawn_function_pickles_to_a_few_kilobytes_for_a_megabyte_task(tmp_path):
+    """daisy pickles the spawn function into one driver-side helper per worker
+    slot, so its pickle holds the worker config, the config file path and the
+    task name (about 1.4 kB here) and stays that size however large the task is."""
+    import cloudpickle
+
+    from volara.logging import set_log_basedir
+    from volara.workers import LocalWorker
+
+    set_log_basedir(tmp_path / "logs")
+    t = PayloadTask(worker_config=LocalWorker())
+    t.meta_dir.mkdir(parents=True)
+
+    assert len(cloudpickle.dumps(t.worker_func())) < 10_000
 
 
 DROP_ARTIFACTS_CALLS: list[str] = []
@@ -114,30 +116,112 @@ class RecordingTask(DummyTask):
         DROP_ARTIFACTS_CALLS.append(self.task_name)
 
 
-def test_drop_calls_drop_artifacts_by_default(tmp_path):
-    """drop() is a full reset: meta dir removed and outputs dropped."""
+@pytest.mark.parametrize(
+    "kwargs, dropped",
+    [
+        ({}, ["dummy-task"]),
+        ({"drop_outputs": False}, []),
+    ],
+)
+def test_drop_outputs_decides_whether_drop_calls_drop_artifacts(
+    tmp_path, kwargs, dropped
+):
     from volara.logging import set_log_basedir
 
     set_log_basedir(tmp_path / "logs")
     DROP_ARTIFACTS_CALLS.clear()
     t = RecordingTask()
     t.meta_dir.mkdir(parents=True)
-    t.drop()
-    assert not t.meta_dir.exists()
-    assert DROP_ARTIFACTS_CALLS == [t.task_name]
+
+    t.drop(**kwargs)
+
+    assert t.meta_dir.exists() is False
+    assert DROP_ARTIFACTS_CALLS == dropped
 
 
-def test_drop_outputs_false_skips_drop_artifacts(tmp_path):
-    """drop(drop_outputs=False) clears the meta dir but keeps the outputs."""
-    from volara.logging import set_log_basedir
+def _argmax(store: Path):
+    out = store / "sem"
+    task = Argmax(
+        probs_data=Raw(store=store / "affs"),
+        sem_data=Labels(store=out),
+        block_size=Coordinate(10, 10),
+    )
+    return task, [out]
 
-    set_log_basedir(tmp_path / "logs")
-    DROP_ARTIFACTS_CALLS.clear()
-    t = RecordingTask()
-    t.meta_dir.mkdir(parents=True)
-    t.drop(drop_outputs=False)
-    assert not t.meta_dir.exists()
-    assert DROP_ARTIFACTS_CALLS == []
+
+def _clahe(store: Path):
+    out = store / "clahe"
+    task = CLAHE(
+        in_arr=Raw(store=store / "raw"),
+        out_arr=Raw(store=out),
+        block_size=Coordinate(10, 10),
+        kernel=Coordinate(8, 8),
+    )
+    return task, [out]
+
+
+def _threshold(store: Path):
+    out = store / "mask"
+    task = Threshold(
+        in_data=Raw(store=store / "raw"),
+        mask=Labels(store=out),
+        threshold=0.5,
+        block_size=Coordinate(10, 10),
+    )
+    return task, [out]
+
+
+def _relabel(store: Path):
+    out = store / "seg"
+    task = Relabel(
+        frags_data=Labels(store=store / "labels"),
+        seg_data=Labels(store=out),
+        lut=LUT(path=store / "lut.npz"),
+        block_size=Coordinate(10, 10),
+    )
+    return task, [out]
+
+
+def _extract_frags(store: Path):
+    out = store / "frags"
+    db = SQLite(path=store / "ef_db.sqlite", ndim=2)
+    task = ExtractFrags(
+        db=db,
+        affs_data=Affs(store=store / "affs"),
+        frags_data=Labels(store=out),
+        block_size=Coordinate(10, 10),
+        context=Coordinate(0, 0),
+        bias=[-0.5, -0.5],
+    )
+    return task, [out, db.path]
+
+
+def _lambda_task(store: Path):
+    out = store / "out"
+    task = LambdaTask(
+        in_data=Raw(store=store / "raw"),
+        out_data=Labels(store=out),
+        lambda_func=lambda x: (x > 0.5).astype(np.uint8),
+        block_size=Coordinate(10, 10),
+    )
+    return task, [out]
+
+
+@pytest.mark.parametrize(
+    "make_task",
+    [_argmax, _clahe, _threshold, _relabel, _extract_frags, _lambda_task],
+)
+def test_drop_artifacts_removes_what_init_created(
+    make_task, zarr_2d, labels_2d, affs_2d, tmp_path
+):
+    """A new task type gets a factory in this list, not a drop test of its own."""
+    task, outputs = make_task(tmp_path / "test.zarr")
+
+    task.init()
+    assert [path.exists() for path in outputs] == [True] * len(outputs)
+
+    task.drop_artifacts()
+    assert [path.exists() for path in outputs] == [False] * len(outputs)
 
 
 def test_run_creates_meta_dir_and_tracking_store(tmp_path):
@@ -155,22 +239,52 @@ def test_run_creates_meta_dir_and_tracking_store(tmp_path):
     assert t.tracking_path.exists()
 
 
-def test_pipeline_add_operator():
+@pytest.mark.parametrize(
+    "combine, n_edges",
+    [
+        (lambda a, b: a + b, 1),
+        (lambda a, b: a | b, 0),
+        (lambda a, b: a + Pipeline(b), 1),
+        (lambda a, b: a | Pipeline(b), 0),
+        (lambda a, b: Pipeline(a) + b, 1),
+        (lambda a, b: Pipeline(a) | b, 0),
+    ],
+    ids=[
+        "task+task",
+        "task|task",
+        "task+pipeline",
+        "task|pipeline",
+        "pipeline+task",
+        "pipeline|task",
+    ],
+)
+def test_plus_runs_in_series_and_pipe_runs_in_parallel(combine, n_edges):
     t1 = DummyTask(label="task-a")
     t2 = DummyTask(label="task-b")
-    p = t1 + t2
+
+    p = combine(t1, t2)
+
     assert isinstance(p, Pipeline)
-    assert len(p.task_graph.nodes()) == 2
-    assert len(p.task_graph.edges()) == 1
+    assert list(p.task_graph.nodes()) == [t1, t2]
+    assert list(p.task_graph.edges()) == [(t1, t2)][:n_edges]
 
 
-def test_pipeline_or_operator():
-    t1 = DummyTask(label="task-a")
-    t2 = DummyTask(label="task-b")
-    p = t1 | t2
-    assert isinstance(p, Pipeline)
-    assert len(p.task_graph.nodes()) == 2
-    assert len(p.task_graph.edges()) == 0
+@pytest.mark.parametrize(
+    "combine", [lambda task: task + 3, lambda task: task | 3], ids=["+", "|"]
+)
+def test_combining_a_task_with_anything_else_is_not_supported(combine):
+    with pytest.raises(NotImplementedError, match="other with type <class 'int'>"):
+        combine(DummyTask())
+
+
+def test_get_task_finds_a_registered_task_class_by_its_task_type():
+    from volara.blockwise import get_blockwise_tasks_type, get_task
+
+    get_blockwise_tasks_type()  # discovers the tasks registered as entry points
+
+    assert get_task("threshold") is Threshold
+    with pytest.raises(ValueError, match="Unknown task: no-such-task"):
+        get_task("no-such-task")
 
 
 def test_process_block_func_context_manager():
@@ -180,10 +294,8 @@ def test_process_block_func_context_manager():
 
 
 def test_serialization_roundtrip():
-    t = DummyTask()
-    json_str = t.model_dump_json()
-    t2 = DummyTask.model_validate_json(json_str)
-    assert t2.task_name == t.task_name
+    t = DummyTask(label="round-trip", array_scheduler=None)
+    assert DummyTask.model_validate_json(t.model_dump_json()) == t
 
 
 PROCESSED_BLOCKS: list[int] = []
@@ -429,9 +541,10 @@ def test_workers_open_arrays_with_the_task_array_scheduler(scheduler):
     assert current_array_scheduler() is None
 
 
-def test_array_scheduler_defaults_to_single_threaded_and_round_trips():
+def test_array_scheduler_defaults_to_single_threaded():
     assert DummyTask().array_scheduler == "single-threaded"
-    dumped = DummyTask(array_scheduler=None).model_dump_json()
-    assert DummyTask.model_validate_json(dumped).array_scheduler is None
-    with pytest.raises(ValueError):
-        DummyTask(array_scheduler="distributed")  # ty: ignore[invalid-argument-type]
+
+
+def test_array_scheduler_rejects_an_unknown_scheduler():
+    with pytest.raises(ValidationError, match="array_scheduler"):
+        DummyTask.model_validate({"array_scheduler": "distributed"})

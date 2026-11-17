@@ -418,30 +418,38 @@ def _prepare_64(ds):
     )
 
 
-def test_inner_chunk_shape_shards_the_array(tmp_path):
+@pytest.mark.parametrize(
+    "kwargs, shards, chunks",
+    [
+        # one shard per block; the inner chunk is funlib's default (the whole
+        # axis up to 64) unless `inner_chunk_shape` sets it
+        ({}, (32, 32, 32), (32, 32, 32)),
+        ({"inner_chunk_shape": (8, 8, 8)}, (32, 32, 32), (8, 8, 8)),
+        ({"sharding": False}, None, (32, 32, 32)),
+    ],
+    ids=["default", "inner_chunk_shape", "sharding_off"],
+)
+def test_prepare_stores_one_shard_per_block(tmp_path, kwargs, shards, chunks):
+    _prepare_64(Raw(store=tmp_path / "a.zarr", **kwargs))
+    stored = zarr.open_array(str(tmp_path / "a.zarr"), mode="r")
+    assert (stored.shards, stored.chunks) == (shards, chunks)
+
+
+def test_prepare_reuses_an_existing_compatible_array(tmp_path):
     ds = Raw(store=tmp_path / "sharded.zarr", inner_chunk_shape=(8, 8, 8))
-    assert Raw.model_validate_json(ds.model_dump_json()).inner_chunk_shape == (8, 8, 8)
+    _prepare_64(ds)
+    ds.array("r+")[:] = 7
 
     _prepare_64(ds)
+
     stored = zarr.open_array(str(tmp_path / "sharded.zarr"), mode="r")
-    assert stored.shards == (32, 32, 32)  # one shard per block
-    assert stored.chunks == (8, 8, 8)
-
-    _prepare_64(ds)  # an existing compatible array is reused
+    assert (stored.shards, stored.chunks) == ((32, 32, 32), (8, 8, 8))
+    np.testing.assert_array_equal(stored[:], np.full((64, 64, 64), 7, dtype=np.uint8))
 
 
-def test_sharded_by_default(tmp_path):
-    _prepare_64(Raw(store=tmp_path / "default.zarr"))
-    stored = zarr.open_array(str(tmp_path / "default.zarr"), mode="r")
-    assert stored.shards == (32, 32, 32)
-    assert stored.chunks == (32, 32, 32)  # funlib's default: the whole axis up to 64
-
-
-def test_sharding_false_is_unsharded(tmp_path):
-    _prepare_64(Raw(store=tmp_path / "plain.zarr", sharding=False))
-    stored = zarr.open_array(str(tmp_path / "plain.zarr"), mode="r")
-    assert stored.shards is None
-    assert stored.chunks == (32, 32, 32)
+def test_inner_chunk_shape_round_trips_through_json(tmp_path):
+    ds = Raw(store=tmp_path / "sharded.zarr", inner_chunk_shape=(8, 8, 8))
+    assert Raw.model_validate_json(ds.model_dump_json()) == ds
 
 
 def test_array_scheduler_context_reaches_open_ds(zarr_store):
@@ -462,3 +470,36 @@ def test_array_scheduler_context_reaches_open_ds(zarr_store):
 
     assert current_array_scheduler() is None
     assert ds.array("r").scheduler is None
+
+
+# --- CloudVolume ---
+
+
+def test_cloudvolume_wrapper_reads_a_precomputed_volume_at_its_voxel_offset(tmp_path):
+    """A local ``file://`` precomputed volume stands in for a remote one. The
+    array is channel-last and its ROI starts at the volume's voxel offset."""
+    from cloudvolume import CloudVolume
+    from funlib.geometry import Roi
+
+    from volara.datasets import CloudVolumeWrapper
+
+    data = np.arange(4 * 5 * 6, dtype=np.uint8).reshape(4, 5, 6)
+    CloudVolume.from_numpy(
+        data,
+        vol_path=f"file://{tmp_path}/volume",
+        resolution=(1, 1, 1),
+        voxel_offset=(10, 20, 30),
+        chunk_size=(2, 5, 3),
+        layer_type="image",
+    )
+
+    dataset = CloudVolumeWrapper(store=f"file://{tmp_path}/volume", agglomerate=False)
+    array = dataset.array("r")
+
+    assert dataset.name == "volume"
+    assert array.roi == Roi((10, 20, 30), (4, 5, 6))
+    assert array.types == ["space", "space", "space", "channel"]
+    np.testing.assert_array_equal(array[:], data[..., None])
+    np.testing.assert_array_equal(
+        array[Roi((11, 20, 33), (2, 5, 3))], data[1:3, :, 3:6, None]
+    )
