@@ -10,7 +10,7 @@ from scipy.ndimage import laplace
 from scipy.spatial import cKDTree  # ty: ignore[unresolved-import]  # scipy stubs omit cKDTree
 
 from ..datasets import Dataset, Labels
-from ..dbs import PostgreSQL, SQLite
+from ..dbs import CSR, PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -34,7 +34,7 @@ class DistanceAgglom(BlockwiseTask):
     task_type: Literal["distance-agglom"] = "distance-agglom"
 
     storage: Annotated[
-        PostgreSQL | SQLite,
+        PostgreSQL | SQLite | CSR,
         Field(discriminator="db_type"),
     ]
     """

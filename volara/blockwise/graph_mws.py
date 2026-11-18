@@ -15,12 +15,12 @@ from pydantic import Field
 from volara.lut import LUT, LUTS
 from volara.segment_utils import replace_values
 
-from ..dbs import PostgreSQL, SQLite
+from ..dbs import CSR, PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
 DB = Annotated[
-    PostgreSQL | SQLite,
+    PostgreSQL | SQLite | CSR,
     Field(discriminator="db_type"),
 ]
 

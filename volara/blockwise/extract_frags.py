@@ -20,7 +20,7 @@ from skimage.measure import label as relabel
 from skimage.segmentation import watershed
 
 from ..datasets import Affs, Labels, Raw
-from ..dbs import PostgreSQL, SQLite
+from ..dbs import CSR, PostgreSQL, SQLite
 from ..segment_utils import replace_values
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
@@ -54,7 +54,7 @@ class ExtractFrags(BlockwiseTask):
 
     task_type: Literal["extract-frags"] = "extract-frags"
     db: Annotated[
-        PostgreSQL | SQLite,
+        PostgreSQL | SQLite | CSR,
         Field(discriminator="db_type"),
     ]
     """
@@ -901,7 +901,7 @@ class ExtractFrags(BlockwiseTask):
         )
         logger.info("Found %d fragments", len(fragment_centers))
 
-        if self.bulk_write:
+        if self._bulk:
             # since we drop indexes, the read_graph query has to check each
             # node for containment which grows with cost as the db grows
             rag = nx.Graph()
@@ -919,7 +919,7 @@ class ExtractFrags(BlockwiseTask):
 
             rag.add_node(int(node), **node_attrs)
 
-        if self.bulk_write:
+        if self._bulk:
             rag_provider.bulk_write_graph(
                 rag,
                 block.write_roi,
@@ -930,9 +930,20 @@ class ExtractFrags(BlockwiseTask):
                 block.write_roi,
             )
 
-    def _task_context(self, worker):
-        if self.bulk_write:
-            return self.db.open("r+").bulk_write_mode(
+    @property
+    def _bulk(self) -> bool:
+        """Whether blocks write through the bulk path: asked for, or the only
+        way the database can be written."""
+        return self.bulk_write or self.db.bulk_only
+
+    def _task_context(self, worker, provider=None):
+        """The bulk-write context of the task. A database that is only
+        written in bulk counts the writes of the handle that entered the
+        context, so a worker passes the ``provider`` its blocks write with."""
+        if self._bulk:
+            if provider is None or not self.db.bulk_only:
+                provider = self.db.open("r+")
+            return provider.bulk_write_mode(
                 worker=worker, node_writes=True, edge_writes=False
             )
         return nullcontext()
@@ -954,7 +965,7 @@ class ExtractFrags(BlockwiseTask):
                 mask=mask,
             )
 
-        with self._task_context(worker=True):
+        with self._task_context(worker=True, provider=rag_provider):
             yield process_block
 
     @contextmanager

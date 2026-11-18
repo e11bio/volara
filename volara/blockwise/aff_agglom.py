@@ -11,11 +11,10 @@ from daisy import Block
 from funlib.geometry import Coordinate, Roi
 from funlib.math import inv_cantor_number
 from funlib.persistence.arrays import Array
-from funlib.persistence.graphs.sql_graph_database import SQLGraphDataBase
 from pydantic import Field
 
 from ..datasets import Affs, Dataset, Labels
-from ..dbs import PostgreSQL, SQLite
+from ..dbs import CSR, GraphProvider, PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -31,7 +30,7 @@ class AffAgglom(BlockwiseTask):
 
     task_type: Literal["aff-agglom"] = "aff-agglom"
     db: Annotated[
-        PostgreSQL | SQLite,
+        PostgreSQL | SQLite | CSR,
         Field(discriminator="db_type"),
     ]
     """
@@ -219,12 +218,12 @@ class AffAgglom(BlockwiseTask):
                     )
 
     def agglomerate_in_block(
-        self, block: Block, affs: Array, frags: Array, rag_provider: SQLGraphDataBase
+        self, block: Block, affs: Array, frags: Array, rag_provider: GraphProvider
     ):
 
         frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
 
-        if self.bulk_write:
+        if self._bulk:
             rag = nx.Graph()
         else:
             rag = rag_provider[block.read_roi]
@@ -246,7 +245,7 @@ class AffAgglom(BlockwiseTask):
             rag,
         )
 
-        if self.bulk_write:
+        if self._bulk:
             # In bulk mode the rag's nodes are bare (auto-created by
             # add_edge), so funlib's bulk_write_edges roi/position
             # filter would drop every edge — every node looks like
@@ -265,9 +264,20 @@ class AffAgglom(BlockwiseTask):
         else:
             rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
 
-    def _task_context(self, worker):
-        if self.bulk_write:
-            return self.db.open("r+").bulk_write_mode(
+    @property
+    def _bulk(self) -> bool:
+        """Whether blocks write through the bulk path: asked for, or the only
+        way the database can be written."""
+        return self.bulk_write or self.db.bulk_only
+
+    def _task_context(self, worker, provider=None):
+        """The bulk-write context of the task. A database that is only
+        written in bulk counts the writes of the handle that entered the
+        context, so a worker passes the ``provider`` its blocks write with."""
+        if self._bulk:
+            if provider is None or not self.db.bulk_only:
+                provider = self.db.open("r+")
+            return provider.bulk_write_mode(
                 worker=worker, node_writes=False, edge_writes=True
             )
         return nullcontext()
@@ -289,7 +299,7 @@ class AffAgglom(BlockwiseTask):
                 rag_provider,
             )
 
-        with self._task_context(worker=True):
+        with self._task_context(worker=True, provider=rag_provider):
             yield process_block
 
     @contextmanager

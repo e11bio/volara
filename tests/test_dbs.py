@@ -223,3 +223,57 @@ def test_a_sqlite_url_path_is_cast_to_a_local_file(tmp_path):
         assert not local.exists()
     finally:
         set_remote_root(before)
+
+
+def test_csr_pipeline_matches_sqlite(bulk):
+    """Extract frags and aff agglom into a CSR database give the nodes and
+    edges they give in SQLite, although neither task asks for bulk writes."""
+    from funlib.geometry import Coordinate
+
+    block, context = Coordinate(10, 10), Coordinate(2, 2)
+    sqlite_db, _ = bulk.pipeline("plain", False, block, context)
+    csr_db = bulk.db("csr", csr=True)
+    bulk.extract_frags(csr_db, "csr", False, block, context)
+    bulk.aff_agglom(csr_db, "csr", False, block, context)
+
+    assert bulk.nodes(csr_db) == bulk.nodes(sqlite_db)
+    want, got = bulk.edges(sqlite_db), bulk.edges(csr_db)
+    assert len(want) > 0 and set(got) == set(want)
+    for pair, data in want.items():
+        assert got[pair]["aff"] == pytest.approx(data["aff"]), pair
+
+
+def test_csr_drop_edges_and_drop(bulk):
+    from funlib.geometry import Coordinate
+
+    db = bulk.db("csr", csr=True)
+    bulk.extract_frags(db, "csr", False, Coordinate(10, 10), Coordinate(2, 2))
+    bulk.aff_agglom(db, "csr", False, Coordinate(10, 10), Coordinate(2, 2))
+    nodes = bulk.nodes(db)
+    db.drop_edges()
+    assert bulk.nodes(db) == nodes and not bulk.edges(db)
+    db.drop()
+    db.drop()  # nothing there: no error, and nothing created
+    assert not db.local.exists()
+    with pytest.raises(RuntimeError):
+        db.open("r")
+
+
+def test_csr_arrays_are_rebuilt_once_per_task(bulk, monkeypatch):
+    """Blocks only append: the arrays are rebuilt when a task ends, not after
+    every block, which a worker's blocks would otherwise each trigger."""
+    from funlib.geometry import Coordinate
+    from funlib.persistence.graphs import CSRGraphDataBase
+
+    builds = []
+    build = CSRGraphDataBase._build
+    monkeypatch.setattr(
+        CSRGraphDataBase,
+        "_build",
+        lambda self, *a, **k: builds.append(1) or build(self, *a, **k),
+    )
+    db = bulk.db("csr", csr=True)
+    bulk.extract_frags(db, "csr", False, Coordinate(5, 5), Coordinate(2, 2))
+    assert len(builds) == 1
+    bulk.aff_agglom(db, "csr", False, Coordinate(5, 5), Coordinate(2, 2))
+    assert len(builds) == 2
