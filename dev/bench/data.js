@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795030016511,
+  "lastUpdate": 1795030888100,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -453,6 +453,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 51.05,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "b4845b82abbf21b95b9b196201fe27fc0adb5374",
+          "message": "Add a CSR graph database (#110)\n\n* Add a CSR graph database\n\nvolara.dbs.CSR opens funlib.persistence's CSRGraphDataBase: a graph in\nmemory-mapped arrays under a directory. Its writes become readable when a\ntask ends, so extract-frags and aff-agglom write to it through their bulk\npath whatever bulk_write says (DB.bulk_only). The tasks that take a\ndatabase accept it beside PostgreSQL and SQLite.\n\nNeeds a funlib.persistence with CSRGraphDataBase.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* Resolve funlib.persistence from its CSR branch until it is released\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* CSR: workers enter bulk mode on the handle their blocks write with\n\nA worker's blocks wrote through one handle while another was put in bulk\nmode, so every block rebuilt the arrays. The arrays are now rebuilt once,\nwhen the task ends.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* Require funlib.persistence 0.9.0, which has CSRGraphDataBase\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* Bump version to 2.1.3\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* CSR: no spoof, which the other databases no longer have\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-18T19:33:30Z",
+          "url": "https://github.com/e11bio/volara/commit/b4845b82abbf21b95b9b196201fe27fc0adb5374"
+        },
+        "date": 1795030886112,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1640.317,
+            "range": "± 37.787",
+            "unit": "ms",
+            "extra": "interpreter startup 24.5 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 57.19,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
