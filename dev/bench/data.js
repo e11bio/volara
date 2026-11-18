@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794599131043,
+  "lastUpdate": 1795030016511,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -418,6 +418,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 36.126,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "59e3b898f3ff03db70f593d180b8bdb80cc2c717",
+          "message": "Remove block-level benchmarking; daisy's run report replaces it (#108)\n\n* Remove volara's block-level benchmarking\n\nPer-block timing and resource figures now come from daisy's run report\n(resource_tracking, runs.jsonl under the task's tracking path). Remove\nBenchmarkLogger and partial_order (volara.blockwise.benchmark),\nBlockwiseTask.get_benchmark_logger, BlockwiseTask.benchmark,\nPipeline.benchmark, every benchmark_logger.trace wrapper (the wrapped code\nis kept), examples/benchmarks/benchmark_cremi.py and tests/test_benchmark.py.\nThe per-commit CI trend tracking (benchmarks/run.py, the benchmark\nworkflow, docs/source/benchmarks.md) is unchanged.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* Remove the spoof methods, whose only caller was benchmark()\n\nBlockwiseTask.spoof, Dataset.spoof, DB.spoof, SQLite.spoof and\nPostgreSQL.spoof built the throwaway copies that benchmark() ran against.\nNothing else in volara calls them.\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n* Drop polars and psutil, unused since the benchmarking removal\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-18T19:18:30Z",
+          "url": "https://github.com/e11bio/volara/commit/59e3b898f3ff03db70f593d180b8bdb80cc2c717"
+        },
+        "date": 1795030015170,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1470.089,
+            "range": "± 17.263",
+            "unit": "ms",
+            "extra": "interpreter startup 24.8 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 51.05,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
