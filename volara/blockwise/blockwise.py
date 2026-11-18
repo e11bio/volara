@@ -17,7 +17,6 @@ from volara.logging import get_log_basedir, set_log_basedir
 from ..datasets import ArraySchedulerName, MaskDataset, array_scheduler
 from ..utils import PydanticRoi, StrictBaseModel
 from ..workers import Worker
-from .benchmark import BenchmarkLogger
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
@@ -287,14 +286,11 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Start our workers and run through every block until a task
         is complete.
         """
-        benchmark_logger = self.get_benchmark_logger()
         with ExitStack() as stack:
             stack.enter_context(array_scheduler(self.array_scheduler))
-            with benchmark_logger.trace("Process Block Setup"):
-                process_block = stack.enter_context(self.process_block_func())
+            process_block = stack.enter_context(self.process_block_func())
 
             def worker_loop():
-                worker_benchmark_logger = self.get_benchmark_logger()
                 client = daisy.Client()
                 # TODO: this shouldn't be necessary, daisy should be doing this for us
                 try:
@@ -307,17 +303,13 @@ class BlockwiseTask(StrictBaseModel, ABC):
                     while True:
                         logger.info("getting block")
                         with ExitStack() as worker_stack:
-                            with worker_benchmark_logger.trace("Acquire Block"):
-                                block = worker_stack.enter_context(
-                                    client.acquire_block()
-                                )
+                            block = worker_stack.enter_context(client.acquire_block())
                             logger.info(f"got block {block}")
 
                             if block is None:
                                 break
 
-                            with benchmark_logger.trace("Process Block"):
-                                process_block(block)
+                            process_block(block)
 
             if self.num_cache_workers is not None:
                 workers = [
@@ -344,18 +336,16 @@ class BlockwiseTask(StrictBaseModel, ABC):
         Builds a `daisy.Task` that puts together everything necessary to run a task
         blockwise.
         """
-        benchmark_logger = self.get_benchmark_logger()
 
-        with benchmark_logger.trace("init"):
-            self.meta_dir.mkdir(parents=True, exist_ok=True)
-            self.init()
+        self.meta_dir.mkdir(parents=True, exist_ok=True)
+        self.init()
 
-            context = self.context_size
-            if not isinstance(context, Coordinate):
-                assert isinstance(context, tuple)
-                context_low, context_high = context[0], context[1]
-            else:
-                context_low, context_high = context, context
+        context = self.context_size
+        if not isinstance(context, Coordinate):
+            assert isinstance(context, tuple)
+            context_low, context_high = context[0], context[1]
+        else:
+            context_low, context_high = context, context
 
         with ExitStack() as stack:
             if multiprocessing:
@@ -363,12 +353,10 @@ class BlockwiseTask(StrictBaseModel, ABC):
             else:
                 stack.enter_context(array_scheduler(self.array_scheduler))
                 process_block_func = self.process_block_func()
-                with benchmark_logger.trace("Process Block Setup"):
-                    process_block = stack.enter_context(process_block_func)
+                process_block = stack.enter_context(process_block_func)
 
                 def process_func(block):
-                    with benchmark_logger.trace("Process Block"):
-                        process_block(block)
+                    process_block(block)
 
             task = daisy.Task(
                 self.task_name,
@@ -398,73 +386,6 @@ class BlockwiseTask(StrictBaseModel, ABC):
             )
 
             yield task
-
-    def get_benchmark_logger(self) -> BenchmarkLogger:
-        _benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
-        return BenchmarkLogger(
-            None,
-            task=self.task_name,
-        )
-
-    def spoof(self, spoof_dir: Path):
-        """
-        Whether or not to spoof the data inputs to this task.
-        """
-        data = {}
-        for name, _field in self.__class__.model_fields.items():
-            value = getattr(self, name)
-            if hasattr(value, "spoof"):
-                # If the value has a spoof method, call it to get a mock value
-                data[name] = value.spoof(spoof_dir)
-            else:
-                data[name] = value
-        return self.__class__(**data)
-
-    def benchmark(self, multiprocessing: bool = True) -> dict:
-        """
-        A helper function for benchmarking and debugging a blockwise task or pipeline.
-
-        Used as a "dry run" of `run_blockwise` without saving any outputs.
-
-        - Will not skip blocks that have already been processed. You can benchmark a task
-            that has already been run.
-        - Will not save any run artifacts such as block done datasets, output datasets,
-            graph nodes or edges, or look up tables. The only thing that will be saved are the
-            worker logs and a timing report.
-        """
-        from volara.logging import set_log_basedir
-
-        log_basedir = get_log_basedir()
-        set_log_basedir("volara_benchmark_logs")
-        benchmark_db_path = Path("volara_benchmark_logs/benchmark.db")
-        if benchmark_db_path.exists():
-            benchmark_db_path.unlink()
-        benchmark_logger = BenchmarkLogger(task=None, db_path=benchmark_db_path)
-        benchmark_logger._init_db()
-
-        spoof_dir = Path("volara_benchmark_logs/spoof")
-        debug_self = self.spoof(spoof_dir)
-
-        try:
-            with debug_self.task(multiprocessing=multiprocessing) as task:
-                tasks = [task]
-                if multiprocessing:
-                    # daisy v2 Server.run_blockwise returns the {task_id: TaskState} map.
-                    result = daisy.Server().run_blockwise(tasks)
-                else:
-                    result = daisy.run_blockwise(
-                        tasks, multiprocessing=False, return_states=True
-                    )
-
-        except Exception as e:
-            raise e
-
-        finally:
-            debug_self.drop()
-            benchmark_logger.print_report()
-            set_log_basedir(log_basedir)
-
-        return result
 
     def run_blockwise(
         self,

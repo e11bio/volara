@@ -832,111 +832,103 @@ class ExtractFrags(BlockwiseTask):
         rag_provider,
         mask: Array | None = None,
     ):
-        benchmark_logger = self.get_benchmark_logger()
 
-        with benchmark_logger.trace("Read Affs"):
-            affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
+        affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
-            if affs.dtype == np.uint8:
-                max_affinity_value = 255.0
-                affs_data = affs_data.astype(np.float64)
-            else:
-                max_affinity_value = 1.0
+        if affs.dtype == np.uint8:
+            max_affinity_value = 255.0
+            affs_data = affs_data.astype(np.float64)
+        else:
+            max_affinity_value = 1.0
 
-            if affs_data.max() < 1e-3:
-                return
+        if affs_data.max() < 1e-3:
+            return
 
-            affs_data /= max_affinity_value
+        affs_data /= max_affinity_value
 
         if mask is not None:
-            with benchmark_logger.trace("Read Mask"):
-                logger.debug("reading mask from %s", block.read_roi)
-                mask_data = mask.to_ndarray(block.read_roi, fill_value=0)
+            logger.debug("reading mask from %s", block.read_roi)
+            mask_data = mask.to_ndarray(block.read_roi, fill_value=0)
 
-                if len(mask_data.shape) == block.read_roi.dims + 1:
-                    # assume masking with raw data where data > 0
-                    mask_data = (np.min(mask_data, axis=0) > 0).astype(np.uint8)
+            if len(mask_data.shape) == block.read_roi.dims + 1:
+                # assume masking with raw data where data > 0
+                mask_data = (np.min(mask_data, axis=0) > 0).astype(np.uint8)
 
-                if np.max(mask_data) == 255:
-                    # should be ones
-                    mask_data = (mask_data > 0).astype(np.uint8)
+            if np.max(mask_data) == 255:
+                # should be ones
+                mask_data = (mask_data > 0).astype(np.uint8)
 
-                logger.debug("masking affinities")
-                affs_data *= mask_data
+            logger.debug("masking affinities")
+            affs_data *= mask_data
 
-        with benchmark_logger.trace("Compute Fragments"):
-            # the voxels of this read that hang past the stored volume, per side
-            in_volume = affs.roi.intersect(block.read_roi)
-            out_of_volume = (
-                (in_volume.begin - block.read_roi.begin) / affs.voxel_size,
-                (block.read_roi.end - in_volume.end) / affs.voxel_size,
-            )
-            fragments_data = self.get_fragments(
-                affs_data, voxel_size=affs.voxel_size, out_of_volume=out_of_volume
-            )
+        # the voxels of this read that hang past the stored volume, per side
+        in_volume = affs.roi.intersect(block.read_roi)
+        out_of_volume = (
+            (in_volume.begin - block.read_roi.begin) / affs.voxel_size,
+            (block.read_roi.end - in_volume.end) / affs.voxel_size,
+        )
+        fragments_data = self.get_fragments(
+            affs_data, voxel_size=affs.voxel_size, out_of_volume=out_of_volume
+        )
 
-            fragments = Array(
-                fragments_data,
-                offset=block.read_roi.offset,
-                voxel_size=frags.voxel_size,
-            )
+        fragments = Array(
+            fragments_data,
+            offset=block.read_roi.offset,
+            voxel_size=frags.voxel_size,
+        )
 
-        with benchmark_logger.trace("Relabel Fragments"):
-            fragments_data = fragments.to_ndarray(block.write_roi)
-            max_id = fragments_data.max()
+        fragments_data = fragments.to_ndarray(block.write_roi)
+        max_id = fragments_data.max()
 
-            fragments_data, max_id = relabel(fragments_data, return_num=True)
-            assert max_id < self.num_voxels_in_block, f"max_id: {max_id}"
+        fragments_data, max_id = relabel(fragments_data, return_num=True)
+        assert max_id < self.num_voxels_in_block, f"max_id: {max_id}"
 
-            # ensure unique IDs
-            id_bump = block.block_id[1] * self.num_voxels_in_block
+        # ensure unique IDs
+        id_bump = block.block_id[1] * self.num_voxels_in_block
 
-            fragments_data[fragments_data > 0] += id_bump
+        fragments_data[fragments_data > 0] += id_bump
 
-        with benchmark_logger.trace("Write Fragments"):
-            frags[block.write_roi] = fragments_data
+        frags[block.write_roi] = fragments_data
 
         # following only makes a difference if fragments were found
         if fragments_data.max() == 0:
             return
 
-        with benchmark_logger.trace("Compute Fragment Centers"):
-            fragment_centers = self.fragment_centers(
-                fragments_data,
-                block.write_roi.get_offset(),
-                affs.voxel_size,
+        fragment_centers = self.fragment_centers(
+            fragments_data,
+            block.write_roi.get_offset(),
+            affs.voxel_size,
+        )
+        logger.info("Found %d fragments", len(fragment_centers))
+
+        if self.bulk_write:
+            # since we drop indexes, the read_graph query has to check each
+            # node for containment which grows with cost as the db grows
+            rag = nx.Graph()
+        else:
+            rag = rag_provider[block.write_roi]
+            assert len(rag) == 0, "RAG should be empty"
+
+        for node, data in fragment_centers.items():
+            # centers
+            node_attrs = {
+                "position": data["center"],
+            }
+
+            node_attrs["size"] = int(data["size"])
+
+            rag.add_node(int(node), **node_attrs)
+
+        if self.bulk_write:
+            rag_provider.bulk_write_graph(
+                rag,
+                block.write_roi,
             )
-            logger.info("Found %d fragments", len(fragment_centers))
-
-        with benchmark_logger.trace("Update RAG"):
-            if self.bulk_write:
-                # since we drop indexes, the read_graph query has to check each
-                # node for containment which grows with cost as the db grows
-                rag = nx.Graph()
-            else:
-                rag = rag_provider[block.write_roi]
-                assert len(rag) == 0, "RAG should be empty"
-
-            for node, data in fragment_centers.items():
-                # centers
-                node_attrs = {
-                    "position": data["center"],
-                }
-
-                node_attrs["size"] = int(data["size"])
-
-                rag.add_node(int(node), **node_attrs)
-
-            if self.bulk_write:
-                rag_provider.bulk_write_graph(
-                    rag,
-                    block.write_roi,
-                )
-            else:
-                rag_provider.write_graph(
-                    rag,
-                    block.write_roi,
-                )
+        else:
+            rag_provider.write_graph(
+                rag,
+                block.write_roi,
+            )
 
     def _task_context(self, worker):
         if self.bulk_write:

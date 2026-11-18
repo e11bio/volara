@@ -113,38 +113,36 @@ class AffAgglom(BlockwiseTask):
         self.db.drop_edges()
 
     def agglomerate(self, affs: np.ndarray, frags: np.ndarray, rag: nx.Graph):
-        benchmark_logger = self.get_benchmark_logger()
 
-        with benchmark_logger.trace("Preprocess fragments"):
-            # Relabel fragments to a dense 1..k range so the cantor pairings in
-            # count_affs stay small. np.unique(return_inverse=True) is this
-            # relabel, done in C, rather than one full-array scan per fragment
-            # (which was O(n_frags * n_voxels)).
-            unique_vals, inverse = np.unique(frags, return_inverse=True)
+        # Relabel fragments to a dense 1..k range so the cantor pairings in
+        # count_affs stay small. np.unique(return_inverse=True) is this
+        # relabel, done in C, rather than one full-array scan per fragment
+        # (which was O(n_frags * n_voxels)).
+        unique_vals, inverse = np.unique(frags, return_inverse=True)
 
-            # 0 sorts first, so when background is present `inverse` already maps
-            # 0 -> 0 and fragments -> 1..k. When the block has NO background,
-            # `inverse` would map the lowest fragment id to 0 and silently turn it
-            # into background, so shift by one in that case.
-            has_background = unique_vals.size > 0 and unique_vals[0] == 0
-            frags = inverse.reshape(frags.shape)
-            if not has_background:
-                frags = frags + 1
-            frags = frags.astype(np.uint64)
+        # 0 sorts first, so when background is present `inverse` already maps
+        # 0 -> 0 and fragments -> 1..k. When the block has NO background,
+        # `inverse` would map the lowest fragment id to 0 and silently turn it
+        # into background, so shift by one in that case.
+        has_background = unique_vals.size > 0 and unique_vals[0] == 0
+        frags = inverse.reshape(frags.shape)
+        if not has_background:
+            frags = frags + 1
+        frags = frags.astype(np.uint64)
 
-            first_seq = 0 if has_background else 1
-            rev_mapping = {
-                seq + first_seq: int(orig) for seq, orig in enumerate(unique_vals)
-            }
-            num_frags = unique_vals.size - (1 if has_background else 0)
+        first_seq = 0 if has_background else 1
+        rev_mapping = {
+            seq + first_seq: int(orig) for seq, orig in enumerate(unique_vals)
+        }
+        num_frags = unique_vals.size - (1 if has_background else 0)
 
-            if num_frags == 0:
-                return
+        if num_frags == 0:
+            return
 
-            neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
+        neighborhood_affs: dict[Coordinate, dict[int, tuple[float, float]]] = {}
 
-            # affs_data.neighborhood cannot be None, assert called to make mypy happy
-            assert self.affs_data.neighborhood is not None
+        # affs_data.neighborhood cannot be None, assert called to make mypy happy
+        assert self.affs_data.neighborhood is not None
 
         def slices(offset: Coordinate):
             base_slice = tuple(
@@ -196,86 +194,76 @@ class AffAgglom(BlockwiseTask):
                 )
             }
 
-        with benchmark_logger.trace("Count affinities"):
-            for offset_affs, offset in zip(
-                affs, self.affs_data.neighborhood, strict=False
-            ):
-                neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
+        for offset_affs, offset in zip(affs, self.affs_data.neighborhood, strict=False):
+            neighborhood_affs[offset] = count_affs(frags, offset_affs, offset)
 
-        with benchmark_logger.trace("postprocess scores"):
-            for score_name, score_neighborhood in self.scores.items():
-                offset_counts = [
-                    neighborhood_affs[offset] for offset in score_neighborhood
-                ]
-                cantor_ids = set(chain(*[x.keys() for x in offset_counts]))
-                for cantor_id in cantor_ids:
-                    key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]
-                    total_count = sum([count[1] for count in key_counts])
-                    if total_count > 0:
-                        u, v = inv_cantor_number(cantor_id, dims=2)
-                        rag.add_edge(
-                            rev_mapping[u],
-                            rev_mapping[v],
-                            **{
-                                score_name: sum(
-                                    [
-                                        count[0] * count[1] / total_count
-                                        for count in key_counts
-                                    ]
-                                )
-                            },
-                        )
+        for score_name, score_neighborhood in self.scores.items():
+            offset_counts = [neighborhood_affs[offset] for offset in score_neighborhood]
+            cantor_ids = set(chain(*[x.keys() for x in offset_counts]))
+            for cantor_id in cantor_ids:
+                key_counts = [x.get(cantor_id, (1.0, 0.0)) for x in offset_counts]
+                total_count = sum([count[1] for count in key_counts])
+                if total_count > 0:
+                    u, v = inv_cantor_number(cantor_id, dims=2)
+                    rag.add_edge(
+                        rev_mapping[u],
+                        rev_mapping[v],
+                        **{
+                            score_name: sum(
+                                [
+                                    count[0] * count[1] / total_count
+                                    for count in key_counts
+                                ]
+                            )
+                        },
+                    )
 
     def agglomerate_in_block(
         self, block: Block, affs: Array, frags: Array, rag_provider: SQLGraphDataBase
     ):
-        benchmark_logger = self.get_benchmark_logger()
 
-        with benchmark_logger.trace("Read data in block"):
-            frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
+        frags_data = frags.to_ndarray(block.read_roi, fill_value=0)
 
-            if self.bulk_write:
-                rag = nx.Graph()
-            else:
-                rag = rag_provider[block.read_roi]
-                # Note: cannot assert rag.number_of_edges() == 0 — read_roi
-                # extends into neighboring blocks' write_rois (non-zero
-                # context, read_write_conflict=False), so once any neighbor
-                # commits its edges they show up here through the context
-                # overlap. The downstream write_graph(write_roi) filter is
-                # what keeps each edge attributed to a single block.
+        if self.bulk_write:
+            rag = nx.Graph()
+        else:
+            rag = rag_provider[block.read_roi]
+            # Note: cannot assert rag.number_of_edges() == 0 — read_roi
+            # extends into neighboring blocks' write_rois (non-zero
+            # context, read_write_conflict=False), so once any neighbor
+            # commits its edges they show up here through the context
+            # overlap. The downstream write_graph(write_roi) filter is
+            # what keeps each edge attributed to a single block.
 
-            affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
+        affs_data = affs.to_ndarray(block.read_roi, fill_value=0)
 
-            if affs_data.dtype == np.uint8:
-                affs_data = affs_data.astype(np.float32) / 255.0
+        if affs_data.dtype == np.uint8:
+            affs_data = affs_data.astype(np.float32) / 255.0
 
-        with benchmark_logger.trace("Agglomerate"):
-            self.agglomerate(
-                affs_data,
-                frags_data,
-                rag,
-            )
+        self.agglomerate(
+            affs_data,
+            frags_data,
+            rag,
+        )
 
-        with benchmark_logger.trace("Write RAG edges"):
-            if self.bulk_write:
-                # In bulk mode the rag's nodes are bare (auto-created by
-                # add_edge), so funlib's bulk_write_edges roi/position
-                # filter would drop every edge — every node looks like
-                # "no position". Filter here by fragment id instead: emit
-                # edge (u, v) iff min(u, v) has voxels in block.write_roi.
-                # Fragments that straddle block boundaries may be emitted
-                # by more than one block; INSERT OR IGNORE in the bulk
-                # insert keeps the first writer's row.
-                write_frags_data = frags.to_ndarray(block.write_roi, fill_value=0)
-                home_ids = {int(i) for i in np.unique(write_frags_data) if i != 0}
-                filtered = nx.Graph()
-                for u, v, data in rag.edges(data=True):
-                    if min(int(u), int(v)) in home_ids:
-                        filtered.add_edge(u, v, **data)
-                rag_provider.bulk_write_edges(filtered.nodes, filtered.edges, roi=None)
-            else:
-                rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
+        if self.bulk_write:
+            # In bulk mode the rag's nodes are bare (auto-created by
+            # add_edge), so funlib's bulk_write_edges roi/position
+            # filter would drop every edge — every node looks like
+            # "no position". Filter here by fragment id instead: emit
+            # edge (u, v) iff min(u, v) has voxels in block.write_roi.
+            # Fragments that straddle block boundaries may be emitted
+            # by more than one block; INSERT OR IGNORE in the bulk
+            # insert keeps the first writer's row.
+            write_frags_data = frags.to_ndarray(block.write_roi, fill_value=0)
+            home_ids = {int(i) for i in np.unique(write_frags_data) if i != 0}
+            filtered = nx.Graph()
+            for u, v, data in rag.edges(data=True):
+                if min(int(u), int(v)) in home_ids:
+                    filtered.add_edge(u, v, **data)
+            rag_provider.bulk_write_edges(filtered.nodes, filtered.edges, roi=None)
+        else:
+            rag_provider.write_graph(rag, block.write_roi, write_nodes=False)
 
     def _task_context(self, worker):
         if self.bulk_write:

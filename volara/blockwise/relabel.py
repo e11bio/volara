@@ -89,27 +89,22 @@ class Relabel(BlockwiseTask):
         )
 
     def map_block(self, block, frags, segs, src_sorted, dst_sorted):
-        benchmark_logger = self.get_benchmark_logger()
 
-        with benchmark_logger.trace("Read Frags"):
-            in_frags = np.ascontiguousarray(frags.to_ndarray(block.write_roi))
+        in_frags = np.ascontiguousarray(frags.to_ndarray(block.write_roi))
 
-        with benchmark_logger.trace("Filter Mapping"):
-            block_src, block_dst = filter_mapping_to_block(
-                in_frags,
-                src_sorted,
-                dst_sorted,
-            )
+        block_src, block_dst = filter_mapping_to_block(
+            in_frags,
+            src_sorted,
+            dst_sorted,
+        )
 
-        with benchmark_logger.trace("Relabel"):
-            out_segs = replace_values_sorted(
-                in_frags,
-                block_src,
-                block_dst,
-            )
+        out_segs = replace_values_sorted(
+            in_frags,
+            block_src,
+            block_dst,
+        )
 
-        with benchmark_logger.trace("Write Segments"):
-            segs[block.write_roi] = out_segs
+        segs[block.write_roi] = out_segs
 
     @contextmanager
     def process_block_func(self):
