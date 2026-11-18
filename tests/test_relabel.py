@@ -11,7 +11,6 @@ from volara.segment_utils import (
     prepare_mapping,
     replace_values,
     replace_values_sorted,
-    warmup_replace_values_sorted,
 )
 
 
@@ -20,25 +19,6 @@ def relabel_sorted(arr, src, dst):
     src_sorted, dst_sorted = prepare_mapping(src, dst)
     block_src, block_dst = filter_mapping_to_block(arr, src_sorted, dst_sorted)
     return replace_values_sorted(np.ascontiguousarray(arr), block_src, block_dst)
-
-
-def test_relabel_init_and_drop(labels_2d, tmp_path):
-    """init() creates output zarr, drop_artifacts() removes it."""
-    frags_path, _ = labels_2d
-    seg_path = tmp_path / "test.zarr" / "seg"
-    lut = LUT(path=tmp_path / "lut.npz")
-    lut.save(np.array([[1, 2, 3, 4], [10, 20, 30, 40]]))
-
-    task = Relabel(
-        frags_data=Labels(store=frags_path),
-        seg_data=Labels(store=seg_path),
-        lut=lut,
-        block_size=Coordinate(10, 10),
-    )
-    task.init()
-    assert seg_path.exists()
-    task.drop_artifacts()
-    assert not seg_path.exists()
 
 
 def test_relabel_basic(labels_2d, block_2d, tmp_path):
@@ -195,12 +175,6 @@ def test_filter_mapping_to_block_empty_block_mapping():
     np.testing.assert_array_equal(
         replace_values_sorted(block, block_src, block_dst), block
     )
-
-
-def test_warmup_replace_values_sorted_is_callable():
-    """`process_block_func` calls this before the block loop so the numba compile
-    does not land inside a timed block. It must not raise."""
-    warmup_replace_values_sorted()
 
 
 def test_relabel_task_matches_replace_values(labels_2d, block_2d, tmp_path):

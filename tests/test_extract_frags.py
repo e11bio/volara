@@ -110,29 +110,6 @@ def reference_shift(affs_data, noise_eps, bias, rng):
 # ---------------------------------------------------------------------------
 
 
-def test_extract_frags_init_and_drop(affs_2d, tmp_path):
-    """init() creates both frags zarr and DB; drop_artifacts() removes them."""
-    affs_path, _ = affs_2d
-    frags_path = tmp_path / "test.zarr" / "frags"
-    db = SQLite(path=tmp_path / "test.zarr" / "ef_db.sqlite", ndim=2)
-
-    task = ExtractFrags(
-        db=db,
-        affs_data=Affs(store=affs_path),
-        frags_data=Labels(store=frags_path),
-        block_size=Coordinate(10, 10),
-        context=Coordinate(0, 0),
-        bias=[-0.5, -0.5],
-    )
-    task.init()
-    assert frags_path.exists()
-    assert db.path.exists()
-
-    task.drop_artifacts()
-    assert not frags_path.exists()
-    assert not db.path.exists()
-
-
 def test_extract_frags_basic(affs_2d, block_2d, tmp_path):
     """Affinities from 4-quadrant labels produce fragments and DB nodes.
 

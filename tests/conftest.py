@@ -16,19 +16,44 @@ def logdir(tmp_path):
     set_log_basedir(tmp_path / "volara_logs")
 
 
-@pytest.fixture()
-def zarr_2d(tmp_path) -> tuple[Path, np.ndarray]:
-    """10x10 float32 array, voxel_size=(1,1), values in [0,1]."""
-    data = np.random.default_rng(42).random((10, 10), dtype=np.float32)
-    path = tmp_path / "test.zarr" / "raw"
-    arr = prepare_ds(
+def write_zarr(path: Path, data: np.ndarray) -> Path:
+    """Write ``data`` as a zarr array with unit voxels."""
+    prepare_ds(
         path,
         shape=data.shape,
         voxel_size=Coordinate(1, 1),
         dtype=data.dtype,
         mode="w",
-    )
-    arr[:] = data
+    )[:] = data
+    return path
+
+
+@pytest.fixture()
+def gradient_20x10(tmp_path) -> tuple[Path, np.ndarray]:
+    """20x10 float32 ramp from 0 to 1: two 10x10 blocks."""
+    data = np.linspace(0, 1, 200, dtype=np.float32).reshape(20, 10)
+    return write_zarr(tmp_path / "data.zarr" / "raw", data), data
+
+
+@pytest.fixture()
+def blocks_20x10() -> list[daisy.Block]:
+    """The two 10x10 blocks that tile Roi((0,0),(20,10))."""
+    return [
+        daisy.Block(
+            total_roi=Roi((0, 0), (20, 10)),
+            read_roi=Roi((offset, 0), (10, 10)),
+            write_roi=Roi((offset, 0), (10, 10)),
+        )
+        for offset in (0, 10)
+    ]
+
+
+@pytest.fixture()
+def zarr_2d(tmp_path) -> tuple[Path, np.ndarray]:
+    """10x10 float32 array, voxel_size=(1,1), values in [0,1]."""
+    data = np.random.default_rng(42).random((10, 10), dtype=np.float32)
+    path = tmp_path / "test.zarr" / "raw"
+    write_zarr(path, data)
     return path, data
 
 
@@ -41,14 +66,7 @@ def labels_2d(tmp_path) -> tuple[Path, np.ndarray]:
     data[5:, :5] = 3
     data[5:, 5:] = 4
     path = tmp_path / "test.zarr" / "labels"
-    arr = prepare_ds(
-        path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )
-    arr[:] = data
+    write_zarr(path, data)
     return path, data
 
 
@@ -77,14 +95,7 @@ def frags_2d(tmp_path) -> tuple[Path, np.ndarray]:
     data = np.zeros((10, 10), dtype=np.uint64)
     data[:, :] = np.arange(1, 11)[:, None]
     path = tmp_path / "test.zarr" / "frags"
-    arr = prepare_ds(
-        path,
-        shape=data.shape,
-        voxel_size=Coordinate(1, 1),
-        dtype=data.dtype,
-        mode="w",
-    )
-    arr[:] = data
+    write_zarr(path, data)
     return path, data
 
 

@@ -138,59 +138,107 @@ def test_lsf_command_is_blocking_bsub(cluster_shims):
     assert cmd.count("-J") == 1, cmd
 
 
-def test_get_command_names_job_after_task(cluster_shims, monkeypatch, tmp_path):
-    """End-to-end: get_command (what daisy's spawn function runs) names the slurm
-    worker job after its task, so workers are identifiable in squeue."""
+@pytest.fixture()
+def worker_context(monkeypatch, tmp_path):
+    """The daisy worker context ``get_command`` reads, without a running server."""
     import daisy
 
-    # Provide the daisy worker context get_command reads, without a running server.
     monkeypatch.setenv("DAISY_CONTEXT", "worker_id=0:task_id=mytask")
     monkeypatch.setattr(
         daisy.logging, "get_worker_log_basename", lambda wid, tid: tmp_path
     )
 
+
+def test_get_command_names_job_after_task(cluster_shims, worker_context, tmp_path):
+    """End-to-end: get_command (what daisy's spawn function runs) names the slurm
+    worker job after its task, so workers are identifiable in squeue."""
     cmd = workers.SlurmWorker(queue="gpu-q").get_command(tmp_path / "c.json", "mytask")
     assert cmd[0] == "sbatch" and cmd[1] == "--wait", cmd
     assert "--job-name=mytask" in cmd, cmd
 
 
-def test_get_command_requests_the_workers_configured_memory(
-    cluster_shims, monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    "memory, flags",
+    [({}, ["--mem=15564"]), ({"memory": 131072}, ["--mem=131072"])],
+)
+def test_get_command_requests_the_workers_memory(
+    cluster_shims, worker_context, tmp_path, memory, flags
 ):
-    """REGRESSION. `get_slurm_command` has always accepted `memory=`, but `get_command` -- the path
-    daisy actually spawns workers through -- never passed one, so EVERY SlurmWorker silently got the
-    15564 MB default with no way to ask for more.
-
-    That is not a tuning nicety: it caps what a blockwise task can do at all. A task whose block is
-    large cannot run on a worker, and pushing such a task onto the fan-out path moves the
-    computation to a machine SMALLER than the driver it came from. e11bio/volara-surface's
-    whole-face surface postprocess hit exactly this -- a 134 GiB computation dispatched to a 15.2 G
-    worker."""
-    import daisy
-
-    monkeypatch.setenv("DAISY_CONTEXT", "worker_id=0:task_id=mytask")
-    monkeypatch.setattr(
-        daisy.logging, "get_worker_log_basename", lambda wid, tid: tmp_path
-    )
-
-    cmd = workers.SlurmWorker(queue="q", memory=131072).get_command(
+    """``get_command`` is the path daisy spawns workers through: it asks slurm for
+    the worker's ``memory`` in MB, 15564 unless configured."""
+    cmd = workers.SlurmWorker(queue="q", **memory).get_command(
         tmp_path / "c.json", "mytask"
     )
-    assert "--mem=131072" in cmd, cmd
-    assert "--mem=15564" not in cmd, cmd
+    assert [arg for arg in cmd if arg.startswith("--mem")] == flags
 
 
-def test_worker_memory_defaults_to_the_historical_value(
-    cluster_shims, monkeypatch, tmp_path
+def test_lsf_get_command_names_the_job_and_logs_beside_the_worker_log(
+    cluster_shims, worker_context, tmp_path
 ):
-    """The new field must not change any existing pipeline: a worker that says nothing about memory
-    still asks for exactly what it asked for before."""
-    import daisy
-
-    monkeypatch.setenv("DAISY_CONTEXT", "worker_id=0:task_id=mytask")
-    monkeypatch.setattr(
-        daisy.logging, "get_worker_log_basename", lambda wid, tid: tmp_path
+    cmd = workers.LSFWorker(queue="gpu-q", num_cpus=4, num_gpus=2).get_command(
+        tmp_path / "c.json", "mytask"
     )
+    assert cmd == [
+        "bsub",
+        "-K",
+        "-J",
+        "mytask",
+        "-n",
+        "4",
+        "-num-gpus",
+        "2",
+        "-q",
+        "gpu-q",
+        "-o",
+        str(tmp_path / "lsf_worker.log"),
+        "-e",
+        str(tmp_path / "lsf_worker.err"),
+        "volara-cli",
+        "blockwise-worker",
+        "-c",
+        str(tmp_path / "c.json"),
+    ]
 
-    cmd = workers.SlurmWorker(queue="q").get_command(tmp_path / "c.json", "mytask")
-    assert "--mem=15564" in cmd, cmd
+
+def test_slurm_command_appends_gpus_constraint_and_extra_flags(cluster_shims):
+    cmd = workers.SlurmWorker(queue="q").get_slurm_command(
+        command=["volara-cli"],
+        num_gpus=2,
+        constraint="a100",
+        flags=["--time=60"],
+    )
+    assert cmd == [
+        "sbatch",
+        "--wait",
+        "--ntasks=1",
+        "--cpus-per-task=1",
+        "--gpus=2",
+        "--mem=15564",
+        "--constraint=a100",
+        "--output=%x_%j.log",
+        "--error=%x_%j.err",
+        "--time=60",
+        "--wrap=volara-cli",
+    ]
+
+
+@pytest.mark.parametrize(
+    "build_command, message",
+    [
+        (
+            lambda: workers.SlurmWorker(queue="q").get_slurm_command(command=["x"]),
+            "sbatch is not installed or not in PATH",
+        ),
+        (
+            lambda: workers.LSFWorker(queue="q").get_lsf_command(command=["x"]),
+            "bsub is not installed or not in PATH",
+        ),
+    ],
+    ids=["slurm", "lsf"],
+)
+def test_a_missing_scheduler_binary_is_reported_as_not_installed(
+    monkeypatch, tmp_path, build_command, message
+):
+    monkeypatch.setenv("PATH", str(tmp_path))  # an empty directory
+    with pytest.raises(OSError, match=message):
+        build_command()

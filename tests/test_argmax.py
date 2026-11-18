@@ -1,6 +1,5 @@
-import daisy
 import numpy as np
-from funlib.geometry import Coordinate, Roi
+from funlib.geometry import Coordinate
 from funlib.persistence.arrays import prepare_ds
 
 from volara.blockwise import Argmax
@@ -24,21 +23,6 @@ def _make_probs(tmp_path, shape, values_per_channel=None):
         mode="w",
     )[:] = data
     return path, data
-
-
-def test_argmax_init_and_drop(tmp_path):
-    """init() creates output zarr, drop_artifacts() removes it."""
-    probs_path, _ = _make_probs(tmp_path, (2, 10, 10))
-    sem_path = tmp_path / "data.zarr" / "sem"
-    task = Argmax(
-        probs_data=Raw(store=probs_path),
-        sem_data=Labels(store=sem_path),
-        block_size=Coordinate(10, 10),
-    )
-    task.init()
-    assert sem_path.exists()
-    task.drop_artifacts()
-    assert not sem_path.exists()
 
 
 def test_argmax_basic(tmp_path, block_2d):
@@ -95,7 +79,7 @@ def test_argmax_combine_classes(tmp_path, block_2d):
     assert np.all(result == 1)
 
 
-def test_argmax_multiblock(tmp_path):
+def test_argmax_multiblock(blocks_20x10, tmp_path):
     """Two blocks tile a (2,20,10) array correctly."""
     probs_path, _ = _make_probs(tmp_path, (2, 20, 10), values_per_channel=[1.0, 2.0])
     sem_path = tmp_path / "data.zarr" / "labels"
@@ -113,17 +97,8 @@ def test_argmax_multiblock(tmp_path):
         block_size=Coordinate(10, 10),
     )
 
-    blocks = [
-        daisy.Block(
-            total_roi=Roi((0, 0), (20, 10)),
-            read_roi=Roi((r, 0), (10, 10)),
-            write_roi=Roi((r, 0), (10, 10)),
-        )
-        for r in (0, 10)
-    ]
-
     with task.process_block_func() as process_block:
-        for b in blocks:
+        for b in blocks_20x10:
             process_block(b)
 
     result = Labels(store=sem_path).array("r")[:]

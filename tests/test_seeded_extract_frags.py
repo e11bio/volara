@@ -9,18 +9,49 @@ from volara.datasets import Affs, Labels
 from volara.dbs import SQLite
 
 
-def test_seeded_extract_frags_api_conformance():
-    required = [
-        "task_name",
-        "write_roi",
-        "write_size",
-        "context_size",
-        "drop_artifacts",
-        "init",
-        "process_block_func",
-    ]
-    for attr in required:
-        assert hasattr(SeededExtractFrags, attr), f"Missing {attr}"
+def test_seeded_extract_frags_grows_each_skeleton_through_the_affinities(tmp_path):
+    """3D affinities cut along z between two skeleton nodes: every voxel takes the
+    ``skeleton_id`` of the node on its side of the cut."""
+    affs_data = np.full((3, 10, 10, 10), 0.9, dtype=np.float32)
+    affs_data[0, 4] = 0.0  # no z-affinity between planes 4 and 5
+    affs_path = tmp_path / "data.zarr" / "affs"
+    arr = prepare_ds(
+        affs_path,
+        shape=affs_data.shape,
+        voxel_size=Coordinate(1, 1, 1),
+        dtype=affs_data.dtype,
+        mode="w",
+    )
+    arr[:] = affs_data
+    arr._source_data.attrs["neighborhood"] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+
+    db = SQLite(
+        path=tmp_path / "skeletons.sqlite",
+        node_attrs={"skeleton_id": "int"},
+        ndim=3,
+    )
+    db.init()
+    graph_provider = db.open("r+")
+    g = graph_provider.read_graph()
+    g.add_node(1, position=(2, 5, 5), skeleton_id=100)
+    g.add_node(2, position=(7, 5, 5), skeleton_id=200)
+    graph_provider.write_graph(g)
+
+    task = SeededExtractFrags(
+        affs_data=Affs(store=affs_path),
+        segs_data=Labels(store=tmp_path / "data.zarr" / "segs"),
+        block_size=Coordinate(10, 10, 10),
+        context=Coordinate(0, 0, 0),
+        bias=[-0.5, -0.5, -0.5],
+        graph_db=db,
+    )
+    state = task.run_blockwise(multiprocessing=False)[task.task_name]
+
+    assert (state.completed_count, state.failed_count) == (1, 0)
+    expected = np.empty((10, 10, 10), dtype=np.uint64)
+    expected[:5] = 100
+    expected[5:] = 200
+    np.testing.assert_array_equal(task.segs_data.array("r")[:], expected)
 
 
 @pytest.mark.xfail(

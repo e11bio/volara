@@ -6609,7 +6609,7 @@ requires-dist = [
     { name = "iohub", specifier = ">=0.3.0a5" },
     { name = "lazy-loader", specifier = ">=0.4" },
     { name = "llvmlite", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "!=0.44.*,<0.46" },
-    { name = "mwatershed", specifier = ">=0.5.2" },
+    { name = "mwatershed", specifier = ">=0.6.0" },
     { name = "numba", specifier = ">=0.59.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.6.3" },
@@ -6624,7 +6624,7 @@ provides-extras = ["s3"]
 dev = [
     { name = "pandas", specifier = ">=3.0.0" },
     { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-cov", specifier = ">=5.0" },
+    { name = "pytest-cov", specifier = ">=7.0" },
     { name = "ruff", specifier = ">=0.17.3" },
     { name = "ty", specifier = ">=0.0.96" },
 ]
