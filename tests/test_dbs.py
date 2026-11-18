@@ -243,15 +243,13 @@ def test_csr_pipeline_matches_sqlite(bulk):
         assert got[pair]["aff"] == pytest.approx(data["aff"]), pair
 
 
-def test_csr_drop_edges_spoof_and_drop(bulk):
+def test_csr_drop_edges_and_drop(bulk):
     from funlib.geometry import Coordinate
 
     db = bulk.db("csr", csr=True)
     bulk.extract_frags(db, "csr", False, Coordinate(10, 10), Coordinate(2, 2))
     bulk.aff_agglom(db, "csr", False, Coordinate(10, 10), Coordinate(2, 2))
     nodes = bulk.nodes(db)
-    spoofed = db.spoof()
-    assert bulk.nodes(spoofed) == nodes and not bulk.edges(spoofed)
     db.drop_edges()
     assert bulk.nodes(db) == nodes and not bulk.edges(db)
     db.drop()

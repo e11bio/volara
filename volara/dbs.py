@@ -331,16 +331,3 @@ class CSR(DB):
         except RuntimeError:
             return
         db.drop_edges()
-
-    def spoof(self, nodes: bool = True):
-        spoofed_db = self.__class__(
-            path=self.local.parent / f"spoofed_{self.local.name}",
-            **self.model_dump(exclude={"path"}),
-        )
-        spoofed = spoofed_db.open("w")
-        if nodes:
-            columns, _ = self.open("r").read_arrays(edge_attrs=[])
-            ids = columns.pop("id")
-            columns.pop("step")
-            spoofed.write_node_arrays(ids, **columns)
-        return spoofed_db
