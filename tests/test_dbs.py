@@ -277,3 +277,44 @@ def test_csr_arrays_are_rebuilt_once_per_task(bulk, monkeypatch):
     assert len(builds) == 1
     bulk.aff_agglom(db, "csr", False, Coordinate(5, 5), Coordinate(2, 2))
     assert len(builds) == 2
+
+
+def test_csr_opens_a_store_without_the_default_attributes(tmp_path):
+    """A store that volara did not write has no `filtered` and no `distance`.
+    It opens for reading; an attribute that was asked for by name still has to
+    be there; creating a store still gives it the defaults."""
+    import numpy as np
+    from funlib.persistence.graphs import CSRGraphDataBase
+    from funlib.persistence.types import Vec
+
+    from volara.dbs import CSR
+
+    path = tmp_path / "bare.csr"
+    bare = CSRGraphDataBase(
+        path,
+        mode="w",
+        node_attrs={"position": Vec(float, 3)},
+        edge_attrs={"adj_weight": "float32"},
+        cell_size=10.0,
+    )
+    with bare.bulk_write_mode():
+        bare.write_node_arrays(
+            np.array([1, 2], dtype=np.uint64),
+            position=np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]),
+        )
+        bare.write_edge_arrays(np.array([1]), np.array([2]), adj_weight=np.array([0.5]))
+
+    for mode in ("r", "r+"):
+        provider = CSR(path=path).open(mode)
+        assert sorted(provider.node_attrs) == ["position"]
+        assert sorted(provider.edge_attrs) == ["adj_weight"]
+        assert provider.num_edges == 1
+    assert CSR(path=path, edge_attrs={"adj_weight": "float"}).open("r").num_nodes == 2
+    with pytest.raises(ValueError, match="'lr_weight' is not in"):
+        CSR(path=path, edge_attrs={"lr_weight": "float"}).open("r")
+    with pytest.raises(ValueError, match="'size' is not in"):
+        CSR(path=path, node_attrs={"size": "int"}).open("r")
+
+    created = CSR(path=tmp_path / "new.csr").open("w")
+    assert sorted(created.node_attrs) == ["filtered", "position", "size"]
+    assert sorted(created.edge_attrs) == ["distance"]

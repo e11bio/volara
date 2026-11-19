@@ -15,7 +15,7 @@ from pydantic import Field
 from volara.lut import LUT, LUTS
 from volara.segment_utils import replace_values
 
-from ..dbs import CSR, PostgreSQL, SQLite
+from ..dbs import CSR, GraphProvider, PostgreSQL, SQLite
 from ..utils import PydanticCoordinate
 from .blockwise import BlockwiseTask
 
@@ -31,6 +31,15 @@ class GraphMWS(BlockwiseTask):
     Currently only supports executing in memory. The full graph for the given ROI
     is read into memory and then we run the mutex watershed algorithm on the full
     graph to get a globally optimal look up table.
+
+    A database that reads as arrays (:class:`~volara.dbs.CSR`) is read and
+    clustered as arrays, without a Python object per edge, unless
+    ``mean_attrs`` asks for segment attributes. Both paths order the edges by
+    decreasing ``|score|``; edges with equal ``|score|`` keep the order the
+    database returned them in, an edge's attributes in the order of
+    ``weights``. Where scores tie, two databases holding the same graph can
+    therefore give different partitions. The array path saves the look up
+    table without the list of edges the other path stores beside it.
     """
 
     task_type: Literal["graph-mws"] = "graph-mws"
@@ -116,12 +125,81 @@ class GraphMWS(BlockwiseTask):
         if self.out_db is not None:
             self.out_db.drop()
 
+    def cluster_arrays(
+        self,
+        rag_provider: GraphProvider,
+        read_roi: Roi | None,
+        starting_lut: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """
+        The look up table of the graph in ``read_roi``, read and clustered
+        as arrays: a ``(2, N)`` array of fragment ids and their segment ids.
+        """
+        nodes, edges = rag_provider.read_arrays(  # ty: ignore[unresolved-attribute]
+            read_roi, node_attrs=[], edge_attrs=list(self.weights)
+        )
+        scores = np.stack(
+            [
+                w * np.asarray(edges[attr], dtype=np.float64) + b
+                for attr, (w, b) in self.weights.items()
+            ],
+            axis=1,
+        )
+        present = ~np.isnan(scores)
+        if self.edge_per_attr:
+            # one edge per attribute an edge has, an edge's attributes together
+            u = np.broadcast_to(edges["u"][:, None], scores.shape)[present]
+            v = np.broadcast_to(edges["v"][:, None], scores.shape)[present]
+            score = scores[present]
+        else:
+            # an edge with none of the attributes scores 0, which repels
+            u, v = edges["u"], edges["v"]
+            score = np.where(present, scores, 0.0).sum(axis=1)
+
+        prefix = None
+        if starting_lut is not None:
+            starting_frags, starting_segs = starting_lut
+            by_frag = np.argsort(starting_frags, kind="stable")
+            at = np.searchsorted(starting_frags, nodes["id"], sorter=by_frag)
+            at[at == len(by_frag)] = 0
+            rows = by_frag[at] if len(by_frag) else at
+            if len(by_frag) == 0 or (starting_frags[rows] != nodes["id"]).any():
+                raise KeyError("the starting LUT does not hold every node of the graph")
+            segments = np.asarray(starting_segs)[rows]
+            by_segment = np.argsort(segments, kind="stable")
+            ids, segments = nodes["id"][by_segment], segments[by_segment]
+            together = segments[1:] == segments[:-1]
+            prefix = (
+                ids[:-1][together],
+                ids[1:][together],
+                np.ones(int(together.sum()), dtype=bool),
+            )
+
+        if len(u) == 0 and (prefix is None or len(prefix[0]) == 0):
+            return np.zeros((2, 0), dtype=np.uint64)
+        fragments, segments = mws.cluster_arrays(u, v, score, prefix=prefix)
+        return np.stack([fragments, segments])
+
     @contextmanager
     def process_block_func(self):
         rag_provider = self.db.open("r+")
 
         if self.out_db is not None:
             out_rag_provider = self.out_db.open("w")
+
+        if hasattr(rag_provider, "read_arrays") and self.mean_attrs is None:
+
+            def process_block_arrays(block: daisy.Block):
+                read_roi = block.write_roi if self.bounded_read else None
+                starting = (
+                    self.starting_lut.load() if self.starting_lut is not None else None
+                )
+                if self.starting_lut is not None:
+                    assert starting is not None, "Unable to load starting LUT"
+                self.lut.save(self.cluster_arrays(rag_provider, read_roi, starting))
+
+            yield process_block_arrays
+            return
 
         if self.starting_lut is not None:
             starting_lut = self.starting_lut.load()
