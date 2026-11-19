@@ -9,6 +9,7 @@ from .blockwise import BlockwiseTask
 from .distance_agglom import (
     DistanceAgglom as DistanceAgglom,
 )
+from .edge_similarity import EdgeSimilarity as EdgeSimilarity
 from .extract_frags import ExtractFrags as ExtractFrags
 from .graph_mws import GraphMWS as GraphMWS
 from .intensity_correction import CLAHE as CLAHE
@@ -73,6 +74,7 @@ __all__ = [
     "Argmax",
     "ComputeShift",
     "DistanceAgglom",
+    "EdgeSimilarity",
     "ExtractFrags",
     "GraphMWS",
     "Relabel",

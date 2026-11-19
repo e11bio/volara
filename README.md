@@ -72,6 +72,7 @@ This diagram visualizes the lifetime of a block in volara. On the left we are re
 - `SeededExtractFrags`: Constrained fragment extraction via mutex watershed that accepts skeletonized seed points
 - `ArgMax`: Argmax accross predicted probabilities
 - `DistanceAgglom`: Supervoxel distance score edge creation, computed between stored supervoxel embeddings. 
+- `EdgeSimilarity`: Edge scores from the similarity of per-node vectors (e.g. a graph model's embedding), read from the graph alone
 - `ComputeShift`: Compute shift between moving and fixed image using phase cross correlation
 - `ApplyShift`: Apply computed shift to register moving image to fixed image
 - `Threshold`: Intensity threshold an array
