@@ -403,3 +403,39 @@ def test_task_is_found_by_its_type():
 
     discover_tasks()
     assert get_task("edge-similarity") is EdgeSimilarity
+
+
+def test_a_block_of_empty_space_inside_the_graph_is_skipped(tmp_path):
+    """Two nodes at the far corners: most blocks lie inside the extent of the
+    graph and hold nothing."""
+    source = CSRGraphDataBase(
+        tmp_path / "rag.csr",
+        mode="w",
+        node_attrs={"position": Vec(float, 3)},
+        edge_attrs={"adj_weight": "float32"},
+        cell_size=10.0,
+    )
+    with source.bulk_write_mode():
+        source.write_node_arrays(
+            np.array([1, 2], dtype=np.uint64),
+            position=np.array([[5.0, 5.0, 5.0], [95.0, 95.0, 95.0]]),
+        )
+        source.write_edge_arrays(np.array([1]), np.array([2]), adj_weight=np.array([1]))
+    vectors = NodeArrays(path=tmp_path / "vectors")
+    vectors.save(np.array([1, 2]), {"embedding": np.array([[1.0, 0.0], [1.0, 1.0]])})
+    task = EdgeSimilarity(
+        db=CSR(path=tmp_path / "rag.csr"),
+        out_db=CSR(
+            path=tmp_path / "scored.csr",
+            edge_attrs={"adj_similarity": "float"},
+            cell_size=10.0,
+        ),
+        vectors=vectors,
+        scores={"adj_similarity": "adj_weight"},
+        block_size=Coordinate(20, 20, 20),
+    )
+    state = run(task)
+    assert state.completed_count == 125
+    graph = task.out_db.open("r").read_graph()
+    assert sorted(graph.nodes) == [1, 2]
+    assert graph.edges[1, 2]["adj_similarity"] == pytest.approx(np.sqrt(0.5))

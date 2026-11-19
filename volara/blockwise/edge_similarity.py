@@ -206,6 +206,36 @@ class EdgeSimilarity(BlockwiseTask):
     def _presence_attrs(self) -> list[str]:
         return sorted({attr for attr in self.scores.values() if attr is not None})
 
+    @staticmethod
+    def _read_arrays(
+        provider: CSRGraphDataBase, roi: Roi, node_attrs: list[str], edge_attrs
+    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+        """``read_arrays`` of ``roi`` and one edge step. funlib.persistence
+        0.9.0 raises on a region inside the extent of the graph whose grid
+        cells hold no node, where the answer is the empty graph."""
+        try:
+            return provider.read_arrays(
+                roi, num_steps=1, node_attrs=node_attrs, edge_attrs=edge_attrs
+            )
+        except ValueError as error:
+            if "cannot reshape array of size 0" not in str(error):
+                raise
+        types = provider.node_attrs
+        nodes: dict[str, np.ndarray] = {
+            "id": np.zeros(0, dtype=np.uint64),
+            "step": np.zeros(0, dtype=np.int16),
+        }
+        for name in node_attrs:
+            size = getattr(types[name], "size", 0)
+            nodes[name] = np.zeros((0, size) if size else (0,))
+        edges: dict[str, np.ndarray] = {
+            "u": np.zeros(0, dtype=np.uint64),
+            "v": np.zeros(0, dtype=np.uint64),
+        }
+        for name in edge_attrs:
+            edges[name] = np.zeros(0)
+        return nodes, edges
+
     def read_block(
         self, provider: GraphProvider, roi: Roi
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
@@ -222,8 +252,8 @@ class EdgeSimilarity(BlockwiseTask):
         position = provider.position_attribute
         copied = [a for a in self.copy_node_attrs if a in provider.node_attrs]
         if isinstance(provider, CSRGraphDataBase):
-            read, edges = provider.read_arrays(
-                roi, num_steps=1, node_attrs=[position, *copied], edge_attrs=presence
+            read, edges = self._read_arrays(
+                provider, roi, [position, *copied], presence
             )
             own = read["step"] == 0
             nodes = {"id": read["id"][own], "position": read[position][own]}
