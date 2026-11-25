@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795030888100,
+  "lastUpdate": 1795627213823,
   "repoUrl": "https://github.com/e11bio/volara",
   "entries": {
     "volara": [
@@ -488,6 +488,41 @@ window.BENCHMARK_DATA = {
           {
             "name": "pytest wall time",
             "value": 57.19,
+            "unit": "s",
+            "extra": "`uv run pytest --cov-report=xml` in the tests job"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "William Patton",
+            "username": "pattonw",
+            "email": "wllmpttn24@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "b43daba55245341c11f393172ad2c12447b81bd5",
+          "message": "Raise the pytest-cov floor to 7.0 (#112)\n\npytest-cov below 7.0 fails to combine coverage data with coverage 7.17.5:\nworker processes record statement coverage while the main process records\nbranch coverage. The lowest-direct test leg installs the floor, so it\nfailed after every test passed.\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>",
+          "timestamp": "2026-11-25T17:13:31Z",
+          "url": "https://github.com/e11bio/volara/commit/b43daba55245341c11f393172ad2c12447b81bd5"
+        },
+        "date": 1795627212344,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "import volara.blockwise, volara.datasets (cold)",
+            "value": 1322.635,
+            "range": "± 56.662",
+            "unit": "ms",
+            "extra": "interpreter startup 19.7 ms subtracted; n=10"
+          },
+          {
+            "name": "pytest wall time",
+            "value": 52.634,
             "unit": "s",
             "extra": "`uv run pytest --cov-report=xml` in the tests job"
           }
