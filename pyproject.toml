@@ -65,7 +65,7 @@ Issues = "https://github.com/e11bio/volara/issues"
 # ruff and ty versions come from uv.lock; `uv lock --upgrade` moves them.
 dev = [
     "pytest>=8.0",
-    "pytest-cov>=5.0",
+    "pytest-cov>=7.0",
     "ty>=0.0.96",
     "ruff>=0.17.3",
     # tests seem to be failing because a dependency of ours fails
