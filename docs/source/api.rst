@@ -17,6 +17,12 @@ Databases
 .. automodule:: volara.dbs
     :members:
 
+Node Arrays
+===========
+
+.. automodule:: volara.node_arrays
+    :members:
+
 Datasets
 ========
 
@@ -53,6 +59,9 @@ Blockwise Tasks
     :members:
 
 .. autopydantic_model:: DistanceAgglom
+    :members:
+
+.. autopydantic_model:: EdgeSimilarity
     :members:
 
 .. autopydantic_model:: ExtractFrags

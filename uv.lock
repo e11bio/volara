@@ -2009,7 +2009,7 @@ wheels = [
 
 [[package]]
 name = "funlib-persistence"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dask" },
@@ -2026,9 +2026,9 @@ dependencies = [
     { name = "zarr", version = "3.1.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "zarr", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/2c/209aa80d0ddd260cb5abe326bae9d7496fb8c8ef3e3c22d70df3c7da011e/funlib_persistence-0.9.0.tar.gz", hash = "sha256:a179f47949428e2a7ed00c28bbd2442c3e91e2fb338ea7aa82642a40d278e235", size = 68130, upload-time = "2026-11-18T18:50:42.996Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/5b/43526f865a32bad1d44a8cbb10e98889a98bc5e3ecc3bd4ab1479c3e8103/funlib_persistence-0.9.1.tar.gz", hash = "sha256:a246152a3c8e9b54923254b2eb47a2435d04c85bd2c9dbf1cb45c6f130cba207", size = 68399, upload-time = "2026-11-25T16:16:17.041Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/29/74860957efc1c9425cd661fa72af806584af7f0124127af3d654df3753d1/funlib_persistence-0.9.0-py3-none-any.whl", hash = "sha256:d605a5d8f81b08a608e92134dd4e0c72850f723c3585ca355d441a15771ce8c1", size = 50959, upload-time = "2026-11-18T18:50:41.765Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/e1/7a183644e21aad388d7cca6b050fd8f1e6f7d215657c879031ef54b7ab3d/funlib_persistence-0.9.1-py3-none-any.whl", hash = "sha256:db97ca897168a72344c227251370cd281b26c2ca9da6a06cc037b2ec37ed5f19", size = 50955, upload-time = "2026-11-25T16:16:16.065Z" },
 ]
 
 [[package]]
@@ -6605,11 +6605,11 @@ requires-dist = [
     { name = "daisy", specifier = ">=2.0.1,<3" },
     { name = "funlib-geometry", specifier = ">=0.3" },
     { name = "funlib-math" },
-    { name = "funlib-persistence", specifier = ">=0.9.0" },
+    { name = "funlib-persistence", specifier = ">=0.9.1" },
     { name = "iohub", specifier = ">=0.3.0a5" },
     { name = "lazy-loader", specifier = ">=0.4" },
     { name = "llvmlite", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "!=0.44.*,<0.46" },
-    { name = "mwatershed", specifier = ">=0.5.2" },
+    { name = "mwatershed", specifier = ">=0.6.0" },
     { name = "numba", specifier = ">=0.59.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.6.3" },

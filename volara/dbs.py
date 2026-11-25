@@ -1,3 +1,4 @@
+import json
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -308,8 +309,34 @@ class CSR(DB):
     def id(self) -> str:
         return self.local.stem
 
+    def _stored(self) -> dict | None:
+        """The metadata of the store on disk, or None if there is none."""
+        meta = self.local / "meta.json"
+        return json.loads(meta.read_text()) if meta.exists() else None
+
     def open(self, mode="r") -> CSRGraphDataBase:
+        """
+        Open the database. ``"w"`` creates it with volara's default attributes
+        and the ones configured here. A read mode opens whatever is stored:
+        the attributes configured here must be in the store, the default ones
+        (``size``, ``filtered``, ``distance``) need not be, so a store that
+        volara did not write opens too.
+        """
         node_attrs, edge_attrs = self.graph_attrs
+        stored = self._stored() if mode != "w" else None
+        if stored is not None:
+            asked_nodes = self.node_attrs or {}
+            asked_edges = self.edge_attrs or {}
+            node_attrs = {
+                name: attr_type
+                for name, attr_type in node_attrs.items()
+                if name in asked_nodes or name in stored["node_attrs"]
+            }
+            edge_attrs = {
+                name: attr_type
+                for name, attr_type in edge_attrs.items()
+                if name in asked_edges or name in stored["edge_attrs"]
+            }
         if mode == "w" and not self.local.parent.exists():
             self.local.parent.mkdir(parents=True)
         return CSRGraphDataBase(
